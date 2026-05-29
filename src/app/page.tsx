@@ -556,15 +556,6 @@ export default function Page() {
   const [runAgent, setRunAgent]       = useState<Agent | null>(null)
   const [messages, setMessages]       = useState<Message[]>([])
   const [chatLoading, setChatLoading] = useState(false)
-  const [authed, setAuthed]           = useState<boolean | null>(null)
-
-  // Check auth on mount
-  useEffect(() => {
-    fetch('/api/agents').then(r => {
-      if (r.status === 401) { window.location.href = '/login' } else { setAuthed(true) }
-    }).catch(() => setAuthed(false))
-  }, [])
-
   // Poll data every 8s
   const fetchAll = useCallback(async () => {
     const [agRes, tkRes, meRes] = await Promise.all([
@@ -572,14 +563,17 @@ export default function Page() {
       fetch('/api/tasks?limit=50'),
       fetch('/api/metrics'),
     ])
+    if (agRes.status === 401) { window.location.href = '/login'; return }
     if (agRes.ok) setAgents(await agRes.json())
     if (tkRes.ok) setTasks(await tkRes.json())
     if (meRes.ok) { const d = await meRes.json(); setMetrics(d.totals); setActivity(d.recentActivity) }
   }, [])
 
   useEffect(() => {
-    if (authed) { fetchAll(); const id = setInterval(fetchAll, 8000); return () => clearInterval(id) }
-  }, [authed, fetchAll])
+    fetchAll()
+    const id = setInterval(fetchAll, 8000)
+    return () => clearInterval(id)
+  }, [fetchAll])
 
   async function handleSend(text: string) {
     const userMsg: Message = { role: 'user', content: text, ts: Date.now() }
@@ -611,10 +605,6 @@ export default function Page() {
   async function handleLogout() {
     await fetch('/api/auth/logout', { method: 'POST' })
     window.location.href = '/login'
-  }
-
-  if (authed === null) {
-    return <div style={{ minHeight: '100vh', background: '#080c14', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(148,163,184,0.5)', fontFamily: 'Inter, sans-serif' }}>Loading…</div>
   }
 
   // Inject updated sparklines into selectedAgent
