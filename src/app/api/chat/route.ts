@@ -1,45 +1,52 @@
 import { NextRequest, NextResponse } from 'next/server'
-import Anthropic from '@anthropic-ai/sdk'
+import OpenAI from 'openai'
+import { requireAuth } from '@/lib/auth'
+import { getDb } from '@/lib/db'
+
+const ollamaClient = new OpenAI({
+  baseURL: process.env.OLLAMA_BASE_URL || 'http://localhost:11434/v1',
+  apiKey: 'ollama',
+})
+
+const HERMES_MODEL = process.env.HERMES_MODEL || 'nous-hermes2'
+
+const SYSTEM_PROMPT = [
+  'You are the AI brain powering Claude OS — a production mission control dashboard for managing AI agents.',
+  'You have access to a fleet of specialist agents: Research Agent, Code Engineer, Data Analyst, Content Writer, Email Manager, and Security Analyst.',
+  'Be helpful, concise, and technically precise. When the user asks you to run a task, confirm what you will do.',
+  'Use markdown sparingly — responses are displayed in a dark terminal-style chat UI.',
+].join(' ')
 
 export async function POST(req: NextRequest) {
+  const { error } = await requireAuth(req)
+  if (error) return error
+
   try {
-    const { messages, apiKey, model } = await req.json()
+    const { messages } = await req.json()
 
-    const key = apiKey || process.env.ANTHROPIC_API_KEY
-
-    if (!key) {
-      return NextResponse.json(
-        { error: 'No API key found. Add ANTHROPIC_API_KEY to .env.local, or enter it in Settings.' },
-        { status: 401 },
-      )
-    }
-
-    const client = new Anthropic({ apiKey: key })
-
-    const response = await client.messages.create({
-      model: model || 'claude-sonnet-4-6',
+    const response = await ollamaClient.chat.completions.create({
+      model: HERMES_MODEL,
       max_tokens: 2048,
-      system: [
-        'You are Claude, the AI brain powering Claude OS — a beautiful mission control dashboard',
-        'for managing AI agents. You have access to a fleet of specialist agents: Research Agent,',
-        'Code Engineer, Data Analyst, Content Writer, Email Manager, and Security Analyst.',
-        'Be helpful, concise, and occasionally reference the OS/agent context when it is relevant.',
-        'Use markdown sparingly — responses are displayed in a dark chat UI.',
-      ].join(' '),
-      messages,
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        ...messages,
+      ],
     })
 
-    const text =
-      response.content[0].type === 'text'
-        ? response.content[0].text
-        : '(No text response)'
+    const content = response.choices[0].message.content || '(No response)'
+    const tokensUsed = response.usage?.total_tokens || 0
 
-    return NextResponse.json({ content: text })
+    // Persist to DB
+    const db = getDb()
+    const lastUser = [...messages].reverse().find((m: any) => m.role === 'user')
+    if (lastUser) {
+      db.prepare('INSERT INTO chat_messages (role, content) VALUES (?, ?)').run('user', lastUser.content)
+    }
+    db.prepare('INSERT INTO chat_messages (role, content, tokens_used) VALUES (?, ?, ?)').run('assistant', content, tokensUsed)
+
+    return NextResponse.json({ content, tokensUsed, model: HERMES_MODEL })
   } catch (err: any) {
     console.error('[chat/route]', err)
-    return NextResponse.json(
-      { error: err.message || 'Failed to get a response from Claude.' },
-      { status: 500 },
-    )
+    return NextResponse.json({ error: err.message || 'Failed to get a response.' }, { status: 500 })
   }
 }
