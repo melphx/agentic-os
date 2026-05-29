@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
-import { getDb, updateAgent, addLog, recordMetric, createTask, saveMemory, getMemory } from '@/lib/db'
+import { getDb, updateAgent, addLog, recordMetric, createTask, saveMemory, getMemory, getKnowledgeContent } from '@/lib/db'
 import { exec } from 'child_process'
 import { promisify } from 'util'
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
@@ -22,10 +22,11 @@ if (!existsSync(AGENT_FILES_DIR)) mkdirSync(AGENT_FILES_DIR, { recursive: true }
 // ── GPT helper with memory injection ──────────────────────────────────────
 
 async function ask(agentId: string, systemPrompt: string, userPrompt: string, maxTokens = 2048) {
-  const memory = getMemory(agentId, 5)
-  const fullSystem = memory
-    ? `${systemPrompt}\n\nYour recent memory:\n${memory}`
-    : systemPrompt
+  const memory    = getMemory(agentId, 5)
+  const knowledge = getKnowledgeContent(agentId)
+  let fullSystem  = systemPrompt
+  if (knowledge) fullSystem += `\n\n--- Uploaded Knowledge Base ---\n${knowledge}\n--- End Knowledge Base ---`
+  if (memory)    fullSystem += `\n\nYour recent memory:\n${memory}`
 
   const completion = await client.chat.completions.create({
     model: MODEL,

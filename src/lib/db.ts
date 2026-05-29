@@ -110,6 +110,16 @@ function initSchema(db: Database.Database) {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS agent_knowledge (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      agent_id TEXT REFERENCES agents(id) ON DELETE CASCADE,
+      filename TEXT NOT NULL,
+      file_type TEXT DEFAULT 'text',
+      file_size INTEGER DEFAULT 0,
+      content TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
     -- Seed default agents if table is empty
     INSERT OR IGNORE INTO agents (id, name, short, description, accent, accent_dark) VALUES
       ('research',  'Research Agent',  'RES', 'Web research, data gathering, and summarisation', '#06b6d4', '#0e7490'),
@@ -267,4 +277,43 @@ export function recordMetric(agentId: string, metric: string, value: number) {
   getDb().prepare(`
     INSERT INTO metrics (agent_id, metric, value) VALUES (?, ?, ?)
   `).run(agentId, metric, value)
+}
+
+// ── Agent Knowledge (training files) ──────────────────────────────────────
+
+export interface AgentKnowledge {
+  id: number
+  agent_id: string
+  filename: string
+  file_type: string
+  file_size: number
+  content: string
+  created_at: string
+}
+
+export function getKnowledge(agentId: string): AgentKnowledge[] {
+  return getDb().prepare(`
+    SELECT id, agent_id, filename, file_type, file_size, created_at
+    FROM agent_knowledge WHERE agent_id = ? ORDER BY created_at DESC
+  `).all(agentId) as AgentKnowledge[]
+}
+
+export function getKnowledgeContent(agentId: string): string {
+  const rows = getDb().prepare(`
+    SELECT filename, content FROM agent_knowledge WHERE agent_id = ? ORDER BY created_at DESC
+  `).all(agentId) as { filename: string; content: string }[]
+  if (!rows.length) return ''
+  return rows.map(r => `--- Knowledge: ${r.filename} ---\n${r.content.slice(0, 3000)}`).join('\n\n')
+}
+
+export function saveKnowledge(agentId: string, filename: string, fileType: string, fileSize: number, content: string): AgentKnowledge {
+  const info = getDb().prepare(`
+    INSERT INTO agent_knowledge (agent_id, filename, file_type, file_size, content)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(agentId, filename, fileType, fileSize, content)
+  return getDb().prepare('SELECT * FROM agent_knowledge WHERE id = ?').get(info.lastInsertRowid) as AgentKnowledge
+}
+
+export function deleteKnowledge(id: number, agentId: string) {
+  getDb().prepare('DELETE FROM agent_knowledge WHERE id = ? AND agent_id = ?').run(id, agentId)
 }

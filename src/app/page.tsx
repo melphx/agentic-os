@@ -4,7 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   LayoutDashboard, Bot, ListTodo, Terminal as TerminalIcon,
   Settings, Send, ChevronLeft, Play, RefreshCw, LogOut,
-  AlertCircle, CheckCircle, Clock, Zap, Activity, X, Search, MessageSquare, Bell,
+  AlertCircle, CheckCircle, Clock, Zap, Activity, X, Search, Bell,
+  BookOpen, Trash2,
 } from 'lucide-react'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -281,52 +282,272 @@ function AgentCard({ agent, onClick }: { agent: Agent; onClick: () => void }) {
 }
 
 
-// ── Task Feedback ──────────────────────────────────────────────────────────
 
-function TaskFeedback({ task, agentId, onRefine }: { task: Task; agentId: string; onRefine: () => void }) {
-  const [open, setOpen] = useState(false)
-  const [feedback, setFeedback] = useState('')
-  const [loading, setLoading] = useState(false)
+// ── Train Sidebar Strip (compact file count shown when Train tab active) ──
 
-  async function handleRefine(e: React.FormEvent) {
-    e.preventDefault()
-    if (!feedback.trim()) return
-    setLoading(true)
-    const description = `Previous task: ${task.title}\nPrevious result:\n${(task.result || task.error || '').slice(0, 1000)}\n\nUser feedback: ${feedback}\n\nPlease refine or continue based on this feedback.`
-    await fetch('/api/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agent_id: agentId, title: 'Refined: ' + task.title, description, type: task.type, priority: task.priority }),
-    })
-    setFeedback('')
-    setOpen(false)
-    setLoading(false)
-    setTimeout(onRefine, 1000)
+function TrainSidebarStrip({ agent }: { agent: Agent }) {
+  const [count, setCount] = useState(0)
+  useEffect(() => {
+    fetch(`/api/agents/train?agent_id=${agent.id}`)
+      .then(r => r.ok ? r.json() : [])
+      .then((d: any[]) => setCount(d.length))
+  }, [agent.id])
+  return (
+    <div style={{ padding: '12px 14px', color: 'rgba(148,163,184,0.4)', fontSize: 12, textAlign: 'center' }}>
+      {count > 0
+        ? <><span style={{ color: agent.accent, fontWeight: 600 }}>{count}</span> file{count !== 1 ? 's' : ''} in knowledge base</>
+        : 'No files yet — upload in the panel →'}
+    </div>
+  )
+}
+
+// ── Train Panel ────────────────────────────────────────────────────────────
+
+interface AgentKnowledge { id: number; agent_id: string; filename: string; file_type: string; file_size: number; created_at: string }
+
+function TrainPanel({ agent }: { agent: Agent }) {
+  const [files, setFiles] = useState<AgentKnowledge[]>([])
+  const [dragging, setDragging] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [uploadMsg, setUploadMsg] = useState<{ text: string; ok: boolean } | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  async function load() {
+    const res = await fetch(`/api/agents/train?agent_id=${agent.id}`)
+    if (res.ok) setFiles(await res.json())
   }
 
+  useEffect(() => { load() }, [agent.id])
+
+  async function uploadFiles(fileList: FileList | null) {
+    if (!fileList || !fileList.length) return
+    setUploading(true)
+    setUploadMsg(null)
+    const fd = new FormData()
+    fd.append('agent_id', agent.id)
+    Array.from(fileList).forEach(f => fd.append('files', f))
+    try {
+      const res = await fetch('/api/agents/train', { method: 'POST', body: fd })
+      const data = await res.json()
+      const saved = data.saved || []
+      const errors = saved.filter((s: any) => s.error)
+      const ok = saved.filter((s: any) => !s.error)
+      if (ok.length) setUploadMsg({ text: `✅ ${ok.length} file${ok.length > 1 ? 's' : ''} uploaded`, ok: true })
+      else if (errors.length) setUploadMsg({ text: `❌ ${errors[0].error}`, ok: false })
+      load()
+    } catch (err: any) {
+      setUploadMsg({ text: `❌ ${err.message}`, ok: false })
+    } finally {
+      setUploading(false)
+      if (inputRef.current) inputRef.current.value = ''
+      setTimeout(() => setUploadMsg(null), 3500)
+    }
+  }
+
+  async function remove(id: number) {
+    await fetch(`/api/agents/train?id=${id}&agent_id=${agent.id}`, { method: 'DELETE' })
+    load()
+  }
+
+  function fmtSize(bytes: number) {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  }
+
+  const FILE_ICON: Record<string, string> = { pdf: '📄', csv: '📊', json: '📋', markdown: '📝', html: '🌐', text: '📃' }
+
   return (
-    <div style={{ marginTop: 8 }}>
-      {!open ? (
-        <button onClick={() => setOpen(true)}
-          style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'rgba(99,102,241,0.7)', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>
-          <MessageSquare size={11} /> Reply / Refine
-        </button>
-      ) : (
-        <form onSubmit={handleRefine} style={{ marginTop: 6 }}>
-          <textarea value={feedback} onChange={e => setFeedback(e.target.value)} rows={2}
-            placeholder="Give feedback or ask for changes… e.g. 'Make it shorter', 'Add more technical detail', 'Focus on the pricing section'"
-            style={{ width: '100%', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 8, padding: '7px 10px', color: 'white', fontSize: 12, outline: 'none', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }} />
-          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-            <motion.button type="submit" disabled={loading} whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
-              style={{ padding: '5px 14px', background: 'linear-gradient(135deg,#4338ca,#6366f1)', border: 'none', borderRadius: 6, color: 'white', fontSize: 12, fontWeight: 600, cursor: 'pointer', opacity: loading ? 0.6 : 1 }}>
-              {loading ? 'Dispatching…' : '⚡ Refine'}
-            </motion.button>
-            <button type="button" onClick={() => setOpen(false)}
-              style={{ padding: '5px 10px', background: 'transparent', border: '1px solid rgba(148,163,184,0.2)', borderRadius: 6, color: 'rgba(148,163,184,0.5)', fontSize: 12, cursor: 'pointer' }}>
-              Cancel
-            </button>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '20px 24px', overflowY: 'auto' }}>
+      {/* Header */}
+      <div style={{ marginBottom: 20 }}>
+        <h2 style={{ color: 'white', fontWeight: 700, fontSize: 17, margin: '0 0 4px' }}>Train {agent.name}</h2>
+        <p style={{ color: 'rgba(148,163,184,0.5)', fontSize: 13, margin: 0 }}>
+          Upload documents, PDFs, CSVs, or text files. The agent will use this knowledge on every task.
+        </p>
+      </div>
+
+      {/* Drop zone */}
+      <div
+        onDragOver={e => { e.preventDefault(); setDragging(true) }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={e => { e.preventDefault(); setDragging(false); uploadFiles(e.dataTransfer.files) }}
+        onClick={() => inputRef.current?.click()}
+        style={{
+          border: `2px dashed ${dragging ? agent.accent : 'rgba(99,102,241,0.25)'}`,
+          borderRadius: 14,
+          padding: '32px 20px',
+          textAlign: 'center',
+          cursor: 'pointer',
+          background: dragging ? `${agent.accent}10` : 'rgba(15,20,35,0.5)',
+          transition: 'all 0.15s',
+          marginBottom: 20,
+          flexShrink: 0,
+        }}>
+        <input ref={inputRef} type="file" multiple accept=".txt,.md,.csv,.json,.html,.pdf" style={{ display: 'none' }} onChange={e => uploadFiles(e.target.files)} />
+        <div style={{ fontSize: 32, marginBottom: 8 }}>{uploading ? '⏳' : '📂'}</div>
+        <div style={{ color: 'white', fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
+          {uploading ? 'Uploading…' : 'Drop files here or click to browse'}
+        </div>
+        <div style={{ color: 'rgba(148,163,184,0.4)', fontSize: 12 }}>TXT · MD · CSV · JSON · HTML · PDF · max 2MB each</div>
+        {uploadMsg && (
+          <div style={{ marginTop: 10, fontSize: 13, color: uploadMsg.ok ? '#10b981' : '#f43f5e', fontWeight: 600 }}>{uploadMsg.text}</div>
+        )}
+      </div>
+
+      {/* Knowledge files list */}
+      {files.length > 0 && (
+        <>
+          <div style={{ fontSize: 11, color: 'rgba(148,163,184,0.4)', fontWeight: 600, letterSpacing: '0.06em', marginBottom: 10 }}>
+            KNOWLEDGE BASE — {files.length} FILE{files.length !== 1 ? 'S' : ''}
           </div>
-        </form>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {files.map(f => (
+              <motion.div key={f.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+                style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'rgba(15,20,35,0.7)', border: '1px solid rgba(99,102,241,0.1)', borderRadius: 10, padding: '10px 14px' }}>
+                <span style={{ fontSize: 20, flexShrink: 0 }}>{FILE_ICON[f.file_type] || '📃'}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: 'white', fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.filename}</div>
+                  <div style={{ color: 'rgba(148,163,184,0.4)', fontSize: 11 }}>{f.file_type} · {fmtSize(f.file_size)} · {new Date(f.created_at).toLocaleDateString()}</div>
+                </div>
+                <button onClick={() => remove(f.id)}
+                  style={{ background: 'none', border: 'none', color: 'rgba(148,163,184,0.3)', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', borderRadius: 6 }}
+                  onMouseEnter={e => (e.currentTarget.style.color = '#f43f5e')}
+                  onMouseLeave={e => (e.currentTarget.style.color = 'rgba(148,163,184,0.3)')}>
+                  <Trash2 size={14} />
+                </button>
+              </motion.div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {files.length === 0 && !uploading && (
+        <div style={{ textAlign: 'center', color: 'rgba(148,163,184,0.25)', fontSize: 13, marginTop: 8 }}>
+          No knowledge files yet. Upload something above to get started.
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Task Thread View ───────────────────────────────────────────────────────
+
+function TaskThreadView({ task, agent }: { task: Task; agent: Agent }) {
+  const resultPreview = (task.result || task.error || '').slice(0, 4000)
+  const [refineMessages, setRefineMessages] = useState<Message[]>([])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
+  const endRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [refineMessages, task])
+  useEffect(() => { setRefineMessages([]); setInput('') }, [task.id])
+
+  async function send() {
+    const text = input.trim()
+    if (!text || loading) return
+    const userMsg: Message = { role: 'user', content: text, ts: Date.now() }
+    const updated = [...refineMessages, userMsg]
+    setRefineMessages(updated)
+    setInput('')
+    setLoading(true)
+    try {
+      const systemContext = `You are ${agent.name}. The user wants to refine or iterate on a completed task.\n\nOriginal task: ${task.title}\nTask type: ${task.type}\nOriginal output:\n${resultPreview}\n\nRespond conversationally and helpfully. Produce full revised output when asked to rewrite. Do not dispatch new tasks.`
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: updated.map(m => ({ role: m.role, content: m.content })),
+          systemOverride: systemContext,
+        }),
+      })
+      const data = await res.json()
+      setRefineMessages(m => [...m, { role: 'assistant', content: data.content || data.error || 'Something went wrong.', ts: Date.now() }])
+    } catch (err: any) {
+      setRefineMessages(m => [...m, { role: 'assistant', content: `⚠️ ${err.message}`, ts: Date.now() }])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const statusColor = task.status === 'completed' ? '#10b981' : task.status === 'failed' ? '#f43f5e' : task.status === 'running' ? '#a5b4fc' : '#94a3b8'
+  const statusBg    = task.status === 'completed' ? 'rgba(16,185,129,0.12)' : task.status === 'failed' ? 'rgba(244,63,94,0.12)' : task.status === 'running' ? 'rgba(99,102,241,0.12)' : 'rgba(148,163,184,0.08)'
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Thread header */}
+      <div style={{ padding: '16px 24px 12px', borderBottom: '1px solid rgba(99,102,241,0.1)', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ color: 'white', fontWeight: 600, fontSize: 15 }}>{task.title}</span>
+          <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: statusBg, color: statusColor, fontWeight: 600 }}>{task.status}</span>
+          <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(99,102,241,0.1)', color: '#a5b4fc' }}>{task.type}</span>
+          <span style={{ fontSize: 11, color: 'rgba(148,163,184,0.35)', marginLeft: 'auto' }}>{new Date(task.created_at).toLocaleString()}</span>
+        </div>
+        {task.description && <p style={{ color: 'rgba(148,163,184,0.5)', fontSize: 12, margin: '6px 0 0', lineHeight: 1.5 }}>{task.description}</p>}
+      </div>
+
+      {/* Chat thread scroll area */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+        {/* Original task as "user" message */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <div style={{ maxWidth: '75%', padding: '10px 14px', borderRadius: '14px 14px 4px 14px', background: `linear-gradient(135deg, ${agent.accent_dark}, ${agent.accent})`, color: 'white', fontSize: 13, lineHeight: 1.55 }}>
+            {task.description || task.title}
+          </div>
+        </div>
+
+        {/* Agent result as "assistant" message */}
+        {(task.result || task.error || task.status === 'running' || task.status === 'pending') && (
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+            <AgentAvatar agent={agent} size={28} />
+            <div style={{ flex: 1, padding: '10px 14px', borderRadius: '4px 14px 14px 14px', background: 'rgba(15,20,35,0.85)', border: '1px solid rgba(99,102,241,0.12)', color: 'white', fontSize: 13, lineHeight: 1.55 }}>
+              {task.status === 'running' && (
+                <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+                  {[0,1,2].map(i => <motion.div key={i} animate={{ opacity: [0.3,1,0.3] }} transition={{ repeat: Infinity, duration: 1.2, delay: i*0.2 }} style={{ width: 6, height: 6, borderRadius: '50%', background: agent.accent }} />)}
+                  <span style={{ color: 'rgba(148,163,184,0.5)', fontSize: 12, marginLeft: 4 }}>Running…</span>
+                </div>
+              )}
+              {task.status === 'pending' && <span style={{ color: 'rgba(148,163,184,0.4)', fontSize: 12 }}>Queued…</span>}
+              {task.result && <Markdown text={task.result} />}
+              {task.error && <span style={{ color: '#f43f5e' }}>{task.error}</span>}
+            </div>
+          </div>
+        )}
+
+        {/* Refine conversation thread */}
+        {refineMessages.map((m, i) => (
+          <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start', gap: 10, alignItems: 'flex-start' }}>
+            {m.role === 'assistant' && <AgentAvatar agent={agent} size={28} />}
+            <div style={{ maxWidth: '75%', padding: '10px 14px', borderRadius: m.role === 'user' ? '14px 14px 4px 14px' : '4px 14px 14px 14px', background: m.role === 'user' ? `linear-gradient(135deg, ${agent.accent_dark}, ${agent.accent})` : 'rgba(15,20,35,0.85)', border: m.role === 'assistant' ? '1px solid rgba(99,102,241,0.12)' : 'none', color: 'white', fontSize: 13, lineHeight: 1.55 }}>
+              {m.role === 'assistant' ? <Markdown text={m.content} /> : m.content}
+            </div>
+          </div>
+        ))}
+
+        {loading && (
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+            <AgentAvatar agent={agent} size={28} />
+            <div style={{ padding: '10px 14px', borderRadius: '4px 14px 14px 14px', background: 'rgba(15,20,35,0.85)', border: '1px solid rgba(99,102,241,0.12)', display: 'flex', gap: 5 }}>
+              {[0,1,2].map(i => <motion.div key={i} animate={{ opacity: [0.3,1,0.3] }} transition={{ repeat: Infinity, duration: 1.2, delay: i*0.2 }} style={{ width: 6, height: 6, borderRadius: '50%', background: agent.accent }} />)}
+            </div>
+          </div>
+        )}
+        <div ref={endRef} />
+      </div>
+
+      {/* Reply input — only shown when task is done */}
+      {(task.status === 'completed' || task.status === 'failed') && (
+        <div style={{ padding: '10px 16px 16px', borderTop: '1px solid rgba(99,102,241,0.1)', display: 'flex', gap: 8, flexShrink: 0 }}>
+          <input ref={inputRef} value={input} onChange={e => setInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
+            placeholder={`Ask ${agent.name} to refine, rewrite, or continue…`}
+            style={{ flex: 1, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.22)', borderRadius: 10, padding: '9px 14px', color: 'white', fontSize: 13, outline: 'none' }} />
+          <motion.button whileTap={{ scale: 0.9 }} onClick={send} disabled={loading}
+            style={{ width: 38, height: 38, borderRadius: 10, background: `linear-gradient(135deg,${agent.accent_dark},${agent.accent})`, border: 'none', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, opacity: loading ? 0.5 : 1 }}>
+            <Send size={15} />
+          </motion.button>
+        </div>
       )}
     </div>
   )
@@ -336,71 +557,141 @@ function TaskFeedback({ task, agentId, onRefine }: { task: Task; agentId: string
 
 function AgentDetailView({ agent, onBack, onRunTask }: { agent: Agent; onBack: () => void; onRunTask: (a: Agent) => void }) {
   const [tasks, setTasks] = useState<Task[]>(agent.tasks || [])
-  const [loading, setLoading] = useState(false)
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
+  const [loadingTasks, setLoadingTasks] = useState(false)
+  const [tab, setTab] = useState<'tasks' | 'train'>('tasks')
 
   async function refresh() {
-    setLoading(true)
+    setLoadingTasks(true)
     const res = await fetch(`/api/agents/${agent.id}`)
-    if (res.ok) { const d = await res.json(); setTasks(d.tasks || []) }
-    setLoading(false)
+    if (res.ok) {
+      const d = await res.json()
+      const updated: Task[] = d.tasks || []
+      setTasks(updated)
+      // Keep selectedTask in sync
+      if (selectedTask) {
+        const fresh = updated.find(t => t.id === selectedTask.id)
+        if (fresh) setSelectedTask(fresh)
+      }
+    }
+    setLoadingTasks(false)
   }
 
   useEffect(() => { refresh() }, [agent.id])
 
+  // Auto-poll while any task is running
+  useEffect(() => {
+    const running = tasks.some(t => t.status === 'running' || t.status === 'pending')
+    if (!running) return
+    const id = setInterval(refresh, 3000)
+    return () => clearInterval(id)
+  }, [tasks])
+
   return (
-    <div style={{ padding: 24, height: '100%', overflowY: 'auto' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
-        <button onClick={onBack} style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, padding: '6px 12px', color: '#a5b4fc', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-          <ChevronLeft size={14} /> Back
-        </button>
-        <AgentAvatar agent={agent} size={44} pulse />
-        <div>
-          <h2 style={{ color: 'white', fontWeight: 700, margin: 0, fontSize: 18 }}>{agent.name}</h2>
-          <p style={{ color: 'rgba(148,163,184,0.6)', margin: 0, fontSize: 13 }}>{agent.description}</p>
-        </div>
-        <div style={{ flex: 1 }} />
-        <button onClick={() => refresh()} style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, padding: '6px 10px', color: '#a5b4fc', cursor: 'pointer' }}>
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-        </button>
-        <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={() => onRunTask(agent)}
-          style={{ background: `linear-gradient(135deg, ${agent.accent_dark}, ${agent.accent})`, border: 'none', borderRadius: 8, padding: '7px 16px', color: 'white', cursor: 'pointer', fontWeight: 600, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Play size={13} /> Run Task
-        </motion.button>
-      </div>
+    <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
 
-      {/* Stats row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 24 }}>
-        {[
-          { label: 'STATUS', value: agent.status, color: STATUS_COLOR[agent.status] },
-          { label: 'TOKENS', value: fmt(agent.tokens_used), color: agent.accent },
-          { label: 'TASKS DONE', value: agent.tasks_completed, color: 'white' },
-          { label: 'UPTIME', value: fmtUptime(agent.uptime_seconds), color: '#94a3b8' },
-        ].map(s => (
-          <div key={s.label} style={{ background: 'rgba(15,20,35,0.7)', border: '1px solid rgba(99,102,241,0.12)', borderRadius: 12, padding: '14px 16px' }}>
-            <div style={{ fontSize: 10, color: 'rgba(148,163,184,0.5)', marginBottom: 6 }}>{s.label}</div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: s.color }}>{s.value}</div>
-          </div>
-        ))}
-      </div>
+      {/* ── Left sidebar: task list ── */}
+      <div style={{ width: 260, flexShrink: 0, borderRight: '1px solid rgba(99,102,241,0.1)', display: 'flex', flexDirection: 'column', background: 'rgba(8,12,20,0.6)', overflow: 'hidden' }}>
 
-      {/* Tasks list */}
-      <h3 style={{ color: 'rgba(148,163,184,0.8)', fontSize: 12, fontWeight: 600, letterSpacing: '0.08em', marginBottom: 12 }}>RECENT TASKS</h3>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {tasks.length === 0 && <p style={{ color: 'rgba(148,163,184,0.4)', fontSize: 13 }}>No tasks yet. Use "Run Task" to dispatch one.</p>}
-        {tasks.map(t => (
-          <div key={t.id} style={{ background: 'rgba(15,20,35,0.6)', border: '1px solid rgba(99,102,241,0.1)', borderRadius: 10, padding: '12px 16px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'white' }}>{t.title}</span>
-              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 20, background: t.status === 'completed' ? 'rgba(16,185,129,0.15)' : t.status === 'failed' ? 'rgba(244,63,94,0.15)' : t.status === 'running' ? 'rgba(99,102,241,0.15)' : 'rgba(148,163,184,0.1)', color: t.status === 'completed' ? '#10b981' : t.status === 'failed' ? '#f43f5e' : t.status === 'running' ? '#a5b4fc' : '#94a3b8' }}>
-                {t.status}
-              </span>
-              <span style={{ fontSize: 10, color: 'rgba(148,163,184,0.4)', marginLeft: 'auto' }}>{new Date(t.created_at).toLocaleString()}</span>
+        {/* Agent header */}
+        <div style={{ padding: '16px 14px 12px', borderBottom: '1px solid rgba(99,102,241,0.1)', flexShrink: 0 }}>
+          <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: 'rgba(148,163,184,0.5)', cursor: 'pointer', fontSize: 12, padding: 0, marginBottom: 12 }}>
+            <ChevronLeft size={13} /> All Agents
+          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <AgentAvatar agent={agent} size={34} pulse />
+            <div>
+              <div style={{ color: 'white', fontWeight: 600, fontSize: 13 }}>{agent.name}</div>
+              <div style={{ color: STATUS_COLOR[agent.status], fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>{STATUS_ICON[agent.status]}{agent.status}</div>
             </div>
-            {t.result && <div style={{ fontSize: 11, color: 'rgba(148,163,184,0.7)', margin: '6px 0 0' }}><Markdown text={t.result.slice(0, 600)} /></div>}
-            {t.error  && <p style={{ fontSize: 11, color: '#f43f5e', margin: '4px 0 0' }}>{t.error}</p>}
-            {(t.status === 'completed' || t.status === 'failed') && <TaskFeedback task={t} agentId={agent.id} onRefine={() => refresh()} />}
           </div>
-        ))}
+        </div>
+
+        {/* Stats strip */}
+        <div style={{ display: 'flex', padding: '10px 14px', gap: 16, borderBottom: '1px solid rgba(99,102,241,0.08)', flexShrink: 0 }}>
+          <div><div style={{ fontSize: 9, color: 'rgba(148,163,184,0.4)', marginBottom: 2 }}>TOKENS</div><div style={{ fontSize: 13, fontWeight: 600, color: agent.accent }}>{fmt(agent.tokens_used)}</div></div>
+          <div><div style={{ fontSize: 9, color: 'rgba(148,163,184,0.4)', marginBottom: 2 }}>TASKS</div><div style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>{agent.tasks_completed}</div></div>
+          <div><div style={{ fontSize: 9, color: 'rgba(148,163,184,0.4)', marginBottom: 2 }}>UPTIME</div><div style={{ fontSize: 13, fontWeight: 600, color: '#94a3b8' }}>{fmtUptime(agent.uptime_seconds)}</div></div>
+        </div>
+
+        {/* Tab switcher */}
+        <div style={{ display: 'flex', padding: '8px 10px 0', gap: 4, flexShrink: 0 }}>
+          {(['tasks', 'train'] as const).map(t => (
+            <button key={t} onClick={() => setTab(t)}
+              style={{ flex: 1, padding: '6px 0', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600, background: tab === t ? `${agent.accent}25` : 'transparent', color: tab === t ? agent.accent : 'rgba(148,163,184,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, transition: 'all 0.12s' }}>
+              {t === 'tasks' ? <><ListTodo size={11} /> Tasks</> : <><BookOpen size={11} /> Train</>}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'tasks' && (
+          <>
+            {/* New task button */}
+            <div style={{ padding: '8px 10px 4px', flexShrink: 0 }}>
+              <motion.button whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }} onClick={() => onRunTask(agent)}
+                style={{ width: '100%', background: `linear-gradient(135deg, ${agent.accent_dark}, ${agent.accent})`, border: 'none', borderRadius: 8, padding: '8px 0', color: 'white', fontWeight: 600, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                <Play size={12} /> New Task
+              </motion.button>
+            </div>
+
+            {/* Refresh */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 14px 4px', flexShrink: 0 }}>
+              <span style={{ fontSize: 10, color: 'rgba(148,163,184,0.35)', fontWeight: 600, letterSpacing: '0.06em' }}>HISTORY</span>
+              <button onClick={refresh} style={{ background: 'none', border: 'none', color: 'rgba(148,163,184,0.3)', cursor: 'pointer', padding: 2, display: 'flex' }}>
+                <RefreshCw size={11} style={{ animation: loadingTasks ? 'spin 1s linear infinite' : 'none' }} />
+              </button>
+            </div>
+
+            {/* Task list */}
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {tasks.length === 0 && (
+                <p style={{ color: 'rgba(148,163,184,0.3)', fontSize: 12, padding: '16px 14px', margin: 0 }}>No tasks yet.</p>
+              )}
+              {tasks.map(t => {
+                const isSelected = selectedTask?.id === t.id
+                const dot = t.status === 'completed' ? '#10b981' : t.status === 'failed' ? '#f43f5e' : t.status === 'running' ? agent.accent : '#94a3b8'
+                return (
+                  <div key={t.id} onClick={() => setSelectedTask(t)}
+                    style={{ padding: '10px 14px', cursor: 'pointer', borderBottom: '1px solid rgba(99,102,241,0.06)', background: isSelected ? `${agent.accent}18` : 'transparent', borderLeft: isSelected ? `2px solid ${agent.accent}` : '2px solid transparent', transition: 'all 0.12s' }}
+                    onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'rgba(99,102,241,0.06)' }}
+                    onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent' }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                      <div style={{ width: 7, height: 7, borderRadius: '50%', background: dot, flexShrink: 0, marginTop: 4 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ color: isSelected ? 'white' : 'rgba(255,255,255,0.75)', fontSize: 12, fontWeight: isSelected ? 600 : 400, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', lineHeight: 1.45 }}>{t.title}</div>
+                        <div style={{ color: 'rgba(148,163,184,0.3)', fontSize: 10, marginTop: 3 }}>{new Date(t.created_at).toLocaleDateString()} · {t.type}</div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </>
+        )}
+
+        {tab === 'train' && (
+          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            {/* compact upload strip in sidebar */}
+            <TrainSidebarStrip agent={agent} />
+          </div>
+        )}
+      </div>
+
+      {/* ── Right panel: task thread or train ── */}
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        {tab === 'train' ? (
+          <TrainPanel agent={agent} />
+        ) : selectedTask ? (
+          <TaskThreadView key={selectedTask.id} task={selectedTask} agent={agent} />
+        ) : (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+            <div style={{ width: 56, height: 56, borderRadius: '50%', background: `${agent.accent}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26 }}>⬡</div>
+            <div style={{ textAlign: 'center' }}>
+              <p style={{ margin: 0, fontSize: 14, color: 'rgba(148,163,184,0.5)' }}>Select a task to view its thread</p>
+              <p style={{ margin: '4px 0 0', fontSize: 12, color: 'rgba(148,163,184,0.3)' }}>or dispatch a new one with "New Task"</p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

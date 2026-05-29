@@ -210,9 +210,23 @@ export async function POST(req: NextRequest) {
   if (error) return error
 
   try {
-    const { messages } = await req.json()
+    const { messages, systemOverride } = await req.json()
     const baseUrl = process.env.INTERNAL_URL || 'http://localhost:3000'
     const jwtSecret = process.env.JWT_SECRET || ''
+
+    // Refine mode: skip function calling entirely, use custom system prompt
+    if (systemOverride) {
+      const refineResponse = await client.chat.completions.create({
+        model: MODEL,
+        max_completion_tokens: 2048,
+        messages: [
+          { role: 'system', content: systemOverride },
+          ...messages,
+        ],
+      })
+      const content = refineResponse.choices[0].message.content || '(No response)'
+      return NextResponse.json({ content, tokensUsed: refineResponse.usage?.total_tokens || 0, model: MODEL, toolsUsed: [] })
+    }
 
     // First call — may trigger tool use
     const response = await client.chat.completions.create({
