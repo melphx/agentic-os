@@ -587,7 +587,13 @@ export default function Page() {
         body: JSON.stringify({ messages: newMsgs.map(m => ({ role: m.role, content: m.content })) }),
       })
       const data = await res.json()
-      if (data.content) setMessages(m => [...m, { role: 'assistant', content: data.content, ts: Date.now() }])
+      if (data.content) {
+        setMessages(m => [...m, { role: 'assistant', content: data.content, ts: Date.now() }])
+      } else if (data.error) {
+        setMessages(m => [...m, { role: 'assistant', content: `⚠️ Error: ${data.error}`, ts: Date.now() }])
+      }
+    } catch (err: any) {
+      setMessages(m => [...m, { role: 'assistant', content: `⚠️ Network error: ${err.message}`, ts: Date.now() }])
     } finally {
       setChatLoading(false)
     }
