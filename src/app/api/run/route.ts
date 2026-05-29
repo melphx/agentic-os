@@ -77,7 +77,7 @@ async function webSearch(query: string): Promise<string> {
 
 // ── Playwright browser automation ─────────────────────────────────────────
 
-async function browserTask(agentId: number, taskId: number, description: string): Promise<{ result: string; tokens: number }> {
+async function browserTask(agentId: string, taskId: number, description: string): Promise<{ result: string; tokens: number }> {
   // Dynamically import playwright (optional dep)
   let chromium: any
   try {
@@ -87,7 +87,7 @@ async function browserTask(agentId: number, taskId: number, description: string)
     return { result: 'Playwright not installed. Run: npx playwright install chromium', tokens: 0 }
   }
 
-  addLog(taskId, String(agentId), 'info', 'Launching headless browser…')
+  addLog(taskId, agentId, 'info', 'Launching headless browser…')
   const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] })
   const page = await browser.newPage()
 
@@ -108,7 +108,7 @@ Respond with ONLY the JSON array, no explanation.`,
 
     let steps: any[] = []
     try { steps = JSON.parse(plan.match(/\[[\s\S]*\]/)?.[0] || '[]') } catch {}
-    addLog(taskId, String(agentId), 'info', `Executing ${steps.length} browser steps`)
+    addLog(taskId, agentId, 'info', `Executing ${steps.length} browser steps`)
 
     const outputs: string[] = []
 
@@ -160,9 +160,9 @@ Respond with ONLY the JSON array, no explanation.`,
             break
           }
         }
-        addLog(taskId, String(agentId), 'info', `✓ ${step.description || step.action}`)
+        addLog(taskId, agentId, 'info', `✓ ${step.description || step.action}`)
       } catch (stepErr: any) {
-        addLog(taskId, String(agentId), 'warn', `Step failed: ${step.description} — ${stepErr.message}`)
+        addLog(taskId, agentId, 'warn', `Step failed: ${step.description} — ${stepErr.message}`)
         outputs.push(`⚠ ${step.description}: ${stepErr.message}`)
       }
     }
@@ -253,7 +253,7 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
   try {
     switch (type) {
       case 'browser': {
-        const out = await browserTask(Number(agentId), taskId, description)
+        const out = await browserTask(agentId, taskId, description)
         result = out.result; tokensUsed = out.tokens
         break
       }

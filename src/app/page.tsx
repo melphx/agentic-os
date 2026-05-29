@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   LayoutDashboard, Bot, ListTodo, Terminal as TerminalIcon,
   Settings, Send, ChevronLeft, Play, RefreshCw, LogOut,
-  AlertCircle, CheckCircle, Clock, Zap, Activity, X,
+  AlertCircle, CheckCircle, Clock, Zap, Activity, X, Search, MessageSquare, Bell,
 } from 'lucide-react'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -29,6 +29,42 @@ interface Task {
 interface LogEntry { id: number; agent_id: string; agent_name: string; accent: string; level: string; message: string; created_at: string }
 interface Metrics { total_agents: number; active_agents: number; total_tokens: number; tasks_completed: number; tasks_pending: number; tasks_running: number; tasks_failed: number }
 interface Message { role: 'user' | 'assistant'; content: string; ts: number }
+
+interface Toast { id: number; message: string; type: 'success' | 'error' | 'info' }
+
+// ── Simple markdown renderer ────────────────────────────────────────────────
+
+function Markdown({ text }: { text: string }) {
+  const lines = text.split('\n')
+  const elements: React.ReactNode[] = []
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i]
+    if (line.startsWith('### ')) { elements.push(<h3 key={i} style={{ color: 'white', fontWeight: 700, fontSize: 13, margin: '10px 0 4px' }}>{line.slice(4)}</h3>) }
+    else if (line.startsWith('## ')) { elements.push(<h2 key={i} style={{ color: 'white', fontWeight: 700, fontSize: 14, margin: '12px 0 4px' }}>{line.slice(3)}</h2>) }
+    else if (line.startsWith('# '))  { elements.push(<h1 key={i} style={{ color: 'white', fontWeight: 700, fontSize: 15, margin: '12px 0 6px' }}>{line.slice(2)}</h1>) }
+    else if (line.startsWith('- ') || line.startsWith('• ')) { elements.push(<div key={i} style={{ color: 'rgba(148,163,184,0.85)', fontSize: 13, lineHeight: 1.6, paddingLeft: 12 }}>{'• '}{renderInline(line.slice(2))}</div>) }
+    else if (line.startsWith('```')) {
+      const codeLines: string[] = []
+      i++
+      while (i < lines.length && !lines[i].startsWith('```')) { codeLines.push(lines[i]); i++ }
+      elements.push(<pre key={i} style={{ background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 6, padding: '8px 12px', fontSize: 11, color: '#a5b4fc', overflowX: 'auto', margin: '6px 0', fontFamily: 'JetBrains Mono, monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{codeLines.join('\n')}</pre>)
+    }
+    else if (line === '') { elements.push(<div key={i} style={{ height: 4 }} />) }
+    else { elements.push(<p key={i} style={{ color: 'rgba(148,163,184,0.85)', fontSize: 13, lineHeight: 1.6, margin: '2px 0' }}>{renderInline(line)}</p>) }
+    i++
+  }
+  return <div>{elements}</div>
+}
+
+function renderInline(text: string): React.ReactNode {
+  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g)
+  return parts.map((p, i) => {
+    if (p.startsWith('`') && p.endsWith('`')) return <code key={i} style={{ background: 'rgba(99,102,241,0.2)', borderRadius: 3, padding: '1px 5px', fontSize: 11, color: '#a5b4fc', fontFamily: 'JetBrains Mono, monospace' }}>{p.slice(1,-1)}</code>
+    if (p.startsWith('**') && p.endsWith('**')) return <strong key={i} style={{ color: 'white', fontWeight: 600 }}>{p.slice(2,-2)}</strong>
+    return p
+  })
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -85,6 +121,84 @@ function AgentAvatar({ agent, size = 44, pulse = false }: { agent: Agent; size?:
 const STATUS_ICON = { active: <Zap size={11} />, idle: <Clock size={11} />, error: <AlertCircle size={11} />, offline: <X size={11} /> }
 const STATUS_COLOR = { active: '#10b981', idle: '#94a3b8', error: '#f43f5e', offline: '#475569' }
 
+
+// ── Toast System ───────────────────────────────────────────────────────────
+
+function ToastContainer({ toasts, remove }: { toasts: Toast[]; remove: (id: number) => void }) {
+  return (
+    <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 1000, display: 'flex', flexDirection: 'column', gap: 8, pointerEvents: 'none' }}>
+      <AnimatePresence>
+        {toasts.map(t => (
+          <motion.div key={t.id} initial={{ opacity: 0, x: 60, scale: 0.95 }} animate={{ opacity: 1, x: 0, scale: 1 }} exit={{ opacity: 0, x: 60 }}
+            style={{ background: 'rgba(15,20,35,0.97)', border: `1px solid ${t.type === 'success' ? 'rgba(16,185,129,0.4)' : t.type === 'error' ? 'rgba(244,63,94,0.4)' : 'rgba(99,102,241,0.4)'}`, borderRadius: 12, padding: '10px 16px', color: 'white', fontSize: 13, display: 'flex', alignItems: 'center', gap: 10, backdropFilter: 'blur(10px)', pointerEvents: 'all', boxShadow: '0 4px 24px rgba(0,0,0,0.4)', maxWidth: 320 }}>
+            <span style={{ fontSize: 16 }}>{t.type === 'success' ? '✅' : t.type === 'error' ? '❌' : 'ℹ️'}</span>
+            <span style={{ flex: 1 }}>{t.message}</span>
+            <button onClick={() => remove(t.id)} style={{ background: 'none', border: 'none', color: 'rgba(148,163,184,0.5)', cursor: 'pointer', padding: 0, fontSize: 16, lineHeight: 1 }}>×</button>
+          </motion.div>
+        ))}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+// ── Global Search ──────────────────────────────────────────────────────────
+
+function GlobalSearch({ onClose, onNavigate }: { onClose: () => void; onNavigate: (view: string, id?: string) => void }) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<any[]>([])
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { inputRef.current?.focus() }, [])
+
+  useEffect(() => {
+    if (!query.trim()) { setResults([]); return }
+    const t = setTimeout(async () => {
+      const res = await fetch('/api/search?q=' + encodeURIComponent(query))
+      if (res.ok) setResults(await res.json())
+    }, 200)
+    return () => clearTimeout(t)
+  }, [query])
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={onClose}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 300, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: 80, backdropFilter: 'blur(4px)' }}>
+      <motion.div initial={{ scale: 0.95, y: -16 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95 }}
+        onClick={e => e.stopPropagation()}
+        style={{ width: 560, maxWidth: '90vw', background: 'rgba(12,16,28,0.98)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 16, overflow: 'hidden', boxShadow: '0 24px 80px rgba(0,0,0,0.6)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px', borderBottom: '1px solid rgba(99,102,241,0.12)' }}>
+          <Search size={16} color="rgba(148,163,184,0.5)" />
+          <input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)}
+            onKeyDown={e => e.key === 'Escape' && onClose()}
+            placeholder="Search agents, tasks, logs…"
+            style={{ flex: 1, background: 'none', border: 'none', color: 'white', fontSize: 15, outline: 'none' }} />
+          <kbd style={{ fontSize: 10, color: 'rgba(148,163,184,0.4)', border: '1px solid rgba(148,163,184,0.2)', borderRadius: 4, padding: '2px 6px' }}>ESC</kbd>
+        </div>
+        <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+          {results.length === 0 && query && (
+            <p style={{ color: 'rgba(148,163,184,0.4)', fontSize: 13, padding: '20px 18px', margin: 0 }}>No results for "{query}"</p>
+          )}
+          {results.length === 0 && !query && (
+            <p style={{ color: 'rgba(148,163,184,0.3)', fontSize: 12, padding: '20px 18px', margin: 0 }}>Type to search across agents, tasks, and logs…</p>
+          )}
+          {results.map((r: any, i: number) => (
+            <div key={i} onClick={() => { onNavigate(r.type === 'agent' ? 'agents' : 'tasks', r.id); onClose() }}
+              style={{ padding: '12px 18px', cursor: 'pointer', borderBottom: '1px solid rgba(99,102,241,0.07)', display: 'flex', alignItems: 'center', gap: 12 }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(99,102,241,0.08)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+              <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 20, background: r.type === 'agent' ? 'rgba(99,102,241,0.2)' : r.type === 'task' ? 'rgba(16,185,129,0.15)' : 'rgba(148,163,184,0.1)', color: r.type === 'agent' ? '#a5b4fc' : r.type === 'task' ? '#10b981' : '#94a3b8', flexShrink: 0 }}>{r.type}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ color: 'white', fontSize: 13, fontWeight: 600, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{r.title}</div>
+                {r.subtitle && <div style={{ color: 'rgba(148,163,184,0.5)', fontSize: 11, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{r.subtitle}</div>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </motion.div>
+    </motion.div>
+  )
+}
+
 // ── Sidebar ────────────────────────────────────────────────────────────────
 
 const NAV = [
@@ -96,7 +210,7 @@ const NAV = [
   { id: 'settings',  icon: <Settings size={18} />,        label: 'Settings'  },
 ]
 
-function Sidebar({ view, setView, agents, onLogout }: { view: string; setView: (v: string) => void; agents: Agent[]; onLogout: () => void }) {
+function Sidebar({ view, setView, agents, onLogout, onSearch }: { view: string; setView: (v: string) => void; agents: Agent[]; onLogout: () => void; onSearch: () => void }) {
   return (
     <div style={{ width: 64, flexShrink: 0, background: 'rgba(8,12,20,0.95)', borderRight: '1px solid rgba(99,102,241,0.12)', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 20, paddingBottom: 16, gap: 4, zIndex: 50 }}>
       <div style={{ width: 36, height: 36, borderRadius: 10, background: 'linear-gradient(135deg,#6366f1,#a855f7)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 20, boxShadow: '0 0 20px rgba(99,102,241,0.4)', fontSize: 18, flexShrink: 0 }}>⬡</div>
@@ -107,6 +221,11 @@ function Sidebar({ view, setView, agents, onLogout }: { view: string; setView: (
           {n.icon}
         </motion.button>
       ))}
+      <motion.button whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.95 }} onClick={() => onSearch()}
+        title="Search (Ctrl+K)"
+        style={{ width: 40, height: 40, borderRadius: 10, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', color: 'rgba(148,163,184,0.5)' }}>
+        <Search size={18} />
+      </motion.button>
       <div style={{ flex: 1 }} />
       {/* Mini agent avatars */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
@@ -158,6 +277,58 @@ function AgentCard({ agent, onClick }: { agent: Agent; onClick: () => void }) {
         </div>
       )}
     </motion.div>
+  )
+}
+
+
+// ── Task Feedback ──────────────────────────────────────────────────────────
+
+function TaskFeedback({ task, agentId, onRefine }: { task: Task; agentId: string; onRefine: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [feedback, setFeedback] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  async function handleRefine(e: React.FormEvent) {
+    e.preventDefault()
+    if (!feedback.trim()) return
+    setLoading(true)
+    const description = `Previous task: ${task.title}\nPrevious result:\n${(task.result || task.error || '').slice(0, 1000)}\n\nUser feedback: ${feedback}\n\nPlease refine or continue based on this feedback.`
+    await fetch('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: agentId, title: 'Refined: ' + task.title, description, type: task.type, priority: task.priority }),
+    })
+    setFeedback('')
+    setOpen(false)
+    setLoading(false)
+    setTimeout(onRefine, 1000)
+  }
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      {!open ? (
+        <button onClick={() => setOpen(true)}
+          style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'rgba(99,102,241,0.7)', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>
+          <MessageSquare size={11} /> Reply / Refine
+        </button>
+      ) : (
+        <form onSubmit={handleRefine} style={{ marginTop: 6 }}>
+          <textarea value={feedback} onChange={e => setFeedback(e.target.value)} rows={2}
+            placeholder="Give feedback or ask for changes… e.g. 'Make it shorter', 'Add more technical detail', 'Focus on the pricing section'"
+            style={{ width: '100%', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 8, padding: '7px 10px', color: 'white', fontSize: 12, outline: 'none', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }} />
+          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+            <motion.button type="submit" disabled={loading} whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
+              style={{ padding: '5px 14px', background: 'linear-gradient(135deg,#4338ca,#6366f1)', border: 'none', borderRadius: 6, color: 'white', fontSize: 12, fontWeight: 600, cursor: 'pointer', opacity: loading ? 0.6 : 1 }}>
+              {loading ? 'Dispatching…' : '⚡ Refine'}
+            </motion.button>
+            <button type="button" onClick={() => setOpen(false)}
+              style={{ padding: '5px 10px', background: 'transparent', border: '1px solid rgba(148,163,184,0.2)', borderRadius: 6, color: 'rgba(148,163,184,0.5)', fontSize: 12, cursor: 'pointer' }}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
   )
 }
 
@@ -225,8 +396,9 @@ function AgentDetailView({ agent, onBack, onRunTask }: { agent: Agent; onBack: (
               </span>
               <span style={{ fontSize: 10, color: 'rgba(148,163,184,0.4)', marginLeft: 'auto' }}>{new Date(t.created_at).toLocaleString()}</span>
             </div>
-            {t.result && <p style={{ fontSize: 11, color: 'rgba(148,163,184,0.6)', margin: 0, whiteSpace: 'pre-wrap', maxHeight: 80, overflow: 'hidden' }}>{t.result.slice(0, 300)}</p>}
-            {t.error  && <p style={{ fontSize: 11, color: '#f43f5e', margin: 0 }}>{t.error}</p>}
+            {t.result && <div style={{ fontSize: 11, color: 'rgba(148,163,184,0.7)', margin: '6px 0 0' }}><Markdown text={t.result.slice(0, 600)} /></div>}
+            {t.error  && <p style={{ fontSize: 11, color: '#f43f5e', margin: '4px 0 0' }}>{t.error}</p>}
+            {(t.status === 'completed' || t.status === 'failed') && <TaskFeedback task={t} agentId={agent.id} onRefine={() => refresh()} />}
           </div>
         ))}
       </div>
@@ -335,7 +507,7 @@ function ChatPanel({ messages, onSend, loading }: { messages: Message[]; onSend:
         {messages.map((m, i) => (
           <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
             <div style={{ maxWidth: '85%', padding: '9px 13px', borderRadius: m.role === 'user' ? '14px 14px 4px 14px' : '14px 14px 14px 4px', background: m.role === 'user' ? 'linear-gradient(135deg,#4338ca,#6366f1)' : 'rgba(15,20,35,0.9)', border: m.role === 'assistant' ? '1px solid rgba(99,102,241,0.15)' : 'none', color: 'white', fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-              {m.content}
+              {m.role === 'assistant' ? <Markdown text={m.content} /> : m.content}
             </div>
           </div>
         ))}
@@ -699,6 +871,15 @@ export default function Page() {
   const [runAgent, setRunAgent]       = useState<Agent | null>(null)
   const [messages, setMessages]       = useState<Message[]>([])
   const [chatLoading, setChatLoading] = useState(false)
+  const [toasts, setToasts]           = useState<Toast[]>([])
+  const [showSearch, setShowSearch]   = useState(false)
+  const toastId = useRef(0)
+
+  function addToast(message: string, type: Toast['type'] = 'info') {
+    const id = ++toastId.current
+    setToasts(t => [...t, { id, message, type }])
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 4000)
+  }
   // Poll data every 8s
   const fetchAll = useCallback(async () => {
     const [agRes, tkRes, meRes] = await Promise.all([
@@ -718,6 +899,15 @@ export default function Page() {
     return () => clearInterval(id)
   }, [fetchAll])
 
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); setShowSearch(s => !s) }
+      if (e.key === 'Escape') setShowSearch(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   async function handleSend(text: string) {
     const userMsg: Message = { role: 'user', content: text, ts: Date.now() }
     const newMsgs = [...messages, userMsg]
@@ -732,6 +922,7 @@ export default function Page() {
       const data = await res.json()
       if (data.content) {
         setMessages(m => [...m, { role: 'assistant', content: data.content, ts: Date.now() }])
+        if (data.toolsUsed?.length) addToast('Action completed: ' + data.toolsUsed.join(', '), 'success')
       } else if (data.error) {
         setMessages(m => [...m, { role: 'assistant', content: `⚠️ Error: ${data.error}`, ts: Date.now() }])
       }
@@ -743,11 +934,13 @@ export default function Page() {
   }
 
   async function handleRunTask(data: any) {
-    await fetch('/api/run', {
+    const res = await fetch('/api/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     })
+    if (res.ok) addToast('Task dispatched: ' + data.title, 'success')
+    else addToast('Failed to dispatch task', 'error')
     setTimeout(fetchAll, 1000)
   }
 
@@ -786,7 +979,7 @@ export default function Page() {
       {/* Grid bg */}
       <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', backgroundImage: 'linear-gradient(rgba(99,102,241,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(99,102,241,0.03) 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
 
-      <Sidebar view={view} setView={v => { setView(v); setSelectedAgent(null) }} agents={agents} onLogout={handleLogout} />
+      <Sidebar view={view} setView={v => { setView(v); setSelectedAgent(null) }} agents={agents} onLogout={handleLogout} onSearch={() => setShowSearch(true)} />
 
       <div style={{ flex: 1, overflowY: 'auto', position: 'relative' }}>
         <AnimatePresence mode="wait">
@@ -801,6 +994,10 @@ export default function Page() {
       <AnimatePresence>
         {runAgent && <RunTaskModal agent={runAgent} onClose={() => setRunAgent(null)} onSubmit={handleRunTask} />}
       </AnimatePresence>
+      <AnimatePresence>
+        {showSearch && <GlobalSearch onClose={() => setShowSearch(false)} onNavigate={(v, id) => { setView(v); setSelectedAgent(null) }} />}
+      </AnimatePresence>
+      <ToastContainer toasts={toasts} remove={id => setToasts(t => t.filter(x => x.id !== id))} />
     </div>
   )
 }
