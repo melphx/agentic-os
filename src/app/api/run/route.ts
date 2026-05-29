@@ -423,4 +423,73 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
       }
 
       case 'api': {
-        const { cont
+        const { content: raw, tokens } = await ask(agentId,
+          'You are an API integration agent. Respond with ONLY a JSON object: { "url": "...", "method": "GET|POST", "headers": {}, "body": {} }',
+          description, 512,
+        )
+        tokensUsed = tokens
+        let apiReq: any = {}
+        try { apiReq = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || '{}') } catch {}
+        const resp = await fetch(apiReq.url, {
+          method: apiReq.method || 'GET',
+          headers: apiReq.headers || {},
+          body: apiReq.body ? JSON.stringify(apiReq.body) : undefined,
+          signal: AbortSignal.timeout(15000),
+        })
+        result = (await resp.text()).slice(0, 4000)
+        addLog(taskId, agentId, 'success', `API response (${resp.status}):\n${result.slice(0, 500)}`)
+        break
+      }
+
+      default: {
+        const { content, tokens } = await ask(agentId,
+          'You are a general-purpose AI agent. Complete the task thoroughly.',
+          description,
+        )
+        result = content; tokensUsed = tokens
+        addLog(taskId, agentId, 'success', result.slice(0, 500))
+      }
+    }
+
+    // Save to DB
+    db.prepare(`UPDATE tasks SET status='completed', completed_at=datetime('now'), result=?, tokens_used=? WHERE id=?`)
+      .run(result.slice(0, 8000), tokensUsed, taskId)
+    db.prepare(`UPDATE agents SET tasks_completed=tasks_completed+1, tokens_used=tokens_used+?, status='idle', current_task=NULL, updated_at=datetime('now') WHERE id=?`)
+      .run(tokensUsed, agentId)
+    recordMetric(agentId, 'tokens', tokensUsed)
+
+    // Save memory summary
+    const { content: memorySummary } = await ask(agentId,
+      'Summarise what was just accomplished in 1-2 sentences for future memory.',
+      `Task: ${description}\nResult: ${result.slice(0, 500)}`,
+      100,
+    ).catch(() => ({ content: description.slice(0, 100) }))
+    saveMemory(agentId, memorySummary, taskId)
+
+  } catch (err: any) {
+    const msg = err.message || String(err)
+    db.prepare(`UPDATE tasks SET status='failed', completed_at=datetime('now'), error=? WHERE id=?`).run(msg, taskId)
+    updateAgent(agentId, { status: 'error', current_task: null })
+    addLog(taskId, agentId, 'error', `Task failed: ${msg}`)
+  }
+}
+
+// ── Route handler ──────────────────────────────────────────────────────────
+
+export async function POST(req: NextRequest) {
+  const { error } = await requireAuth(req)
+  if (error) return error
+
+  try {
+    const { agent_id, title, description, type, priority } = await req.json()
+    if (!title || !description)
+      return NextResponse.json({ error: 'title and description are required' }, { status: 400 })
+
+    const task = createTask({ agent_id, title, description, type: type || 'general', priority: priority || 2, status: 'pending' })
+    runTask(task.id, agent_id || 'code', type || 'general', description).catch(console.error)
+
+    return NextResponse.json({ ok: true, taskId: task.id, message: 'Task queued and running' })
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 })
+  }
+}
