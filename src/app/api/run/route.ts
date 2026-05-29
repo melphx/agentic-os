@@ -21,10 +21,41 @@ if (!existsSync(AGENT_FILES_DIR)) mkdirSync(AGENT_FILES_DIR, { recursive: true }
 
 // ── GPT helper with memory injection ──────────────────────────────────────
 
+// Custom system prompts stored per-agent (set via UI, persisted in DB)
+const customPromptCache: Record<string, string> = {}
+let promptsLoaded = false
+
+function loadCustomPromptsFromDb() {
+  if (promptsLoaded) return
+  promptsLoaded = true
+  try {
+    const db = getDb()
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS agent_settings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id TEXT NOT NULL,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        updated_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(agent_id, key)
+      )
+    `)
+    const rows = db.prepare(`SELECT agent_id, value FROM agent_settings WHERE key = 'custom_prompt'`).all() as { agent_id: string; value: string }[]
+    for (const row of rows) customPromptCache[row.agent_id] = row.value
+  } catch { /* table may not exist yet */ }
+}
+
+export function setAgentCustomPrompt(agentId: string, prompt: string) {
+  customPromptCache[agentId] = prompt
+}
+
 async function ask(agentId: string, systemPrompt: string, userPrompt: string, maxTokens = 2048) {
+  loadCustomPromptsFromDb()
   const memory    = getMemory(agentId, 5)
   const knowledge = getKnowledgeContent(agentId)
-  let fullSystem  = systemPrompt
+  // Use custom prompt if set, otherwise use provided systemPrompt
+  const baseSystem = customPromptCache[agentId] || systemPrompt
+  let fullSystem  = baseSystem
   if (knowledge) fullSystem += `\n\n--- Uploaded Knowledge Base ---\n${knowledge}\n--- End Knowledge Base ---`
   if (memory)    fullSystem += `\n\nYour recent memory:\n${memory}`
 
@@ -79,46 +110,116 @@ async function webSearch(query: string): Promise<string> {
 // ── Playwright browser automation ─────────────────────────────────────────
 
 async function browserTask(agentId: string, taskId: number, description: string): Promise<{ result: string; tokens: number }> {
+  // Hard 90-second timeout for the entire browser task
+  const BROWSER_TIMEOUT = 90_000
+
   // Dynamically import playwright (optional dep)
   let chromium: any
   try {
     const pw = await import('playwright')
     chromium = pw.chromium
   } catch {
-    return { result: 'Playwright not installed. Run: npx playwright install chromium', tokens: 0 }
+    return { result: 'Playwright not installed. Run: npx playwright install chromium --with-deps', tokens: 0 }
   }
 
   addLog(taskId, agentId, 'info', 'Launching headless browser…')
-  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] })
+
+  let browser: any
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+    })
+  } catch (e: any) {
+    return { result: `Failed to launch browser: ${e.message}`, tokens: 0 }
+  }
+
   const page = await browser.newPage()
+  await page.setDefaultTimeout(10000)
+  await page.setDefaultNavigationTimeout(20000)
 
   let result = ''
   let tokens = 0
 
-  try {
+  // Wrap everything in a hard timeout
+  const taskPromise = (async () => {
     // Ask GPT to produce a step-by-step browser plan
     const { content: plan, tokens: planTokens } = await ask(
       String(agentId),
       `You are a browser automation agent. Given a task, produce a JSON array of steps.
-Each step: { "action": "navigate|click|type|screenshot|extract|scroll|wait", "selector"?: "css", "value"?: "text or url", "description": "what this does" }
-Respond with ONLY the JSON array, no explanation.`,
+Each step: { "action": "navigate|extract|screenshot|scroll|click|type|wait", "selector"?: "css", "value"?: "text or url", "description": "what this does" }
+For content scraping tasks, use: navigate then extract then (optionally) screenshot.
+Respond with ONLY the JSON array, no markdown, no explanation.`,
       description,
-      1024,
+      512,
     )
     tokens += planTokens
 
     let steps: any[] = []
     try { steps = JSON.parse(plan.match(/\[[\s\S]*\]/)?.[0] || '[]') } catch {}
-    addLog(taskId, agentId, 'info', `Executing ${steps.length} browser steps`)
 
+    if (!steps.length) {
+      // Fallback: just navigate and extract if no steps parsed
+      const urlMatch = description.match(/https?:\/\/[^\s]+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/)
+      if (urlMatch) {
+        const url = urlMatch[0].startsWith('http') ? urlMatch[0] : `https://${urlMatch[0]}`
+        steps = [
+          { action: 'navigate', value: url, description: `Open ${url}` },
+          { action: 'extract', value: 'all visible text, headings, and key content', description: 'Extract page content' },
+        ]
+      }
+    }
+
+    addLog(taskId, agentId, 'info', `Executing ${steps.length} browser steps`)
     const outputs: string[] = []
 
     for (const step of steps) {
       try {
         switch (step.action) {
-          case 'navigate':
-            await page.goto(step.value, { waitUntil: 'domcontentloaded', timeout: 15000 })
-            outputs.push(`Navigated to ${step.value}`)
+          case 'navigate': {
+            const url = step.value?.startsWith('http') ? step.value : `https://${step.value}`
+            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 })
+            // Wait a moment for JS to settle
+            await page.waitForTimeout(1500)
+            outputs.push(`Navigated to ${url}`)
+            break
+          }
+          case 'extract': {
+            const text = await page.evaluate(() => {
+              // Remove nav, footer, scripts for cleaner extraction
+              const remove = document.querySelectorAll('nav,footer,script,style,noscript,iframe')
+              remove.forEach(el => el.remove())
+              return document.body.innerText
+            })
+            const clean = text.replace(/\s+/g, ' ').trim().slice(0, 5000)
+            if (!clean) { outputs.push('Page returned no readable text'); break }
+            const { content: summary, tokens: sumTokens } = await ask(
+              String(agentId),
+              'Extract and summarise the key information from this page. Be thorough and accurate.',
+              `Page content:\n${clean}\n\nTask context: ${description}`,
+              1024,
+            )
+            tokens += sumTokens
+            outputs.push(`Page content:\n${summary}`)
+            break
+          }
+          case 'screenshot': {
+            const buf = await page.screenshot({ type: 'png', fullPage: false })
+            const b64 = buf.toString('base64')
+            const imgPath = path.join(AGENT_FILES_DIR, `screenshot-${Date.now()}.png`)
+            writeFileSync(imgPath, buf)
+            const analysis = await analyzeScreenshot(b64, step.value || 'Describe what you see on this page')
+            tokens += 300
+            outputs.push(`Screenshot analysis: ${analysis}`)
+            break
+          }
+          case 'scroll':
+            await page.evaluate(() => window.scrollBy(0, 500))
+            outputs.push('Scrolled down')
+            break
+          case 'wait':
+            await page.waitForTimeout(Math.min(parseInt(step.value) || 1000, 3000))
+            outputs.push(`Waited`)
             break
           case 'click':
             await page.click(step.selector, { timeout: 5000 })
@@ -126,40 +227,8 @@ Respond with ONLY the JSON array, no explanation.`,
             break
           case 'type':
             await page.fill(step.selector, step.value, { timeout: 5000 })
-            outputs.push(`Typed "${step.value}" into ${step.selector}`)
+            outputs.push(`Typed into ${step.selector}`)
             break
-          case 'scroll':
-            await page.evaluate(() => window.scrollBy(0, 500))
-            outputs.push('Scrolled down')
-            break
-          case 'wait':
-            await page.waitForTimeout(parseInt(step.value) || 1000)
-            outputs.push(`Waited ${step.value}ms`)
-            break
-          case 'screenshot': {
-            const buf = await page.screenshot({ type: 'png', fullPage: false })
-            const b64 = buf.toString('base64')
-            // Save screenshot
-            const imgPath = path.join(AGENT_FILES_DIR, `screenshot-${Date.now()}.png`)
-            writeFileSync(imgPath, buf)
-            // Analyse with vision
-            const analysis = await analyzeScreenshot(b64, step.value || 'Describe what you see on this page')
-            tokens += 300 // rough vision token estimate
-            outputs.push(`Screenshot saved to ${imgPath}\nVision analysis: ${analysis}`)
-            break
-          }
-          case 'extract': {
-            const text = await page.evaluate(() => document.body.innerText)
-            const { content: summary, tokens: sumTokens } = await ask(
-              String(agentId),
-              'Extract and summarise the requested information from the page text.',
-              `Page text:\n${text.slice(0, 4000)}\n\nExtract: ${step.value || 'key information'}`,
-              512,
-            )
-            tokens += sumTokens
-            outputs.push(`Extracted: ${summary}`)
-            break
-          }
         }
         addLog(taskId, agentId, 'info', `✓ ${step.description || step.action}`)
       } catch (stepErr: any) {
@@ -168,12 +237,37 @@ Respond with ONLY the JSON array, no explanation.`,
       }
     }
 
-    result = outputs.join('\n')
+    result = outputs.join('\n\n')
+  })()
+
+  const timeoutPromise = new Promise<void>((_, reject) =>
+    setTimeout(() => reject(new Error('Browser task timed out after 90 seconds')), BROWSER_TIMEOUT)
+  )
+
+  try {
+    await Promise.race([taskPromise, timeoutPromise])
+  } catch (e: any) {
+    result = result || `Browser task failed: ${e.message}`
+    addLog(taskId, agentId, 'error', e.message)
   } finally {
-    await browser.close()
+    await browser.close().catch(() => {})
   }
 
-  return { result, tokens }
+  // If we got raw extracted content, use the full ask to produce the final output
+  if (result && description.toLowerCase().includes('blog') || description.toLowerCase().includes('write') || description.toLowerCase().includes('post')) {
+    try {
+      const { content: final, tokens: finalTokens } = await ask(
+        String(agentId),
+        'You are a content writer. Using the extracted page content below, complete the user\'s writing task. Produce polished, publication-ready content.',
+        `Task: ${description}\n\nExtracted content:\n${result}`,
+        2048,
+      )
+      tokens += finalTokens
+      result = final
+    } catch {}
+  }
+
+  return { result: result || 'Browser task completed but returned no content.', tokens }
 }
 
 // ── Security scanner ───────────────────────────────────────────────────────
@@ -329,73 +423,4 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
       }
 
       case 'api': {
-        const { content: raw, tokens } = await ask(agentId,
-          'You are an API integration agent. Respond with ONLY a JSON object: { "url": "...", "method": "GET|POST", "headers": {}, "body": {} }',
-          description, 512,
-        )
-        tokensUsed = tokens
-        let apiReq: any = {}
-        try { apiReq = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || '{}') } catch {}
-        const resp = await fetch(apiReq.url, {
-          method: apiReq.method || 'GET',
-          headers: apiReq.headers || {},
-          body: apiReq.body ? JSON.stringify(apiReq.body) : undefined,
-          signal: AbortSignal.timeout(15000),
-        })
-        result = (await resp.text()).slice(0, 4000)
-        addLog(taskId, agentId, 'success', `API response (${resp.status}):\n${result.slice(0, 500)}`)
-        break
-      }
-
-      default: {
-        const { content, tokens } = await ask(agentId,
-          'You are a general-purpose AI agent. Complete the task thoroughly.',
-          description,
-        )
-        result = content; tokensUsed = tokens
-        addLog(taskId, agentId, 'success', result.slice(0, 500))
-      }
-    }
-
-    // Save to DB
-    db.prepare(`UPDATE tasks SET status='completed', completed_at=datetime('now'), result=?, tokens_used=? WHERE id=?`)
-      .run(result.slice(0, 8000), tokensUsed, taskId)
-    db.prepare(`UPDATE agents SET tasks_completed=tasks_completed+1, tokens_used=tokens_used+?, status='idle', current_task=NULL, updated_at=datetime('now') WHERE id=?`)
-      .run(tokensUsed, agentId)
-    recordMetric(agentId, 'tokens', tokensUsed)
-
-    // Save memory summary
-    const { content: memorySummary } = await ask(agentId,
-      'Summarise what was just accomplished in 1-2 sentences for future memory.',
-      `Task: ${description}\nResult: ${result.slice(0, 500)}`,
-      100,
-    ).catch(() => ({ content: description.slice(0, 100) }))
-    saveMemory(agentId, memorySummary, taskId)
-
-  } catch (err: any) {
-    const msg = err.message || String(err)
-    db.prepare(`UPDATE tasks SET status='failed', completed_at=datetime('now'), error=? WHERE id=?`).run(msg, taskId)
-    updateAgent(agentId, { status: 'error', current_task: null })
-    addLog(taskId, agentId, 'error', `Task failed: ${msg}`)
-  }
-}
-
-// ── Route handler ──────────────────────────────────────────────────────────
-
-export async function POST(req: NextRequest) {
-  const { error } = await requireAuth(req)
-  if (error) return error
-
-  try {
-    const { agent_id, title, description, type, priority } = await req.json()
-    if (!title || !description)
-      return NextResponse.json({ error: 'title and description are required' }, { status: 400 })
-
-    const task = createTask({ agent_id, title, description, type: type || 'general', priority: priority || 2, status: 'pending' })
-    runTask(task.id, agent_id || 'code', type || 'general', description).catch(console.error)
-
-    return NextResponse.json({ ok: true, taskId: task.id, message: 'Task queued and running' })
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 })
-  }
-}
+        const { cont

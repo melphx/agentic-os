@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Bot, ListTodo, Terminal as TerminalIcon,
   Settings, Send, ChevronLeft, Play, RefreshCw, LogOut,
   AlertCircle, CheckCircle, Clock, Zap, Activity, X, Search, Bell,
-  BookOpen, Trash2,
+  BookOpen, Trash2, Download, Cpu, SlidersHorizontal, Layers, Copy, Check,
 } from 'lucide-react'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -433,16 +433,32 @@ function TrainPanel({ agent }: { agent: Agent }) {
 
 // ── Task Thread View ───────────────────────────────────────────────────────
 
-function TaskThreadView({ task, agent }: { task: Task; agent: Agent }) {
+function TaskThreadView({ task, agent, onCancelled }: { task: Task; agent: Agent; onCancelled?: () => void }) {
   const resultPreview = (task.result || task.error || '').slice(0, 4000)
   const [refineMessages, setRefineMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [refineMessages, task])
   useEffect(() => { setRefineMessages([]); setInput('') }, [task.id])
+
+  async function cancelTask() {
+    if (cancelling) return
+    setCancelling(true)
+    try {
+      await fetch(`/api/tasks/${task.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'cancelled' }),
+      })
+      onCancelled?.()
+    } catch { /* ignore */ } finally {
+      setCancelling(false)
+    }
+  }
 
   async function send() {
     const text = input.trim()
@@ -477,14 +493,36 @@ function TaskThreadView({ task, agent }: { task: Task; agent: Agent }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Thread header */}
-      <div style={{ padding: '16px 24px 12px', borderBottom: '1px solid rgba(99,102,241,0.1)', flexShrink: 0 }}>
+      <div style={{ padding: '14px 20px 10px', borderBottom: '1px solid rgba(99,102,241,0.1)', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ color: 'white', fontWeight: 600, fontSize: 15 }}>{task.title}</span>
-          <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: statusBg, color: statusColor, fontWeight: 600 }}>{task.status}</span>
-          <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(99,102,241,0.1)', color: '#a5b4fc' }}>{task.type}</span>
-          <span style={{ fontSize: 11, color: 'rgba(148,163,184,0.35)', marginLeft: 'auto' }}>{new Date(task.created_at).toLocaleString()}</span>
+          <span style={{ color: 'white', fontWeight: 600, fontSize: 14, flex: 1, minWidth: 0 }}>{task.title}</span>
+          <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: statusBg, color: statusColor, fontWeight: 600, flexShrink: 0 }}>{task.status}</span>
+          <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(99,102,241,0.1)', color: '#a5b4fc', flexShrink: 0 }}>{task.type}</span>
+          {(task.status === 'running' || task.status === 'pending') && (
+            <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }} onClick={cancelTask} disabled={cancelling}
+              style={{ padding: '2px 10px', borderRadius: 20, background: 'rgba(244,63,94,0.12)', border: '1px solid rgba(244,63,94,0.3)', color: '#f43f5e', fontSize: 10, fontWeight: 600, cursor: cancelling ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+              {cancelling ? '…' : '✕ Cancel'}
+            </motion.button>
+          )}
         </div>
-        {task.description && <p style={{ color: 'rgba(148,163,184,0.5)', fontSize: 12, margin: '6px 0 0', lineHeight: 1.5 }}>{task.description}</p>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6 }}>
+          <span style={{ fontSize: 11, color: 'rgba(148,163,184,0.3)' }}>{new Date(task.created_at).toLocaleString()}</span>
+          {task.tokens_used > 0 && <TokenCost tokens={task.tokens_used} />}
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+            {task.result && <CopyButton text={task.result} />}
+            {task.result && (
+              <button onClick={() => {
+                const blob = new Blob([`# ${task.title}\n\n${task.result}`], { type: 'text/markdown' })
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a'); a.href = url; a.download = `${task.title.slice(0,40).replace(/[^a-z0-9]/gi,'-')}.md`; a.click()
+                URL.revokeObjectURL(url)
+              }} title="Download as Markdown"
+                style={{ background: 'none', border: 'none', color: 'rgba(148,163,184,0.4)', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
+                <Download size={12} /> Export
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Chat thread scroll area */}
@@ -553,26 +591,143 @@ function TaskThreadView({ task, agent }: { task: Task; agent: Agent }) {
   )
 }
 
+// ── Copy button helper ─────────────────────────────────────────────────────
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button onClick={() => { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000) }}
+      title="Copy to clipboard"
+      style={{ background: 'none', border: 'none', color: copied ? '#10b981' : 'rgba(148,163,184,0.4)', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
+      {copied ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy</>}
+    </button>
+  )
+}
+
+// ── Task cost helper ───────────────────────────────────────────────────────
+
+function TokenCost({ tokens }: { tokens: number }) {
+  // gpt-4o-mini: ~$0.15/1M input + $0.60/1M output, rough avg $0.0004/1k
+  const cost = (tokens / 1000 * 0.0004)
+  const display = cost < 0.01 ? `<$0.01` : `$${cost.toFixed(3)}`
+  return <span style={{ fontSize: 10, color: 'rgba(148,163,184,0.35)' }}>{tokens.toLocaleString()} tokens · {display}</span>
+}
+
+// ── Agent prompt editor (in Train tab) ────────────────────────────────────
+
+function AgentPromptEditor({ agent }: { agent: Agent }) {
+  const defaultPrompts: Record<string, string> = {
+    research:  'You are a Research Agent specialising in web research, data gathering, and summarisation. Be thorough, cite sources, and present findings clearly.',
+    code:      'You are a Code Engineer. Write clean, well-commented, production-ready code. Explain your approach briefly before the code.',
+    data:      'You are a Data Analyst. Provide structured analysis, highlight key trends, and present actionable insights.',
+    writer:    'You are a Content Writer. Write engaging, SEO-friendly content that is clear, compelling, and tailored to the audience.',
+    email:     'You are an Email Manager. Write professional, concise emails with clear subject lines and calls to action.',
+    security:  'You are a Security Analyst. Identify vulnerabilities, assess risk levels, and provide concrete remediation steps.',
+  }
+  const [prompt, setPrompt] = useState(defaultPrompts[agent.id] || '')
+  const [saved, setSaved] = useState(false)
+  const [loading, setLoading] = useState(true)
+
+  // Load from server on mount
+  useEffect(() => {
+    fetch(`/api/agents/${agent.id}/prompt`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.prompt) setPrompt(d.prompt)
+        setLoading(false)
+      })
+      .catch(() => setLoading(false))
+  }, [agent.id])
+
+  async function save() {
+    await fetch(`/api/agents/${agent.id}/prompt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+    })
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+  }
+
+  async function reset() {
+    const def = defaultPrompts[agent.id] || ''
+    setPrompt(def)
+    await fetch(`/api/agents/${agent.id}/prompt`, { method: 'DELETE' })
+  }
+
+  return (
+    <div style={{ padding: '16px 24px', borderTop: '1px solid rgba(99,102,241,0.1)', marginTop: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <Cpu size={14} color="#a5b4fc" />
+        <span style={{ color: 'white', fontWeight: 600, fontSize: 13 }}>System Prompt</span>
+        <span style={{ fontSize: 11, color: 'rgba(148,163,184,0.4)' }}>— shapes how this agent thinks</span>
+      </div>
+      <textarea value={loading ? 'Loading…' : prompt} onChange={e => setPrompt(e.target.value)} rows={5} disabled={loading}
+        style={{ width: '100%', background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 10, padding: '10px 12px', color: loading ? 'rgba(148,163,184,0.4)' : 'white', fontSize: 12, outline: 'none', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit', lineHeight: 1.6 }} />
+      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        <motion.button whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }} onClick={save}
+          style={{ padding: '6px 16px', background: saved ? 'rgba(16,185,129,0.15)' : `linear-gradient(135deg,${agent.accent_dark},${agent.accent})`, border: saved ? '1px solid rgba(16,185,129,0.3)' : 'none', borderRadius: 7, color: saved ? '#10b981' : 'white', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+          {saved ? '✓ Saved' : 'Save Prompt'}
+        </motion.button>
+        <button onClick={reset} style={{ padding: '6px 12px', background: 'transparent', border: '1px solid rgba(148,163,184,0.15)', borderRadius: 7, color: 'rgba(148,163,184,0.5)', fontSize: 12, cursor: 'pointer' }}>Reset</button>
+      </div>
+      <p style={{ color: 'rgba(148,163,184,0.3)', fontSize: 11, margin: '8px 0 0' }}>Saved to server — active immediately on next task.</p>
+    </div>
+  )
+}
+
+// ── Quick task templates ───────────────────────────────────────────────────
+
+const AGENT_TEMPLATES: Record<string, { label: string; description: string; type: string }[]> = {
+  research:  [
+    { label: '🔍 Research topic',    description: 'Research [topic] and summarise the top findings, key players, and recent developments.', type: 'search' },
+    { label: '📰 News digest',        description: 'Find the latest news about [topic] from the past 7 days and summarise the top 5 stories.', type: 'search' },
+    { label: '🌐 Scrape & summarise', description: 'Navigate to [URL] and extract the key information from the page.', type: 'browser' },
+  ],
+  writer:    [
+    { label: '✍️ Blog post',          description: 'Write a 500-word SEO-friendly blog post about [topic] targeting [audience].', type: 'general' },
+    { label: '📧 Email draft',        description: 'Write a professional email to [recipient] about [subject]. Tone: [tone].', type: 'general' },
+    { label: '📱 Social post',        description: 'Write 3 variations of a social media post about [topic] for LinkedIn.', type: 'general' },
+  ],
+  code:      [
+    { label: '⚡ Write script',       description: 'Write a Python script that [description]. Include error handling and comments.', type: 'code' },
+    { label: '🐛 Debug code',         description: 'Debug this code and explain the issues:\n\n[paste code here]', type: 'general' },
+    { label: '📝 Code review',        description: 'Review this code for bugs, security issues, and improvements:\n\n[paste code here]', type: 'general' },
+  ],
+  data:      [
+    { label: '📊 Analyse data',       description: 'Analyse this dataset and provide key insights, trends, and anomalies:\n\n[paste data here]', type: 'general' },
+    { label: '🗄️ Write SQL',          description: 'Write a SQL query to [description] from a table with columns: [columns].', type: 'general' },
+    { label: '📈 Visualisation plan', description: 'Suggest the best charts and visualisations for this data and explain why:\n\n[describe data]', type: 'general' },
+  ],
+  security:  [
+    { label: '🔒 Scan server',        description: 'Run a security scan on localhost and report vulnerabilities and recommendations.', type: 'security' },
+    { label: '🛡️ Audit review',       description: 'Review these server logs for suspicious activity and security threats:\n\n[paste logs]', type: 'general' },
+  ],
+  email:     [
+    { label: '📥 Draft reply',        description: 'Draft a professional reply to this email:\n\n[paste email here]', type: 'general' },
+    { label: '📢 Newsletter',         description: 'Write a monthly newsletter email about [topic] for [audience].', type: 'general' },
+  ],
+}
+
 // ── Agent Detail ───────────────────────────────────────────────────────────
 
-function AgentDetailView({ agent, onBack, onRunTask }: { agent: Agent; onBack: () => void; onRunTask: (a: Agent) => void }) {
+function AgentDetailView({ agent, onBack, onRunTask }: { agent: Agent; onBack: () => void; onRunTask: (a: Agent, prefill?: Partial<{ title: string; description: string; type: string }>) => void }) {
   const [tasks, setTasks] = useState<Task[]>(agent.tasks || [])
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
+  // BUG FIX: track by ID only — never overwritten by polls
+  const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null)
   const [loadingTasks, setLoadingTasks] = useState(false)
   const [tab, setTab] = useState<'tasks' | 'train'>('tasks')
+
+  // Derive selected task from ID — always current data, never stale
+  const selectedTask = tasks.find(t => t.id === selectedTaskId) ?? null
 
   async function refresh() {
     setLoadingTasks(true)
     const res = await fetch(`/api/agents/${agent.id}`)
     if (res.ok) {
       const d = await res.json()
-      const updated: Task[] = d.tasks || []
-      setTasks(updated)
-      // Keep selectedTask in sync
-      if (selectedTask) {
-        const fresh = updated.find(t => t.id === selectedTask.id)
-        if (fresh) setSelectedTask(fresh)
-      }
+      setTasks(d.tasks || [])
+      // Do NOT touch selectedTaskId — user's selection is preserved
     }
     setLoadingTasks(false)
   }
@@ -642,21 +797,22 @@ function AgentDetailView({ agent, onBack, onRunTask }: { agent: Agent; onBack: (
               </button>
             </div>
 
-            {/* Task list */}
+            {/* Task list — selectedTaskId never changed by polls */}
             <div style={{ flex: 1, overflowY: 'auto' }}>
               {tasks.length === 0 && (
                 <p style={{ color: 'rgba(148,163,184,0.3)', fontSize: 12, padding: '16px 14px', margin: 0 }}>No tasks yet.</p>
               )}
               {tasks.map(t => {
-                const isSelected = selectedTask?.id === t.id
+                const isSelected = selectedTaskId === t.id
                 const dot = t.status === 'completed' ? '#10b981' : t.status === 'failed' ? '#f43f5e' : t.status === 'running' ? agent.accent : '#94a3b8'
                 return (
-                  <div key={t.id} onClick={() => setSelectedTask(t)}
-                    style={{ padding: '10px 14px', cursor: 'pointer', borderBottom: '1px solid rgba(99,102,241,0.06)', background: isSelected ? `${agent.accent}18` : 'transparent', borderLeft: isSelected ? `2px solid ${agent.accent}` : '2px solid transparent', transition: 'all 0.12s' }}
+                  <div key={t.id} onClick={() => setSelectedTaskId(t.id)}
+                    style={{ padding: '10px 14px', cursor: 'pointer', borderBottom: '1px solid rgba(99,102,241,0.06)', background: isSelected ? `${agent.accent}18` : 'transparent', borderLeft: isSelected ? `2px solid ${agent.accent}` : '2px solid transparent', transition: 'background 0.1s' }}
                     onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'rgba(99,102,241,0.06)' }}
                     onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent' }}>
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                      <div style={{ width: 7, height: 7, borderRadius: '50%', background: dot, flexShrink: 0, marginTop: 4 }} />
+                      <div style={{ width: 7, height: 7, borderRadius: '50%', background: dot, flexShrink: 0, marginTop: 4,
+                        boxShadow: t.status === 'running' ? `0 0 6px ${agent.accent}` : 'none' }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ color: isSelected ? 'white' : 'rgba(255,255,255,0.75)', fontSize: 12, fontWeight: isSelected ? 600 : 400, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', lineHeight: 1.45 }}>{t.title}</div>
                         <div style={{ color: 'rgba(148,163,184,0.3)', fontSize: 10, marginTop: 3 }}>{new Date(t.created_at).toLocaleDateString()} · {t.type}</div>
@@ -671,25 +827,40 @@ function AgentDetailView({ agent, onBack, onRunTask }: { agent: Agent; onBack: (
 
         {tab === 'train' && (
           <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            {/* compact upload strip in sidebar */}
             <TrainSidebarStrip agent={agent} />
           </div>
         )}
       </div>
 
-      {/* ── Right panel: task thread or train ── */}
+      {/* ── Right panel ── */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         {tab === 'train' ? (
-          <TrainPanel agent={agent} />
+          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+            <TrainPanel agent={agent} />
+            <AgentPromptEditor agent={agent} />
+          </div>
         ) : selectedTask ? (
-          <TaskThreadView key={selectedTask.id} task={selectedTask} agent={agent} />
+          <TaskThreadView key={selectedTaskId!} task={selectedTask} agent={agent} onCancelled={refresh} />
         ) : (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
-            <div style={{ width: 56, height: 56, borderRadius: '50%', background: `${agent.accent}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26 }}>⬡</div>
-            <div style={{ textAlign: 'center' }}>
-              <p style={{ margin: 0, fontSize: 14, color: 'rgba(148,163,184,0.5)' }}>Select a task to view its thread</p>
-              <p style={{ margin: '4px 0 0', fontSize: 12, color: 'rgba(148,163,184,0.3)' }}>or dispatch a new one with "New Task"</p>
+          /* Empty state — show quick templates */
+          <div style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
+            <div style={{ textAlign: 'center', marginBottom: 28 }}>
+              <div style={{ width: 52, height: 52, borderRadius: '50%', background: `${agent.accent}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, margin: '0 auto 12px' }}>⬡</div>
+              <p style={{ margin: 0, fontSize: 14, color: 'rgba(148,163,184,0.6)', fontWeight: 600 }}>Select a task or start a new one</p>
+              <p style={{ margin: '4px 0 0', fontSize: 12, color: 'rgba(148,163,184,0.3)' }}>Quick start with a template below</p>
             </div>
+            {(AGENT_TEMPLATES[agent.id] || AGENT_TEMPLATES.research).map((tpl, i) => (
+              <motion.div key={i} whileHover={{ x: 3 }} onClick={() => onRunTask(agent, tpl)}
+                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 16px', marginBottom: 8, background: 'rgba(15,20,35,0.6)', border: `1px solid rgba(99,102,241,0.1)`, borderRadius: 10, cursor: 'pointer', transition: 'border-color 0.15s' }}
+                onMouseEnter={e => (e.currentTarget.style.borderColor = `${agent.accent}44`)}
+                onMouseLeave={e => (e.currentTarget.style.borderColor = 'rgba(99,102,241,0.1)')}>
+                <Layers size={14} color={agent.accent} style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ color: 'white', fontSize: 13, fontWeight: 500 }}>{tpl.label}</div>
+                  <div style={{ color: 'rgba(148,163,184,0.4)', fontSize: 11, marginTop: 2 }}>{tpl.type} task</div>
+                </div>
+              </motion.div>
+            ))}
           </div>
         )}
       </div>
@@ -699,10 +870,10 @@ function AgentDetailView({ agent, onBack, onRunTask }: { agent: Agent; onBack: (
 
 // ── Run Task Modal ─────────────────────────────────────────────────────────
 
-function RunTaskModal({ agent, onClose, onSubmit }: { agent: Agent; onClose: () => void; onSubmit: (d: any) => void }) {
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [type, setType] = useState('general')
+function RunTaskModal({ agent, onClose, onSubmit, prefill }: { agent: Agent; onClose: () => void; onSubmit: (d: any) => void; prefill?: Partial<{ title: string; description: string; type: string }> }) {
+  const [title, setTitle] = useState(prefill?.title || '')
+  const [description, setDescription] = useState(prefill?.description || '')
+  const [type, setType] = useState(prefill?.type || 'general')
   const [priority, setPriority] = useState(2)
   const [loading, setLoading] = useState(false)
 
@@ -869,426 +1040,4 @@ function DashboardView({ agents, metrics, activity, onSelectAgent }: { agents: A
             <div style={{ width: 6, height: 6, borderRadius: '50%', background: log.level === 'error' ? '#f43f5e' : log.level === 'success' ? '#10b981' : log.level === 'warn' ? '#f59e0b' : '#6366f1', marginTop: 5, flexShrink: 0 }} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <span style={{ fontSize: 12, color: log.accent || '#a5b4fc', fontWeight: 600, marginRight: 8 }}>{log.agent_name}</span>
-              <span style={{ fontSize: 12, color: 'rgba(148,163,184,0.7)', wordBreak: 'break-word' }}>{log.message.slice(0, 120)}</span>
-            </div>
-            <span style={{ fontSize: 10, color: 'rgba(148,163,184,0.3)', flexShrink: 0 }}>{new Date(log.created_at).toLocaleTimeString()}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-// ── Tasks View ─────────────────────────────────────────────────────────────
-
-function TasksView({ tasks, agents }: { tasks: Task[]; agents: Agent[] }) {
-  const agentMap = Object.fromEntries(agents.map(a => [a.id, a]))
-  return (
-    <div style={{ padding: 24, height: '100%', overflowY: 'auto' }}>
-      <h1 style={{ color: 'white', fontWeight: 700, fontSize: 22, margin: '0 0 20px' }}>Task Queue</h1>
-      {tasks.length === 0 && <p style={{ color: 'rgba(148,163,184,0.4)', fontSize: 13 }}>No tasks yet. Open an agent and click "Run Task".</p>}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {tasks.map(t => {
-          const ag = t.agent_id ? agentMap[t.agent_id] : null
-          return (
-            <div key={t.id} style={{ background: 'rgba(15,20,35,0.7)', border: '1px solid rgba(99,102,241,0.1)', borderRadius: 12, padding: '14px 18px', display: 'flex', alignItems: 'flex-start', gap: 14 }}>
-              {ag && <AgentAvatar agent={ag} size={32} />}
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <span style={{ color: 'white', fontWeight: 600, fontSize: 13 }}>{t.title}</span>
-                  <span style={{ fontSize: 10, padding: '1px 7px', borderRadius: 20, background: t.priority === 1 ? 'rgba(244,63,94,0.15)' : t.priority === 2 ? 'rgba(99,102,241,0.15)' : 'rgba(148,163,184,0.1)', color: t.priority === 1 ? '#f43f5e' : t.priority === 2 ? '#a5b4fc' : '#94a3b8' }}>P{t.priority}</span>
-                  <span style={{ fontSize: 10, padding: '1px 7px', borderRadius: 20, background: t.status === 'completed' ? 'rgba(16,185,129,0.15)' : t.status === 'failed' ? 'rgba(244,63,94,0.15)' : t.status === 'running' ? 'rgba(99,102,241,0.2)' : 'rgba(148,163,184,0.1)', color: t.status === 'completed' ? '#10b981' : t.status === 'failed' ? '#f43f5e' : t.status === 'running' ? '#a5b4fc' : '#94a3b8' }}>{t.status}</span>
-                </div>
-                <p style={{ color: 'rgba(148,163,184,0.5)', fontSize: 12, margin: 0 }}>{ag?.name || 'Unassigned'} · {t.type} · {new Date(t.created_at).toLocaleString()}</p>
-                {t.result && <p style={{ color: 'rgba(148,163,184,0.6)', fontSize: 11, margin: '6px 0 0', whiteSpace: 'pre-wrap', maxHeight: 60, overflow: 'hidden' }}>{t.result.slice(0,200)}</p>}
-                {t.error  && <p style={{ color: '#f43f5e', fontSize: 11, margin: '6px 0 0' }}>{t.error}</p>}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-// ── Terminal View ──────────────────────────────────────────────────────────
-
-function TerminalView({ agents, metrics }: { agents: Agent[]; metrics: Metrics | null }) {
-  const [history, setHistory] = useState<string[]>([
-    '⬡ Claude OS Terminal v2.0 — Production',
-    'Type "help" for available commands.',
-    '',
-  ])
-  const [input, setInput] = useState('')
-  const endRef = useRef<HTMLDivElement>(null)
-  useEffect(() => endRef.current?.scrollIntoView({ behavior: 'smooth' }), [history])
-
-  function exec(cmd: string) {
-    const parts = cmd.trim().toLowerCase().split(' ')
-    const lines: string[] = [`$ ${cmd}`]
-    switch (parts[0]) {
-      case 'help':
-        lines.push('  status   — system overview', '  agents   — list all agents', '  tasks    — show task queue', '  metrics  — token / task stats', '  clear    — clear terminal', '  version  — build info')
-        break
-      case 'status':
-        lines.push(`  Agents: ${metrics?.total_agents || 0} total, ${metrics?.active_agents || 0} active`, `  Tasks: ${(metrics?.tasks_completed||0)+(metrics?.tasks_pending||0)+(metrics?.tasks_running||0)} total`, `  Tokens: ${fmt(metrics?.total_tokens || 0)}`, `  AI: nous-hermes2 via Ollama`)
-        break
-      case 'agents':
-        agents.forEach(a => lines.push(`  [${a.status.toUpperCase().padEnd(7)}] ${a.name.padEnd(20)} tokens=${fmt(a.tokens_used)}`))
-        break
-      case 'metrics':
-        lines.push(`  completed=${metrics?.tasks_completed||0}  running=${metrics?.tasks_running||0}  pending=${metrics?.tasks_pending||0}  failed=${metrics?.tasks_failed||0}`)
-        break
-      case 'version':
-        lines.push('  Claude OS v2.0.0 · Next.js 14 · SQLite · OpenAI · JWT Auth')
-        break
-      case 'clear':
-        setHistory(['⬡ Terminal cleared.', '']); return
-      default:
-        lines.push(`  Unknown command: ${parts[0]}. Type "help".`)
-    }
-    lines.push('')
-    setHistory(h => [...h, ...lines])
-  }
-
-  return (
-    <div style={{ padding: 24, height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <h1 style={{ color: 'white', fontWeight: 700, fontSize: 22, margin: '0 0 16px' }}>Terminal</h1>
-      <div style={{ flex: 1, background: 'rgba(4,8,16,0.9)', border: '1px solid rgba(99,102,241,0.15)', borderRadius: 14, padding: 20, overflowY: 'auto', fontFamily: 'JetBrains Mono, monospace', fontSize: 13, lineHeight: 1.7 }}>
-        {history.map((l, i) => <div key={i} style={{ color: l.startsWith('$') ? '#a5b4fc' : l.startsWith('  [') ? '#10b981' : 'rgba(148,163,184,0.8)', whiteSpace: 'pre' }}>{l}</div>)}
-        <div ref={endRef} />
-      </div>
-      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-        <span style={{ color: '#6366f1', fontFamily: 'JetBrains Mono, monospace', fontSize: 13, padding: '8px 0', flexShrink: 0 }}>$</span>
-        <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { exec(input); setInput('') } }} placeholder="Type a command…" autoFocus
-          style={{ flex: 1, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, padding: '7px 12px', color: 'white', fontFamily: 'JetBrains Mono, monospace', fontSize: 13, outline: 'none' }} />
-      </div>
-    </div>
-  )
-}
-
-// ── Settings View ──────────────────────────────────────────────────────────
-
-function SettingsView() {
-  const [openaiUrl, setOpenaiUrl] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('openaiUrl') || 'https://api.openai.com/v1' : '')
-  const [model, setModel] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('openaiModel') || 'gpt-4o-mini' : '')
-  const [saved, setSaved]         = useState(false)
-
-  function save() {
-    localStorage.setItem('openaiUrl', openaiUrl)
-    localStorage.setItem('openaiModel', model)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
-  }
-
-  return (
-    <div style={{ padding: 24, maxWidth: 520 }}>
-      <h1 style={{ color: 'white', fontWeight: 700, fontSize: 22, margin: '0 0 24px' }}>Settings</h1>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-        {[
-          { label: 'OPENAI BASE URL', value: openaiUrl, set: setOpenaiUrl, placeholder: 'https://api.openai.com/v1' },
-          { label: 'MODEL', value: model, set: setModel, placeholder: 'gpt-4o-mini' },
-        ].map(f => (
-          <div key={f.label} style={{ background: 'rgba(15,20,35,0.7)', border: '1px solid rgba(99,102,241,0.12)', borderRadius: 12, padding: '16px 18px' }}>
-            <label style={{ display: 'block', fontSize: 11, color: 'rgba(148,163,184,0.6)', fontWeight: 600, letterSpacing: '0.06em', marginBottom: 8 }}>{f.label}</label>
-            <input value={f.value} onChange={e => f.set(e.target.value)} placeholder={f.placeholder}
-              style={{ width: '100%', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, padding: '8px 12px', color: 'white', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
-          </div>
-        ))}
-        <motion.button onClick={save} whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
-          style={{ background: saved ? 'rgba(16,185,129,0.2)' : 'linear-gradient(135deg,#4338ca,#6366f1)', border: saved ? '1px solid rgba(16,185,129,0.4)' : 'none', borderRadius: 10, padding: '10px 0', color: saved ? '#10b981' : 'white', fontWeight: 600, cursor: 'pointer', fontSize: 14 }}>
-          {saved ? '✓ Saved' : 'Save Settings'}
-        </motion.button>
-        <div style={{ background: 'rgba(15,20,35,0.7)', border: '1px solid rgba(99,102,241,0.12)', borderRadius: 12, padding: '14px 18px' }}>
-          <div style={{ fontSize: 11, color: 'rgba(148,163,184,0.5)', marginBottom: 6 }}>STACK</div>
-          <div style={{ fontSize: 12, color: 'rgba(148,163,184,0.7)', lineHeight: 1.8 }}>Next.js 14 · SQLite (better-sqlite3) · JWT Auth · Hermes via Ollama · Framer Motion</div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-
-// ── Schedules View ─────────────────────────────────────────────────────────
-
-interface Schedule { id: number; agent_id: string; title: string; description: string; type: string; cron: string; enabled: number; last_run: string | null; created_at: string }
-
-function SchedulesView({ agents }: { agents: Agent[] }) {
-  const [schedules, setSchedules] = useState<Schedule[]>([])
-  const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ agent_id: 'research', title: '', description: '', type: 'general', cron: '0 9 * * *' })
-  const agentMap = Object.fromEntries(agents.map(a => [a.id, a]))
-
-  async function load() {
-    const res = await fetch('/api/schedules')
-    if (res.ok) setSchedules(await res.json())
-  }
-
-  useEffect(() => { load() }, [])
-
-  async function createSchedule(e: React.FormEvent) {
-    e.preventDefault()
-    await fetch('/api/schedules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
-    setShowForm(false)
-    setForm({ agent_id: 'research', title: '', description: '', type: 'general', cron: '0 9 * * *' })
-    load()
-  }
-
-  async function toggleSchedule(id: number, enabled: number) {
-    await fetch('/api/schedules', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, enabled: !enabled }) })
-    load()
-  }
-
-  const CRON_PRESETS = [
-    { label: 'Every hour',    value: '0 * * * *'    },
-    { label: 'Every morning', value: '0 9 * * *'    },
-    { label: 'Every day',     value: '0 0 * * *'    },
-    { label: 'Every Monday',  value: '0 9 * * 1'    },
-    { label: 'Every 15 min',  value: '*/15 * * * *' },
-  ]
-
-  return (
-    <div style={{ padding: 24, height: '100%', overflowY: 'auto' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
-        <div>
-          <h1 style={{ color: 'white', fontWeight: 700, fontSize: 22, margin: 0 }}>Schedules</h1>
-          <p style={{ color: 'rgba(148,163,184,0.5)', fontSize: 13, margin: '4px 0 0' }}>Automate agent tasks on a recurring schedule</p>
-        </div>
-        <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => setShowForm(!showForm)}
-          style={{ background: 'linear-gradient(135deg,#4338ca,#6366f1)', border: 'none', borderRadius: 10, padding: '8px 18px', color: 'white', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
-          + New Schedule
-        </motion.button>
-      </div>
-
-      <AnimatePresence>
-        {showForm && (
-          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
-            style={{ background: 'rgba(15,20,35,0.9)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 14, padding: 24, marginBottom: 20, overflow: 'hidden' }}>
-            <h3 style={{ color: 'white', fontWeight: 600, margin: '0 0 16px', fontSize: 15 }}>New Scheduled Task</h3>
-            <form onSubmit={createSchedule} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-              <div style={{ gridColumn: '1/-1' }}>
-                <label style={{ display: 'block', fontSize: 11, color: 'rgba(148,163,184,0.6)', fontWeight: 600, marginBottom: 6 }}>TITLE</label>
-                <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} required placeholder="Daily web research"
-                  style={{ width: '100%', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, padding: '8px 12px', color: 'white', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
-              </div>
-              <div style={{ gridColumn: '1/-1' }}>
-                <label style={{ display: 'block', fontSize: 11, color: 'rgba(148,163,184,0.6)', fontWeight: 600, marginBottom: 6 }}>TASK DESCRIPTION</label>
-                <textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} required rows={2} placeholder="Search for latest AI news and summarise the top 5 stories"
-                  style={{ width: '100%', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, padding: '8px 12px', color: 'white', fontSize: 13, outline: 'none', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }} />
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: 11, color: 'rgba(148,163,184,0.6)', fontWeight: 600, marginBottom: 6 }}>AGENT</label>
-                <select value={form.agent_id} onChange={e => setForm(f => ({ ...f, agent_id: e.target.value }))}
-                  style={{ width: '100%', background: 'rgba(15,20,35,0.9)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, padding: '8px 12px', color: 'white', fontSize: 13, outline: 'none' }}>
-                  {agents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: 11, color: 'rgba(148,163,184,0.6)', fontWeight: 600, marginBottom: 6 }}>TYPE</label>
-                <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}
-                  style={{ width: '100%', background: 'rgba(15,20,35,0.9)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, padding: '8px 12px', color: 'white', fontSize: 13, outline: 'none' }}>
-                  {['general','code','scrape','file','api','browser','security','search'].map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </div>
-              <div style={{ gridColumn: '1/-1' }}>
-                <label style={{ display: 'block', fontSize: 11, color: 'rgba(148,163,184,0.6)', fontWeight: 600, marginBottom: 6 }}>CRON SCHEDULE</label>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
-                  {CRON_PRESETS.map(p => (
-                    <button key={p.value} type="button" onClick={() => setForm(f => ({ ...f, cron: p.value }))}
-                      style={{ padding: '3px 10px', borderRadius: 20, border: `1px solid ${form.cron === p.value ? '#6366f1' : 'rgba(99,102,241,0.2)'}`, background: form.cron === p.value ? 'rgba(99,102,241,0.2)' : 'transparent', color: form.cron === p.value ? '#a5b4fc' : 'rgba(148,163,184,0.5)', fontSize: 11, cursor: 'pointer' }}>
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-                <input value={form.cron} onChange={e => setForm(f => ({ ...f, cron: e.target.value }))} placeholder="* * * * *"
-                  style={{ width: '100%', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, padding: '8px 12px', color: 'white', fontSize: 13, outline: 'none', boxSizing: 'border-box', fontFamily: 'JetBrains Mono, monospace' }} />
-                <p style={{ color: 'rgba(148,163,184,0.4)', fontSize: 11, margin: '4px 0 0' }}>Format: minute hour day month weekday</p>
-              </div>
-              <div style={{ gridColumn: '1/-1', display: 'flex', gap: 10 }}>
-                <motion.button type="submit" whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
-                  style={{ flex: 1, background: 'linear-gradient(135deg,#4338ca,#6366f1)', border: 'none', borderRadius: 8, padding: '9px 0', color: 'white', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
-                  Create Schedule
-                </motion.button>
-                <button type="button" onClick={() => setShowForm(false)}
-                  style={{ padding: '9px 18px', background: 'rgba(148,163,184,0.1)', border: '1px solid rgba(148,163,184,0.2)', borderRadius: 8, color: 'rgba(148,163,184,0.7)', fontSize: 13, cursor: 'pointer' }}>
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {schedules.length === 0 && !showForm && (
-        <p style={{ color: 'rgba(148,163,184,0.4)', fontSize: 13 }}>No schedules yet. Click "New Schedule" to automate your first task.</p>
-      )}
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {schedules.map(s => {
-          const ag = agentMap[s.agent_id]
-          return (
-            <div key={s.id} style={{ background: 'rgba(15,20,35,0.7)', border: `1px solid ${s.enabled ? 'rgba(99,102,241,0.2)' : 'rgba(148,163,184,0.08)'}`, borderRadius: 12, padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16 }}>
-              {ag && <AgentAvatar agent={ag} size={36} />}
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <span style={{ color: 'white', fontWeight: 600, fontSize: 14 }}>{s.title}</span>
-                  <span style={{ fontSize: 10, padding: '1px 7px', borderRadius: 20, background: 'rgba(99,102,241,0.15)', color: '#a5b4fc', fontFamily: 'JetBrains Mono, monospace' }}>{s.cron}</span>
-                  <span style={{ fontSize: 10, padding: '1px 7px', borderRadius: 20, background: 'rgba(148,163,184,0.1)', color: '#94a3b8' }}>{s.type}</span>
-                </div>
-                <p style={{ color: 'rgba(148,163,184,0.5)', fontSize: 12, margin: 0 }}>{ag?.name || s.agent_id} · {s.description.slice(0, 80)}</p>
-                {s.last_run && <p style={{ color: 'rgba(148,163,184,0.35)', fontSize: 11, margin: '3px 0 0' }}>Last run: {new Date(s.last_run).toLocaleString()}</p>}
-              </div>
-              <button onClick={() => toggleSchedule(s.id, s.enabled)}
-                style={{ padding: '6px 14px', borderRadius: 8, border: `1px solid ${s.enabled ? 'rgba(16,185,129,0.3)' : 'rgba(148,163,184,0.15)'}`, background: s.enabled ? 'rgba(16,185,129,0.1)' : 'rgba(148,163,184,0.05)', color: s.enabled ? '#10b981' : 'rgba(148,163,184,0.4)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
-                {s.enabled ? 'Active' : 'Paused'}
-              </button>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-// ── Root ───────────────────────────────────────────────────────────────────
-
-export default function Page() {
-  const [view, setView]               = useState('dashboard')
-  const [agents, setAgents]           = useState<Agent[]>([])
-  const [tasks, setTasks]             = useState<Task[]>([])
-  const [metrics, setMetrics]         = useState<Metrics | null>(null)
-  const [activity, setActivity]       = useState<LogEntry[]>([])
-  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null)
-  const [runAgent, setRunAgent]       = useState<Agent | null>(null)
-  const [messages, setMessages]       = useState<Message[]>([])
-  const [chatLoading, setChatLoading] = useState(false)
-  const [toasts, setToasts]           = useState<Toast[]>([])
-  const [showSearch, setShowSearch]   = useState(false)
-  const toastId = useRef(0)
-
-  function addToast(message: string, type: Toast['type'] = 'info') {
-    const id = ++toastId.current
-    setToasts(t => [...t, { id, message, type }])
-    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 4000)
-  }
-  // Poll data every 8s
-  const fetchAll = useCallback(async () => {
-    const [agRes, tkRes, meRes] = await Promise.all([
-      fetch('/api/agents'),
-      fetch('/api/tasks?limit=50'),
-      fetch('/api/metrics'),
-    ])
-    if (agRes.status === 401) { window.location.href = '/login'; return }
-    if (agRes.ok) setAgents(await agRes.json())
-    if (tkRes.ok) setTasks(await tkRes.json())
-    if (meRes.ok) { const d = await meRes.json(); setMetrics(d.totals); setActivity(d.recentActivity) }
-  }, [])
-
-  useEffect(() => {
-    fetchAll()
-    const id = setInterval(fetchAll, 8000)
-    return () => clearInterval(id)
-  }, [fetchAll])
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); setShowSearch(s => !s) }
-      if (e.key === 'Escape') setShowSearch(false)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
-
-  async function handleSend(text: string) {
-    const userMsg: Message = { role: 'user', content: text, ts: Date.now() }
-    const newMsgs = [...messages, userMsg]
-    setMessages(newMsgs)
-    setChatLoading(true)
-    try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: newMsgs.map(m => ({ role: m.role, content: m.content })) }),
-      })
-      const data = await res.json()
-      if (data.content) {
-        setMessages(m => [...m, { role: 'assistant', content: data.content, ts: Date.now() }])
-        if (data.toolsUsed?.length) addToast('Action completed: ' + data.toolsUsed.join(', '), 'success')
-      } else if (data.error) {
-        setMessages(m => [...m, { role: 'assistant', content: `⚠️ Error: ${data.error}`, ts: Date.now() }])
-      }
-    } catch (err: any) {
-      setMessages(m => [...m, { role: 'assistant', content: `⚠️ Network error: ${err.message}`, ts: Date.now() }])
-    } finally {
-      setChatLoading(false)
-    }
-  }
-
-  async function handleRunTask(data: any) {
-    const res = await fetch('/api/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    })
-    if (res.ok) addToast('Task dispatched: ' + data.title, 'success')
-    else addToast('Failed to dispatch task', 'error')
-    setTimeout(fetchAll, 1000)
-  }
-
-  async function handleLogout() {
-    await fetch('/api/auth/logout', { method: 'POST' })
-    window.location.href = '/login'
-  }
-
-  // Inject updated sparklines into selectedAgent
-  const liveSelectedAgent = selectedAgent ? agents.find(a => a.id === selectedAgent.id) || selectedAgent : null
-
-  function mainContent() {
-    if (liveSelectedAgent) return (
-      <AgentDetailView agent={liveSelectedAgent} onBack={() => setSelectedAgent(null)} onRunTask={a => setRunAgent(a)} />
-    )
-    switch (view) {
-      case 'dashboard': return <DashboardView agents={agents} metrics={metrics} activity={activity} onSelectAgent={a => { setSelectedAgent(a); setView('agents') }} />
-      case 'agents':    return (
-        <div style={{ padding: 24, height: '100%', overflowY: 'auto' }}>
-          <h1 style={{ color: 'white', fontWeight: 700, fontSize: 22, margin: '0 0 20px' }}>Agents</h1>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14 }}>
-            {agents.map(a => <AgentCard key={a.id} agent={a} onClick={() => setSelectedAgent(a)} />)}
-          </div>
-        </div>
-      )
-      case 'tasks':    return <TasksView tasks={tasks} agents={agents} />
-      case 'terminal': return <TerminalView agents={agents} metrics={metrics} />
-      case 'schedules': return <SchedulesView agents={agents} />
-      case 'settings': return <SettingsView />
-      default: return null
-    }
-  }
-
-  return (
-    <div style={{ display: 'flex', height: '100vh', background: '#080c14', color: 'white', fontFamily: 'Inter, sans-serif', overflow: 'hidden' }}>
-      {/* Grid bg */}
-      <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', backgroundImage: 'linear-gradient(rgba(99,102,241,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(99,102,241,0.03) 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
-
-      <Sidebar view={view} setView={v => { setView(v); setSelectedAgent(null) }} agents={agents} onLogout={handleLogout} onSearch={() => setShowSearch(true)} />
-
-      <div style={{ flex: 1, overflowY: 'auto', position: 'relative' }}>
-        <AnimatePresence mode="wait">
-          <motion.div key={liveSelectedAgent?.id || view} initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 }} transition={{ duration: 0.18 }} style={{ minHeight: '100%' }}>
-            {mainContent()}
-          </motion.div>
-        </AnimatePresence>
-      </div>
-
-      <ChatPanel messages={messages} onSend={handleSend} loading={chatLoading} />
-
-      <AnimatePresence>
-        {runAgent && <RunTaskModal agent={runAgent} onClose={() => setRunAgent(null)} onSubmit={handleRunTask} />}
-      </AnimatePresence>
-      <AnimatePresence>
-        {showSearch && <GlobalSearch onClose={() => setShowSearch(false)} onNavigate={(v, id) => { setView(v); setSelectedAgent(null) }} />}
-      </AnimatePresence>
-      <ToastContainer toasts={toasts} remove={id => setToasts(t => t.filter(x => x.id !== id))} />
-    </div>
-  )
-}
+              <span style={{ fontSize: 12, color: 'rgba(148,163,184,0.7)', wordBreak: 'break-word' }}>{log.message.slice(0, 120)}</sp
