@@ -12,6 +12,8 @@ const execAsync = promisify(exec)
 const client = new OpenAI({
   baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
   apiKey: process.env.OPENAI_API_KEY || '',
+  timeout: 60000,   // 60s per request — prevents silent hangs
+  maxRetries: 1,
 })
 const MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini'
 const AGENT_FILES_DIR = process.env.AGENT_FILES_DIR || path.join(process.cwd(), 'agent-files')
@@ -336,11 +338,25 @@ async function securityScan(agentId: string, taskId: number, description: string
 
 // ── Main task runner ───────────────────────────────────────────────────────
 
+const TASK_TIMEOUT_MS = 3 * 60 * 1000  // 3 minutes global cap per task
+
 async function runTask(taskId: number, agentId: string, type: string, description: string) {
   const db = getDb()
   db.prepare(`UPDATE tasks SET status='running', started_at=datetime('now') WHERE id=?`).run(taskId)
   updateAgent(agentId, { status: 'active', current_task: description.slice(0, 80) })
   addLog(taskId, agentId, 'info', `Task started: ${description.slice(0, 120)}`)
+
+  // Hard timeout: mark failed if entire task exceeds 3 minutes
+  const globalTimer = setTimeout(() => {
+    try {
+      const row = db.prepare(`SELECT status FROM tasks WHERE id=?`).get(taskId) as any
+      if (row?.status === 'running') {
+        db.prepare(`UPDATE tasks SET status='failed', completed_at=datetime('now'), error='Task timed out after 3 minutes' WHERE id=?`).run(taskId)
+        updateAgent(agentId, { status: 'idle', current_task: null, progress: 0 })
+        addLog(taskId, agentId, 'error', 'Task timed out after 3 minutes')
+      }
+    } catch {}
+  }, TASK_TIMEOUT_MS)
 
   let result = ''
   let tokensUsed = 0
@@ -451,6 +467,8 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
       }
     }
 
+    clearTimeout(globalTimer)
+
     // Save to DB
     db.prepare(`UPDATE tasks SET status='completed', completed_at=datetime('now'), result=?, tokens_used=? WHERE id=?`)
       .run(result.slice(0, 8000), tokensUsed, taskId)
@@ -467,9 +485,10 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
     saveMemory(agentId, memorySummary, taskId)
 
   } catch (err: any) {
+    clearTimeout(globalTimer)
     const msg = err.message || String(err)
     db.prepare(`UPDATE tasks SET status='failed', completed_at=datetime('now'), error=? WHERE id=?`).run(msg, taskId)
-    updateAgent(agentId, { status: 'error', current_task: null })
+    updateAgent(agentId, { status: 'idle', current_task: null, progress: 0 })
     addLog(taskId, agentId, 'error', `Task failed: ${msg}`)
   }
 }
@@ -482,11 +501,14 @@ export async function POST(req: NextRequest) {
 
   try {
     const { agent_id, title, description, type, priority } = await req.json()
-    if (!title || !description)
-      return NextResponse.json({ error: 'title and description are required' }, { status: 400 })
+    if (!title)
+      return NextResponse.json({ error: 'title is required' }, { status: 400 })
 
-    const task = createTask({ agent_id, title, description, type: type || 'general', priority: priority || 2, status: 'pending' })
-    runTask(task.id, agent_id || 'code', type || 'general', description).catch(console.error)
+    // Allow missing description — fall back to title so simple tasks like "hello" work
+    const effectiveDescription = (description || title).trim()
+
+    const task = createTask({ agent_id, title, description: effectiveDescription, type: type || 'general', priority: priority || 2, status: 'pending' })
+    runTask(task.id, agent_id || 'code', type || 'general', effectiveDescription).catch(console.error)
 
     return NextResponse.json({ ok: true, taskId: task.id, message: 'Task queued and running' })
   } catch (err: any) {
