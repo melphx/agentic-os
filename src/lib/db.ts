@@ -73,7 +73,7 @@ function initSchema(db: Database.Database) {
       agent_id TEXT REFERENCES agents(id),
       title TEXT NOT NULL,
       description TEXT,
-      type TEXT DEFAULT 'general' CHECK(type IN ('code','scrape','file','api','general')),
+      type TEXT DEFAULT 'general' CHECK(type IN ('code','scrape','file','api','general','browser','security','search')),
       status TEXT DEFAULT 'pending' CHECK(status IN ('pending','running','completed','failed','cancelled')),
       priority INTEGER DEFAULT 2 CHECK(priority IN (1,2,3)),
       result TEXT,
@@ -129,6 +129,36 @@ function initSchema(db: Database.Database) {
       ('email',     'Email Manager',   'EML', 'Inbox management and automated responses',        '#f43f5e', '#be123c'),
       ('security',  'Security Analyst','SEC', 'Vulnerability scanning and threat analysis',      '#a855f7', '#7c3aed');
   `)
+
+  // ── Migration: expand tasks.type CHECK constraint to include browser/security/search ──
+  // SQLite can't ALTER constraints, so we recreate the table preserving all data
+  try {
+    const typeCheck = db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'`).get() as { sql: string } | undefined
+    if (typeCheck && !typeCheck.sql.includes("'browser'")) {
+      db.exec(`
+        ALTER TABLE tasks RENAME TO tasks_old;
+        CREATE TABLE tasks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          agent_id TEXT REFERENCES agents(id),
+          title TEXT NOT NULL,
+          description TEXT,
+          type TEXT DEFAULT 'general' CHECK(type IN ('code','scrape','file','api','general','browser','security','search')),
+          status TEXT DEFAULT 'pending' CHECK(status IN ('pending','running','completed','failed','cancelled')),
+          priority INTEGER DEFAULT 2 CHECK(priority IN (1,2,3)),
+          result TEXT,
+          error TEXT,
+          tokens_used INTEGER DEFAULT 0,
+          created_at TEXT DEFAULT (datetime('now')),
+          started_at TEXT,
+          completed_at TEXT
+        );
+        INSERT INTO tasks SELECT * FROM tasks_old;
+        DROP TABLE tasks_old;
+      `)
+    }
+  } catch (e) {
+    // Migration already applied or not needed
+  }
 }
 
 // ── Typed helpers ──────────────────────────────────────────────────────────
