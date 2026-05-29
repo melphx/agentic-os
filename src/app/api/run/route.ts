@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
-import { getDb, updateAgent, addLog, recordMetric, createTask } from '@/lib/db'
+import { getDb, updateAgent, addLog, recordMetric, createTask, saveMemory, getMemory } from '@/lib/db'
 import { exec } from 'child_process'
 import { promisify } from 'util'
-import { readFileSync, writeFileSync, existsSync } from 'fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 import path from 'path'
 import OpenAI from 'openai'
 
@@ -13,8 +13,233 @@ const client = new OpenAI({
   baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
   apiKey: process.env.OPENAI_API_KEY || '',
 })
-
 const MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini'
+const AGENT_FILES_DIR = process.env.AGENT_FILES_DIR || path.join(process.cwd(), 'agent-files')
+
+// Ensure agent files dir exists
+if (!existsSync(AGENT_FILES_DIR)) mkdirSync(AGENT_FILES_DIR, { recursive: true })
+
+// ── GPT helper with memory injection ──────────────────────────────────────
+
+async function ask(agentId: string, systemPrompt: string, userPrompt: string, maxTokens = 2048) {
+  const memory = getMemory(agentId, 5)
+  const fullSystem = memory
+    ? `${systemPrompt}\n\nYour recent memory:\n${memory}`
+    : systemPrompt
+
+  const completion = await client.chat.completions.create({
+    model: MODEL,
+    max_completion_tokens: maxTokens,
+    messages: [
+      { role: 'system', content: fullSystem },
+      { role: 'user', content: userPrompt },
+    ],
+  })
+  return {
+    content: completion.choices[0].message.content || '',
+    tokens: completion.usage?.total_tokens || 0,
+  }
+}
+
+// ── Vision helper ──────────────────────────────────────────────────────────
+
+async function analyzeScreenshot(base64Image: string, prompt: string) {
+  const completion = await client.chat.completions.create({
+    model: 'gpt-4o', // vision requires gpt-4o
+    max_completion_tokens: 1024,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image_url', image_url: { url: `data:image/png;base64,${base64Image}` } },
+        { type: 'text', text: prompt },
+      ],
+    }],
+  })
+  return completion.choices[0].message.content || ''
+}
+
+// ── Web search via Tavily ──────────────────────────────────────────────────
+
+async function webSearch(query: string): Promise<string> {
+  const apiKey = process.env.TAVILY_API_KEY
+  if (!apiKey) return 'No TAVILY_API_KEY set. Add it to .env.local to enable web search.'
+  const res = await fetch('https://api.tavily.com/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_key: apiKey, query, max_results: 5, include_answer: true }),
+  })
+  const data = await res.json()
+  const results = (data.results || []).map((r: any, i: number) =>
+    `[${i + 1}] ${r.title}\n${r.url}\n${r.content?.slice(0, 300)}`
+  ).join('\n\n')
+  return data.answer ? `Answer: ${data.answer}\n\nSources:\n${results}` : results
+}
+
+// ── Playwright browser automation ─────────────────────────────────────────
+
+async function browserTask(agentId: number, taskId: number, description: string): Promise<{ result: string; tokens: number }> {
+  // Dynamically import playwright (optional dep)
+  let chromium: any
+  try {
+    const pw = await import('playwright')
+    chromium = pw.chromium
+  } catch {
+    return { result: 'Playwright not installed. Run: npx playwright install chromium', tokens: 0 }
+  }
+
+  addLog(taskId, String(agentId), 'info', 'Launching headless browser…')
+  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] })
+  const page = await browser.newPage()
+
+  let result = ''
+  let tokens = 0
+
+  try {
+    // Ask GPT to produce a step-by-step browser plan
+    const { content: plan, tokens: planTokens } = await ask(
+      String(agentId),
+      `You are a browser automation agent. Given a task, produce a JSON array of steps.
+Each step: { "action": "navigate|click|type|screenshot|extract|scroll|wait", "selector"?: "css", "value"?: "text or url", "description": "what this does" }
+Respond with ONLY the JSON array, no explanation.`,
+      description,
+      1024,
+    )
+    tokens += planTokens
+
+    let steps: any[] = []
+    try { steps = JSON.parse(plan.match(/\[[\s\S]*\]/)?.[0] || '[]') } catch {}
+    addLog(taskId, String(agentId), 'info', `Executing ${steps.length} browser steps`)
+
+    const outputs: string[] = []
+
+    for (const step of steps) {
+      try {
+        switch (step.action) {
+          case 'navigate':
+            await page.goto(step.value, { waitUntil: 'domcontentloaded', timeout: 15000 })
+            outputs.push(`Navigated to ${step.value}`)
+            break
+          case 'click':
+            await page.click(step.selector, { timeout: 5000 })
+            outputs.push(`Clicked ${step.selector}`)
+            break
+          case 'type':
+            await page.fill(step.selector, step.value, { timeout: 5000 })
+            outputs.push(`Typed "${step.value}" into ${step.selector}`)
+            break
+          case 'scroll':
+            await page.evaluate(() => window.scrollBy(0, 500))
+            outputs.push('Scrolled down')
+            break
+          case 'wait':
+            await page.waitForTimeout(parseInt(step.value) || 1000)
+            outputs.push(`Waited ${step.value}ms`)
+            break
+          case 'screenshot': {
+            const buf = await page.screenshot({ type: 'png', fullPage: false })
+            const b64 = buf.toString('base64')
+            // Save screenshot
+            const imgPath = path.join(AGENT_FILES_DIR, `screenshot-${Date.now()}.png`)
+            writeFileSync(imgPath, buf)
+            // Analyse with vision
+            const analysis = await analyzeScreenshot(b64, step.value || 'Describe what you see on this page')
+            tokens += 300 // rough vision token estimate
+            outputs.push(`Screenshot saved to ${imgPath}\nVision analysis: ${analysis}`)
+            break
+          }
+          case 'extract': {
+            const text = await page.evaluate(() => document.body.innerText)
+            const { content: summary, tokens: sumTokens } = await ask(
+              String(agentId),
+              'Extract and summarise the requested information from the page text.',
+              `Page text:\n${text.slice(0, 4000)}\n\nExtract: ${step.value || 'key information'}`,
+              512,
+            )
+            tokens += sumTokens
+            outputs.push(`Extracted: ${summary}`)
+            break
+          }
+        }
+        addLog(taskId, String(agentId), 'info', `✓ ${step.description || step.action}`)
+      } catch (stepErr: any) {
+        addLog(taskId, String(agentId), 'warn', `Step failed: ${step.description} — ${stepErr.message}`)
+        outputs.push(`⚠ ${step.description}: ${stepErr.message}`)
+      }
+    }
+
+    result = outputs.join('\n')
+  } finally {
+    await browser.close()
+  }
+
+  return { result, tokens }
+}
+
+// ── Security scanner ───────────────────────────────────────────────────────
+
+async function securityScan(agentId: string, taskId: number, description: string): Promise<{ result: string; tokens: number }> {
+  const outputs: string[] = []
+
+  // Determine what to scan from description
+  const targetMatch = description.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|localhost|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/)
+  const target = targetMatch?.[0] || 'localhost'
+
+  addLog(taskId, agentId, 'info', `Starting security scan on ${target}`)
+
+  // nmap port scan
+  try {
+    addLog(taskId, agentId, 'info', 'Running nmap port scan…')
+    const { stdout } = await execAsync(`nmap -sV --top-ports 100 -T4 ${target} 2>&1`, { timeout: 60000 })
+    outputs.push(`NMAP RESULTS:\n${stdout}`)
+    addLog(taskId, agentId, 'info', 'nmap scan complete')
+  } catch (e: any) {
+    outputs.push(`nmap: ${e.message} (install with: sudo apt install nmap)`)
+  }
+
+  // Lynis system audit (localhost only)
+  if (target === 'localhost' || target === '127.0.0.1') {
+    try {
+      addLog(taskId, agentId, 'info', 'Running Lynis system audit…')
+      const { stdout } = await execAsync('lynis audit system --quick --no-colors 2>&1 | tail -50', { timeout: 120000 })
+      outputs.push(`LYNIS AUDIT:\n${stdout}`)
+      addLog(taskId, agentId, 'info', 'Lynis audit complete')
+    } catch (e: any) {
+      outputs.push(`lynis: ${e.message} (install with: sudo apt install lynis)`)
+    }
+
+    // Check open ports
+    try {
+      const { stdout } = await execAsync('ss -tlnp 2>&1')
+      outputs.push(`OPEN PORTS:\n${stdout}`)
+    } catch {}
+
+    // Check failed logins
+    try {
+      const { stdout } = await execAsync('grep "Failed password" /var/log/auth.log 2>/dev/null | tail -20 || echo "No auth.log access"')
+      outputs.push(`FAILED LOGINS:\n${stdout}`)
+    } catch {}
+
+    // Check for outdated packages
+    try {
+      const { stdout } = await execAsync('apt list --upgradable 2>/dev/null | head -20')
+      outputs.push(`UPGRADABLE PACKAGES:\n${stdout}`)
+    } catch {}
+  }
+
+  const rawOutput = outputs.join('\n\n')
+
+  // Ask GPT to summarise findings and give recommendations
+  const { content: summary, tokens } = await ask(
+    agentId,
+    'You are a security analyst. Analyse the scan results and provide: 1) Critical findings, 2) Medium risk issues, 3) Recommendations. Be concise and actionable.',
+    `Scan target: ${target}\n\nRaw results:\n${rawOutput.slice(0, 6000)}`,
+    1024,
+  )
+
+  return { result: `${summary}\n\n---\nRAW OUTPUT:\n${rawOutput.slice(0, 3000)}`, tokens }
+}
+
+// ── Main task runner ───────────────────────────────────────────────────────
 
 async function runTask(taskId: number, agentId: string, type: string, description: string) {
   const db = getDb()
@@ -27,17 +252,36 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
 
   try {
     switch (type) {
+      case 'browser': {
+        const out = await browserTask(Number(agentId), taskId, description)
+        result = out.result; tokensUsed = out.tokens
+        break
+      }
+
+      case 'security': {
+        const out = await securityScan(agentId, taskId, description)
+        result = out.result; tokensUsed = out.tokens
+        break
+      }
+
+      case 'search': {
+        addLog(taskId, agentId, 'info', 'Searching the web…')
+        const searchResults = await webSearch(description)
+        const { content, tokens } = await ask(agentId,
+          'You are a research agent. Synthesise the search results into a clear, well-structured answer.',
+          `Query: ${description}\n\nSearch results:\n${searchResults}`,
+        )
+        result = content; tokensUsed = tokens
+        addLog(taskId, agentId, 'success', result.slice(0, 300))
+        break
+      }
+
       case 'code': {
-        const completion = await client.chat.completions.create({
-          model: MODEL,
-          messages: [
-            { role: 'system', content: 'You are a code execution agent. Respond with ONLY the shell command or Python script to run, no explanation, no markdown fences.' },
-            { role: 'user', content: description },
-          ],
-          max_completion_tokens: 1024,
-        })
-        const code = completion.choices[0].message.content || ''
-        tokensUsed = completion.usage?.total_tokens || 0
+        const { content: code, tokens: planTokens } = await ask(agentId,
+          'You are a code execution agent. Respond with ONLY the shell command or Python script to run, no explanation, no markdown fences.',
+          description, 1024,
+        )
+        tokensUsed += planTokens
         addLog(taskId, agentId, 'info', `Generated code:\n${code}`)
         const { stdout, stderr } = await execAsync(`timeout 30 bash -c ${JSON.stringify(code)}`)
         result = stdout || stderr || '(no output)'
@@ -53,35 +297,24 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
         const response = await fetch(url, { signal: AbortSignal.timeout(15000) })
         const html = await response.text()
         const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 4000)
-        const completion = await client.chat.completions.create({
-          model: MODEL,
-          messages: [
-            { role: 'system', content: 'You are a web research agent. Summarise the key information from the provided page content.' },
-            { role: 'user', content: `URL: ${url}\n\nContent:\n${text}\n\nTask: ${description}` },
-          ],
-          max_completion_tokens: 1024,
-        })
-        result = completion.choices[0].message.content || ''
-        tokensUsed = completion.usage?.total_tokens || 0
+        const { content, tokens } = await ask(agentId,
+          'You are a web research agent. Summarise the key information from the provided page content.',
+          `URL: ${url}\n\nContent:\n${text}\n\nTask: ${description}`,
+        )
+        result = content; tokensUsed = tokens
         addLog(taskId, agentId, 'success', result.slice(0, 500))
         break
       }
 
       case 'file': {
-        const completion = await client.chat.completions.create({
-          model: MODEL,
-          messages: [
-            { role: 'system', content: 'You are a file management agent. Complete the task and respond with a JSON object: { "action": "read|write|list", "path": "...", "content": "..." }' },
-            { role: 'user', content: description },
-          ],
-          max_completion_tokens: 2048,
-        })
-        tokensUsed = completion.usage?.total_tokens || 0
-        const raw = completion.choices[0].message.content || '{}'
+        const { content: raw, tokens } = await ask(agentId,
+          'You are a file management agent. Complete the task and respond with a JSON object: { "action": "read|write|list", "path": "...", "content": "..." }',
+          description, 2048,
+        )
+        tokensUsed = tokens
         let instruction: any = {}
         try { instruction = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || '{}') } catch {}
-        const ALLOWED_DIR = process.env.AGENT_FILES_DIR || path.join(process.cwd(), 'agent-files')
-        const filePath = path.join(ALLOWED_DIR, path.basename(instruction.path || 'output.txt'))
+        const filePath = path.join(AGENT_FILES_DIR, path.basename(instruction.path || 'output.txt'))
         if (instruction.action === 'write') {
           writeFileSync(filePath, instruction.content || '')
           result = `Wrote ${filePath}`
@@ -95,16 +328,11 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
       }
 
       case 'api': {
-        const completion = await client.chat.completions.create({
-          model: MODEL,
-          messages: [
-            { role: 'system', content: 'You are an API integration agent. Respond with ONLY a JSON object: { "url": "...", "method": "GET|POST", "headers": {}, "body": {} }' },
-            { role: 'user', content: description },
-          ],
-          max_completion_tokens: 512,
-        })
-        tokensUsed = completion.usage?.total_tokens || 0
-        const raw = completion.choices[0].message.content || '{}'
+        const { content: raw, tokens } = await ask(agentId,
+          'You are an API integration agent. Respond with ONLY a JSON object: { "url": "...", "method": "GET|POST", "headers": {}, "body": {} }',
+          description, 512,
+        )
+        tokensUsed = tokens
         let apiReq: any = {}
         try { apiReq = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || '{}') } catch {}
         const resp = await fetch(apiReq.url, {
@@ -119,25 +347,29 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
       }
 
       default: {
-        const completion = await client.chat.completions.create({
-          model: MODEL,
-          messages: [
-            { role: 'system', content: 'You are a general-purpose AI agent. Complete the task thoroughly.' },
-            { role: 'user', content: description },
-          ],
-          max_completion_tokens: 2048,
-        })
-        result = completion.choices[0].message.content || ''
-        tokensUsed = completion.usage?.total_tokens || 0
+        const { content, tokens } = await ask(agentId,
+          'You are a general-purpose AI agent. Complete the task thoroughly.',
+          description,
+        )
+        result = content; tokensUsed = tokens
         addLog(taskId, agentId, 'success', result.slice(0, 500))
       }
     }
 
+    // Save to DB
     db.prepare(`UPDATE tasks SET status='completed', completed_at=datetime('now'), result=?, tokens_used=? WHERE id=?`)
       .run(result.slice(0, 8000), tokensUsed, taskId)
     db.prepare(`UPDATE agents SET tasks_completed=tasks_completed+1, tokens_used=tokens_used+?, status='idle', current_task=NULL, updated_at=datetime('now') WHERE id=?`)
       .run(tokensUsed, agentId)
     recordMetric(agentId, 'tokens', tokensUsed)
+
+    // Save memory summary
+    const { content: memorySummary } = await ask(agentId,
+      'Summarise what was just accomplished in 1-2 sentences for future memory.',
+      `Task: ${description}\nResult: ${result.slice(0, 500)}`,
+      100,
+    ).catch(() => ({ content: description.slice(0, 100) }))
+    saveMemory(agentId, memorySummary, taskId)
 
   } catch (err: any) {
     const msg = err.message || String(err)
@@ -146,6 +378,8 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
     addLog(taskId, agentId, 'error', `Task failed: ${msg}`)
   }
 }
+
+// ── Route handler ──────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
   const { error } = await requireAuth(req)

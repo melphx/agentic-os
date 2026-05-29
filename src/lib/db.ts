@@ -47,6 +47,27 @@ function initSchema(db: Database.Database) {
       updated_at TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS agent_memory (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      agent_id TEXT REFERENCES agents(id),
+      summary TEXT NOT NULL,
+      task_id INTEGER REFERENCES tasks(id),
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS schedules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      agent_id TEXT REFERENCES agents(id),
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      type TEXT DEFAULT 'general',
+      cron TEXT NOT NULL,
+      enabled INTEGER DEFAULT 1,
+      last_run TEXT,
+      next_run TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS tasks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       agent_id TEXT REFERENCES agents(id),
@@ -142,6 +163,52 @@ export interface TaskLog {
   level: 'info' | 'warn' | 'error' | 'success'
   message: string
   created_at: string
+}
+
+export function saveMemory(agentId: string, summary: string, taskId?: number) {
+  getDb().prepare(`
+    INSERT INTO agent_memory (agent_id, summary, task_id) VALUES (?, ?, ?)
+  `).run(agentId, summary, taskId ?? null)
+  // Keep only the last 20 memories per agent
+  getDb().prepare(`
+    DELETE FROM agent_memory WHERE agent_id = ? AND id NOT IN (
+      SELECT id FROM agent_memory WHERE agent_id = ? ORDER BY created_at DESC LIMIT 20
+    )
+  `).run(agentId, agentId)
+}
+
+export function getMemory(agentId: string, limit = 5): string {
+  const rows = getDb().prepare(`
+    SELECT summary FROM agent_memory WHERE agent_id = ?
+    ORDER BY created_at DESC LIMIT ?
+  `).all(agentId, limit) as { summary: string }[]
+  if (!rows.length) return ''
+  return rows.reverse().map((r, i) => `[Memory ${i + 1}] ${r.summary}`).join('\n')
+}
+
+export interface Schedule {
+  id: number; agent_id: string; title: string; description: string
+  type: string; cron: string; enabled: number
+  last_run: string | null; next_run: string | null; created_at: string
+}
+
+export function getSchedules(): Schedule[] {
+  return getDb().prepare('SELECT * FROM schedules ORDER BY created_at DESC').all() as Schedule[]
+}
+
+export function createSchedule(data: Omit<Schedule, 'id' | 'created_at' | 'last_run' | 'next_run'>): Schedule {
+  const info = getDb().prepare(`
+    INSERT INTO schedules (agent_id, title, description, type, cron, enabled)
+    VALUES (@agent_id, @title, @description, @type, @cron, @enabled)
+  `).run(data)
+  return getDb().prepare('SELECT * FROM schedules WHERE id = ?').get(info.lastInsertRowid) as Schedule
+}
+
+export function updateSchedule(id: number, fields: Partial<Schedule>) {
+  const allowed = ['enabled', 'last_run', 'next_run']
+  const updates = Object.entries(fields).filter(([k]) => allowed.includes(k)).map(([k]) => `${k} = @${k}`).join(', ')
+  if (!updates) return
+  getDb().prepare(`UPDATE schedules SET ${updates} WHERE id = @id`).run({ ...fields, id })
 }
 
 export function getAgents(): Agent[] {
