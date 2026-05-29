@@ -9,13 +9,12 @@ import OpenAI from 'openai'
 
 const execAsync = promisify(exec)
 
-const ollamaClient = new OpenAI({
-  baseURL: process.env.OLLAMA_BASE_URL || 'http://localhost:11434/v1',
-  apiKey: 'ollama',
+const client = new OpenAI({
+  baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
+  apiKey: process.env.OPENAI_API_KEY || '',
 })
-const HERMES_MODEL = process.env.HERMES_MODEL || 'nous-hermes2'
 
-// ── Task runner ────────────────────────────────────────────────────────────
+const MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini'
 
 async function runTask(taskId: number, agentId: string, type: string, description: string) {
   const db = getDb()
@@ -29,20 +28,17 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
   try {
     switch (type) {
       case 'code': {
-        // Use Hermes to generate + execute code
-        const completion = await ollamaClient.chat.completions.create({
-          model: HERMES_MODEL,
+        const completion = await client.chat.completions.create({
+          model: MODEL,
           messages: [
             { role: 'system', content: 'You are a code execution agent. Respond with ONLY the shell command or Python script to run, no explanation, no markdown fences.' },
-            { role: 'user',   content: description },
+            { role: 'user', content: description },
           ],
           max_tokens: 1024,
         })
         const code = completion.choices[0].message.content || ''
         tokensUsed = completion.usage?.total_tokens || 0
         addLog(taskId, agentId, 'info', `Generated code:\n${code}`)
-
-        // Run in sandbox (bash -c, timeout 30s)
         const { stdout, stderr } = await execAsync(`timeout 30 bash -c ${JSON.stringify(code)}`)
         result = stdout || stderr || '(no output)'
         addLog(taskId, agentId, 'success', `Output:\n${result.slice(0, 2000)}`)
@@ -50,22 +46,18 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
       }
 
       case 'scrape': {
-        // Extract URL from description
         const urlMatch = description.match(/https?:\/\/[^\s]+/)
         if (!urlMatch) throw new Error('No URL found in task description')
         const url = urlMatch[0]
         addLog(taskId, agentId, 'info', `Fetching ${url}`)
         const response = await fetch(url, { signal: AbortSignal.timeout(15000) })
         const html = await response.text()
-        // Strip tags for a basic text extract
         const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 4000)
-
-        // Ask Hermes to summarise
-        const completion = await ollamaClient.chat.completions.create({
-          model: HERMES_MODEL,
+        const completion = await client.chat.completions.create({
+          model: MODEL,
           messages: [
             { role: 'system', content: 'You are a web research agent. Summarise the key information from the provided page content.' },
-            { role: 'user',   content: `URL: ${url}\n\nContent:\n${text}\n\nTask: ${description}` },
+            { role: 'user', content: `URL: ${url}\n\nContent:\n${text}\n\nTask: ${description}` },
           ],
           max_tokens: 1024,
         })
@@ -76,11 +68,11 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
       }
 
       case 'file': {
-        const completion = await ollamaClient.chat.completions.create({
-          model: HERMES_MODEL,
+        const completion = await client.chat.completions.create({
+          model: MODEL,
           messages: [
             { role: 'system', content: 'You are a file management agent. Complete the task and respond with a JSON object: { "action": "read|write|list", "path": "...", "content": "..." }' },
-            { role: 'user',   content: description },
+            { role: 'user', content: description },
           ],
           max_tokens: 2048,
         })
@@ -88,10 +80,8 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
         const raw = completion.choices[0].message.content || '{}'
         let instruction: any = {}
         try { instruction = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || '{}') } catch {}
-
         const ALLOWED_DIR = process.env.AGENT_FILES_DIR || path.join(process.cwd(), 'agent-files')
         const filePath = path.join(ALLOWED_DIR, path.basename(instruction.path || 'output.txt'))
-
         if (instruction.action === 'write') {
           writeFileSync(filePath, instruction.content || '')
           result = `Wrote ${filePath}`
@@ -105,38 +95,35 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
       }
 
       case 'api': {
-        // Let Hermes generate a fetch call, execute it server-side
-        const completion = await ollamaClient.chat.completions.create({
-          model: HERMES_MODEL,
+        const completion = await client.chat.completions.create({
+          model: MODEL,
           messages: [
             { role: 'system', content: 'You are an API integration agent. Respond with ONLY a JSON object: { "url": "...", "method": "GET|POST", "headers": {}, "body": {} }' },
-            { role: 'user',   content: description },
+            { role: 'user', content: description },
           ],
           max_tokens: 512,
         })
         tokensUsed = completion.usage?.total_tokens || 0
         const raw = completion.choices[0].message.content || '{}'
-        let req: any = {}
-        try { req = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || '{}') } catch {}
-
-        const resp = await fetch(req.url, {
-          method: req.method || 'GET',
-          headers: req.headers || {},
-          body: req.body ? JSON.stringify(req.body) : undefined,
+        let apiReq: any = {}
+        try { apiReq = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || '{}') } catch {}
+        const resp = await fetch(apiReq.url, {
+          method: apiReq.method || 'GET',
+          headers: apiReq.headers || {},
+          body: apiReq.body ? JSON.stringify(apiReq.body) : undefined,
           signal: AbortSignal.timeout(15000),
         })
-        const data = await resp.text()
-        result = data.slice(0, 4000)
-        addLog(taskId, agentId, 'success', `API response (${resp.status}):\n${result.slice(0,500)}`)
+        result = (await resp.text()).slice(0, 4000)
+        addLog(taskId, agentId, 'success', `API response (${resp.status}):\n${result.slice(0, 500)}`)
         break
       }
 
       default: {
-        const completion = await ollamaClient.chat.completions.create({
-          model: HERMES_MODEL,
+        const completion = await client.chat.completions.create({
+          model: MODEL,
           messages: [
             { role: 'system', content: 'You are a general-purpose AI agent. Complete the task thoroughly.' },
-            { role: 'user',   content: description },
+            { role: 'user', content: description },
           ],
           max_tokens: 2048,
         })
@@ -160,8 +147,6 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
   }
 }
 
-// ── Route handler ──────────────────────────────────────────────────────────
-
 export async function POST(req: NextRequest) {
   const { error } = await requireAuth(req)
   if (error) return error
@@ -172,8 +157,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'title and description are required' }, { status: 400 })
 
     const task = createTask({ agent_id, title, description, type: type || 'general', priority: priority || 2, status: 'pending' })
-
-    // Run async — don't await so the response returns immediately
     runTask(task.id, agent_id || 'code', type || 'general', description).catch(console.error)
 
     return NextResponse.json({ ok: true, taskId: task.id, message: 'Task queued and running' })

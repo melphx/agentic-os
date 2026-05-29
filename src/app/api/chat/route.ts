@@ -3,12 +3,12 @@ import OpenAI from 'openai'
 import { requireAuth } from '@/lib/auth'
 import { getDb } from '@/lib/db'
 
-const ollamaClient = new OpenAI({
-  baseURL: process.env.OLLAMA_BASE_URL || 'http://localhost:11434/v1',
-  apiKey: 'ollama',
+const client = new OpenAI({
+  baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
+  apiKey: process.env.OPENAI_API_KEY || '',
 })
 
-const HERMES_MODEL = process.env.HERMES_MODEL || 'nous-hermes2'
+const MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini'
 
 const SYSTEM_PROMPT = [
   'You are the AI brain powering Claude OS — a production mission control dashboard for managing AI agents.',
@@ -24,8 +24,8 @@ export async function POST(req: NextRequest) {
   try {
     const { messages } = await req.json()
 
-    const response = await ollamaClient.chat.completions.create({
-      model: HERMES_MODEL,
+    const response = await client.chat.completions.create({
+      model: MODEL,
       max_tokens: 2048,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
@@ -36,7 +36,6 @@ export async function POST(req: NextRequest) {
     const content = response.choices[0].message.content || '(No response)'
     const tokensUsed = response.usage?.total_tokens || 0
 
-    // Persist to DB
     const db = getDb()
     const lastUser = [...messages].reverse().find((m: any) => m.role === 'user')
     if (lastUser) {
@@ -44,7 +43,7 @@ export async function POST(req: NextRequest) {
     }
     db.prepare('INSERT INTO chat_messages (role, content, tokens_used) VALUES (?, ?, ?)').run('assistant', content, tokensUsed)
 
-    return NextResponse.json({ content, tokensUsed, model: HERMES_MODEL })
+    return NextResponse.json({ content, tokensUsed, model: MODEL })
   } catch (err: any) {
     console.error('[chat/route]', err)
     return NextResponse.json({ error: err.message || 'Failed to get a response.' }, { status: 500 })

@@ -320,7 +320,7 @@ function ChatPanel({ messages, onSend, loading }: { messages: Message[]; onSend:
         <div style={{ width: 28, height: 28, borderRadius: 8, background: 'linear-gradient(135deg,#6366f1,#a855f7)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, boxShadow: '0 0 12px rgba(99,102,241,0.4)' }}>⬡</div>
         <div>
           <div style={{ color: 'white', fontWeight: 600, fontSize: 13 }}>Hermes</div>
-          <div style={{ color: 'rgba(148,163,184,0.5)', fontSize: 11 }}>nous-hermes2 · Ollama</div>
+          <div style={{ color: 'rgba(148,163,184,0.5)', fontSize: 11 }}>OpenAI · gpt-4o-mini</div>
         </div>
         {loading && <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }} style={{ marginLeft: 'auto' }}><RefreshCw size={14} color="#6366f1" /></motion.div>}
       </div>
@@ -476,7 +476,7 @@ function TerminalView({ agents, metrics }: { agents: Agent[]; metrics: Metrics |
         lines.push(`  completed=${metrics?.tasks_completed||0}  running=${metrics?.tasks_running||0}  pending=${metrics?.tasks_pending||0}  failed=${metrics?.tasks_failed||0}`)
         break
       case 'version':
-        lines.push('  Claude OS v2.0.0 · Next.js 14 · SQLite · Hermes/Ollama · JWT Auth')
+        lines.push('  Claude OS v2.0.0 · Next.js 14 · SQLite · OpenAI · JWT Auth')
         break
       case 'clear':
         setHistory(['⬡ Terminal cleared.', '']); return
@@ -506,13 +506,13 @@ function TerminalView({ agents, metrics }: { agents: Agent[]; metrics: Metrics |
 // ── Settings View ──────────────────────────────────────────────────────────
 
 function SettingsView() {
-  const [ollamaUrl, setOllamaUrl] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('ollamaUrl') || 'http://localhost:11434/v1' : '')
-  const [model, setModel]         = useState(() => typeof window !== 'undefined' ? localStorage.getItem('hermesModel') || 'nous-hermes2' : '')
+  const [openaiUrl, setOpenaiUrl] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('openaiUrl') || 'https://api.openai.com/v1' : '')
+  const [model, setModel] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('openaiModel') || 'gpt-4o-mini' : '')
   const [saved, setSaved]         = useState(false)
 
   function save() {
-    localStorage.setItem('ollamaUrl', ollamaUrl)
-    localStorage.setItem('hermesModel', model)
+    localStorage.setItem('openaiUrl', openaiUrl)
+    localStorage.setItem('openaiModel', model)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
@@ -522,8 +522,8 @@ function SettingsView() {
       <h1 style={{ color: 'white', fontWeight: 700, fontSize: 22, margin: '0 0 24px' }}>Settings</h1>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
         {[
-          { label: 'OLLAMA BASE URL', value: ollamaUrl, set: setOllamaUrl, placeholder: 'http://localhost:11434/v1' },
-          { label: 'HERMES MODEL', value: model, set: setModel, placeholder: 'nous-hermes2' },
+          { label: 'OPENAI BASE URL', value: openaiUrl, set: setOpenaiUrl, placeholder: 'https://api.openai.com/v1' },
+          { label: 'MODEL', value: model, set: setModel, placeholder: 'gpt-4o-mini' },
         ].map(f => (
           <div key={f.label} style={{ background: 'rgba(15,20,35,0.7)', border: '1px solid rgba(99,102,241,0.12)', borderRadius: 12, padding: '16px 18px' }}>
             <label style={{ display: 'block', fontSize: 11, color: 'rgba(148,163,184,0.6)', fontWeight: 600, letterSpacing: '0.06em', marginBottom: 8 }}>{f.label}</label>
