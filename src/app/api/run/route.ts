@@ -34,7 +34,7 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
             { role: 'system', content: 'You are a code execution agent. Respond with ONLY the shell command or Python script to run, no explanation, no markdown fences.' },
             { role: 'user', content: description },
           ],
-          max_tokens: 1024,
+          max_completion_tokens: 1024,
         })
         const code = completion.choices[0].message.content || ''
         tokensUsed = completion.usage?.total_tokens || 0
@@ -59,7 +59,7 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
             { role: 'system', content: 'You are a web research agent. Summarise the key information from the provided page content.' },
             { role: 'user', content: `URL: ${url}\n\nContent:\n${text}\n\nTask: ${description}` },
           ],
-          max_tokens: 1024,
+          max_completion_tokens: 1024,
         })
         result = completion.choices[0].message.content || ''
         tokensUsed = completion.usage?.total_tokens || 0
@@ -74,7 +74,7 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
             { role: 'system', content: 'You are a file management agent. Complete the task and respond with a JSON object: { "action": "read|write|list", "path": "...", "content": "..." }' },
             { role: 'user', content: description },
           ],
-          max_tokens: 2048,
+          max_completion_tokens: 2048,
         })
         tokensUsed = completion.usage?.total_tokens || 0
         const raw = completion.choices[0].message.content || '{}'
@@ -101,7 +101,7 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
             { role: 'system', content: 'You are an API integration agent. Respond with ONLY a JSON object: { "url": "...", "method": "GET|POST", "headers": {}, "body": {} }' },
             { role: 'user', content: description },
           ],
-          max_tokens: 512,
+          max_completion_tokens: 512,
         })
         tokensUsed = completion.usage?.total_tokens || 0
         const raw = completion.choices[0].message.content || '{}'
@@ -125,7 +125,7 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
             { role: 'system', content: 'You are a general-purpose AI agent. Complete the task thoroughly.' },
             { role: 'user', content: description },
           ],
-          max_tokens: 2048,
+          max_completion_tokens: 2048,
         })
         result = completion.choices[0].message.content || ''
         tokensUsed = completion.usage?.total_tokens || 0
