@@ -277,4 +277,13 @@ export async function POST(req: NextRequest) {
 
     // Persist to DB
     const db = getDb()
-    const lastUser = [...messages].reverse().find((m: any) => m.role === '
+    const lastUser = [...messages].reverse().find((m: any) => m.role === 'user')
+    if (lastUser) db.prepare('INSERT INTO chat_messages (role, content) VALUES (?, ?)').run('user', lastUser.content)
+    db.prepare('INSERT INTO chat_messages (role, content, tokens_used) VALUES (?, ?, ?)').run('assistant', content, totalTokens)
+
+    return NextResponse.json({ content, tokensUsed: totalTokens, model: MODEL, toolsUsed: assistantMessage.tool_calls?.map(tc => tc.function.name) || [] })
+  } catch (err: any) {
+    console.error('[chat/route]', err)
+    return NextResponse.json({ error: err.message || 'Failed to get a response.' }, { status: 500 })
+  }
+}
