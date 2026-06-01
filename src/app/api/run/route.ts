@@ -123,7 +123,7 @@ async function ask(agentId: string, systemPrompt: string, userPrompt: string, ma
       reply = completion.choices[0].message.content || ''
       roundTokens = completion.usage?.total_tokens || 0
     }
-    totalTokens += roundTokens''
+    totalTokens += roundTokens
 
     // Check if agent wants to call an integration
     const callMatch = reply.match(/\{\{CALL:([^:]+):([\s\S]+?)\}\}/)
