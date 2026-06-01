@@ -7,7 +7,7 @@ const client = new OpenAI({
   baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
   apiKey: process.env.OPENAI_API_KEY || '',
 })
-const MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini'
+const MODEL = process.env.OPENAI_MODEL || 'gpt-5.4'
 
 const SYSTEM_PROMPT = `You are the AI brain of Claude OS — a production mission control dashboard for managing AI agents.
 You have full control over the system. When users ask you to do something, USE THE AVAILABLE TOOLS to actually do it.
@@ -277,13 +277,4 @@ export async function POST(req: NextRequest) {
 
     // Persist to DB
     const db = getDb()
-    const lastUser = [...messages].reverse().find((m: any) => m.role === 'user')
-    if (lastUser) db.prepare('INSERT INTO chat_messages (role, content) VALUES (?, ?)').run('user', lastUser.content)
-    db.prepare('INSERT INTO chat_messages (role, content, tokens_used) VALUES (?, ?, ?)').run('assistant', content, totalTokens)
-
-    return NextResponse.json({ content, tokensUsed: totalTokens, model: MODEL, toolsUsed: assistantMessage.tool_calls?.map(tc => tc.function.name) || [] })
-  } catch (err: any) {
-    console.error('[chat/route]', err)
-    return NextResponse.json({ error: err.message || 'Failed to get a response.' }, { status: 500 })
-  }
-}
+    const lastUser = [...messages].reverse().find((m: any) => m.role === '

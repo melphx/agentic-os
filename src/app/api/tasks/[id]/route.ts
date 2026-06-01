@@ -40,7 +40,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     // Log the cancellation
     db.prepare(
       `INSERT INTO task_logs (task_id, agent_id, level, message) VALUES (?, ?, 'warn', 'Task cancelled by user')`
-    ).run(id, task.agent_id || '')
+    ).run(id, task.agent_id || null)
 
     return NextResponse.json({ ok: true })
   }

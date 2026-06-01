@@ -289,10 +289,14 @@ export function createTask(data: Omit<Task, 'id' | 'created_at' | 'started_at' |
   return getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(info.lastInsertRowid) as Task
 }
 
-export function addLog(taskId: number, agentId: string, level: TaskLog['level'], message: string) {
-  getDb().prepare(`
-    INSERT INTO task_logs (task_id, agent_id, level, message) VALUES (?, ?, ?, ?)
-  `).run(taskId, agentId, level, message)
+export function addLog(taskId: number, agentId: string | null, level: TaskLog['level'], message: string) {
+  try {
+    // Use null if agentId is empty/missing to avoid FK constraint failures
+    const safeAgentId = agentId || null
+    getDb().prepare(`
+      INSERT INTO task_logs (task_id, agent_id, level, message) VALUES (?, ?, ?, ?)
+    `).run(taskId, safeAgentId, level, message)
+  } catch { /* never let logging crash the task */ }
 }
 
 export function getMetricHistory(agentId: string, metric: string, limit = 12): number[] {

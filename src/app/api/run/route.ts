@@ -15,7 +15,7 @@ const client = new OpenAI({
   timeout: 60000,   // 60s per request — prevents silent hangs
   maxRetries: 1,
 })
-const MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini'
+const MODEL = process.env.OPENAI_MODEL || 'gpt-5.4'
 const AGENT_FILES_DIR = process.env.AGENT_FILES_DIR || path.join(process.cwd(), 'agent-files')
 
 // Ensure agent files dir exists
@@ -58,8 +58,10 @@ async function ask(agentId: string, systemPrompt: string, userPrompt: string, ma
   // Use custom prompt if set, otherwise use provided systemPrompt
   const baseSystem = customPromptCache[agentId] || systemPrompt
   let fullSystem  = baseSystem
-  if (knowledge) fullSystem += `\n\n--- Uploaded Knowledge Base ---\n${knowledge}\n--- End Knowledge Base ---`
-  if (memory)    fullSystem += `\n\nYour recent memory:\n${memory}`
+  if (knowledge) {
+    fullSystem += `\n\n=== AGENT KNOWLEDGE BASE ===\n${knowledge}\n=== END KNOWLEDGE BASE ===\nAlways reference the above knowledge when relevant to the task.`
+  }
+  if (memory)    fullSystem += `\n\nRecent memory:\n${memory}`
 
   const completion = await client.chat.completions.create({
     model: MODEL,
@@ -79,7 +81,7 @@ async function ask(agentId: string, systemPrompt: string, userPrompt: string, ma
 
 async function analyzeScreenshot(base64Image: string, prompt: string) {
   const completion = await client.chat.completions.create({
-    model: 'gpt-4o', // vision requires gpt-4o
+    model: MODEL, // use configured model
     max_completion_tokens: 1024,
     messages: [{
       role: 'user',
@@ -476,19 +478,19 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
       .run(tokensUsed, agentId)
     recordMetric(agentId, 'tokens', tokensUsed)
 
-    // Save memory summary
-    const { content: memorySummary } = await ask(agentId,
-      'Summarise what was just accomplished in 1-2 sentences for future memory.',
-      `Task: ${description}\nResult: ${result.slice(0, 500)}`,
-      100,
-    ).catch(() => ({ content: description.slice(0, 100) }))
-    saveMemory(agentId, memorySummary, taskId)
+    // Save memory summary — fire and forget, don't block task completion
+    ask(agentId,
+      'In one sentence, summarise what was just done.',
+      `Task: ${description}\nResult: ${result.slice(0, 300)}`,
+      60,
+    ).then(({ content }) => saveMemory(agentId, content, taskId))
+      .catch(() => saveMemory(agentId, description.slice(0, 100), taskId))
 
   } catch (err: any) {
     clearTimeout(globalTimer)
     const msg = err.message || String(err)
-    db.prepare(`UPDATE tasks SET status='failed', completed_at=datetime('now'), error=? WHERE id=?`).run(msg, taskId)
-    updateAgent(agentId, { status: 'idle', current_task: null, progress: 0 })
+    try { db.prepare(`UPDATE tasks SET status='failed', completed_at=datetime('now'), error=? WHERE id=?`).run(msg.slice(0, 2000), taskId) } catch {}
+    try { updateAgent(agentId, { status: 'idle', current_task: null, progress: 0 }) } catch {}
     addLog(taskId, agentId, 'error', `Task failed: ${msg}`)
   }
 }
