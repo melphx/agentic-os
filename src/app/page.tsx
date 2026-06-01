@@ -436,17 +436,36 @@ function TrainPanel({ agent }: { agent: Agent }) {
 
 // ── Task Thread View ───────────────────────────────────────────────────────
 
+// Persist refine messages across task switches — keyed by task ID
+const refineMsgCache = new Map<number, Message[]>()
+
 function TaskThreadView({ task, agent, onCancelled }: { task: Task; agent: Agent; onCancelled?: () => void }) {
   const resultPreview = (task.result || task.error || '').slice(0, 4000)
-  const [refineMessages, setRefineMessages] = useState<Message[]>([])
+  // Load cached messages for this task so switching tasks doesn't lose history
+  const [refineMessages, setRefineMessages] = useState<Message[]>(() => refineMsgCache.get(task.id) || [])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const taskIdRef = useRef(task.id)
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [refineMessages, task])
-  useEffect(() => { setRefineMessages([]); setInput('') }, [task.id])
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [refineMessages])
+
+  // Only reset messages when task ID genuinely changes (not on re-renders with same task)
+  useEffect(() => {
+    if (taskIdRef.current !== task.id) {
+      taskIdRef.current = task.id
+      const cached = refineMsgCache.get(task.id) || []
+      setRefineMessages(cached)
+      setInput('')
+    }
+  }, [task.id])
+
+  // Persist messages to cache whenever they change
+  useEffect(() => {
+    refineMsgCache.set(task.id, refineMessages)
+  }, [refineMessages, task.id])
 
   async function cancelTask() {
     if (cancelling) return
@@ -467,17 +486,25 @@ function TaskThreadView({ task, agent, onCancelled }: { task: Task; agent: Agent
     const text = input.trim()
     if (!text || loading) return
     const userMsg: Message = { role: 'user', content: text, ts: Date.now() }
-    const updated = [...refineMessages, userMsg]
-    setRefineMessages(updated)
+    // Use functional update to always work off latest state — avoids stale closure
+    let currentMessages: Message[] = []
+    setRefineMessages(prev => {
+      currentMessages = [...prev, userMsg]
+      return currentMessages
+    })
     setInput('')
     setLoading(true)
+    // Small delay to ensure state update has flushed
+    await new Promise(r => setTimeout(r, 0))
     try {
       const systemContext = `You are ${agent.name}. The user wants to refine or iterate on a completed task.\n\nOriginal task: ${task.title}\nTask type: ${task.type}\nOriginal output:\n${resultPreview}\n\nRespond conversationally and helpfully. Produce full revised output when asked to rewrite. Do not dispatch new tasks.`
+      // Get latest messages from cache for the API call
+      const latestMessages = refineMsgCache.get(task.id) || currentMessages
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: updated.map(m => ({ role: m.role, content: m.content })),
+          messages: latestMessages.map(m => ({ role: m.role, content: m.content })),
           systemOverride: systemContext,
         }),
       })
