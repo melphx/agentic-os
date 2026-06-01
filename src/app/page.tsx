@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Bot, ListTodo, Terminal as TerminalIcon,
   Settings, Send, ChevronLeft, Play, RefreshCw, LogOut,
   AlertCircle, CheckCircle, Clock, Zap, Activity, X, Search, Bell,
-  BookOpen, Trash2, Download, Cpu, SlidersHorizontal, Layers, Copy, Check, Zap, Plus, Globe, TestTube,
+  BookOpen, Trash2, Download, Cpu, SlidersHorizontal, Layers, Copy, Check, Plus, Globe, TestTube,
 } from 'lucide-react'
 
 // ── Types ──────────────────────────────────────────────────────────────────
