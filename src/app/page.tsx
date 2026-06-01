@@ -203,12 +203,14 @@ function GlobalSearch({ onClose, onNavigate }: { onClose: () => void; onNavigate
 // ── Sidebar ────────────────────────────────────────────────────────────────
 
 const NAV = [
-  { id: 'dashboard', icon: <LayoutDashboard size={18} />, label: 'Dashboard' },
-  { id: 'agents',    icon: <Bot size={18} />,             label: 'Agents'    },
-  { id: 'tasks',     icon: <ListTodo size={18} />,        label: 'Tasks'     },
-  { id: 'terminal',  icon: <TerminalIcon size={18} />,    label: 'Terminal'  },
-  { id: 'schedules', icon: <Clock size={18} />,           label: 'Schedules' },
-  { id: 'settings',  icon: <Settings size={18} />,        label: 'Settings'  },
+  { id: 'dashboard',  icon: <LayoutDashboard size={18} />, label: 'Dashboard'  },
+  { id: 'agents',     icon: <Bot size={18} />,             label: 'Agents'     },
+  { id: 'tasks',      icon: <ListTodo size={18} />,        label: 'Tasks'      },
+  { id: 'pipelines',  icon: <GitBranch size={18} />,       label: 'Pipelines'  },
+  { id: 'analytics',  icon: <BarChart2 size={18} />,       label: 'Analytics'  },
+  { id: 'terminal',   icon: <TerminalIcon size={18} />,    label: 'Terminal'   },
+  { id: 'schedules',  icon: <Clock size={18} />,           label: 'Schedules'  },
+  { id: 'settings',   icon: <Settings size={18} />,        label: 'Settings'   },
 ]
 
 function Sidebar({ view, setView, agents, onLogout, onSearch }: { view: string; setView: (v: string) => void; agents: Agent[]; onLogout: () => void; onSearch: () => void }) {
@@ -541,9 +543,12 @@ function TaskThreadView({ task, agent, onCancelled }: { task: Task; agent: Agent
             <AgentAvatar agent={agent} size={28} />
             <div style={{ flex: 1, padding: '10px 14px', borderRadius: '4px 14px 14px 14px', background: 'rgba(15,20,35,0.85)', border: '1px solid rgba(99,102,241,0.12)', color: 'white', fontSize: 13, lineHeight: 1.55 }}>
               {task.status === 'running' && (
-                <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
-                  {[0,1,2].map(i => <motion.div key={i} animate={{ opacity: [0.3,1,0.3] }} transition={{ repeat: Infinity, duration: 1.2, delay: i*0.2 }} style={{ width: 6, height: 6, borderRadius: '50%', background: agent.accent }} />)}
-                  <span style={{ color: 'rgba(148,163,184,0.5)', fontSize: 12, marginLeft: 4 }}>Running…</span>
+                <div>
+                  <div style={{ display: 'flex', gap: 5, alignItems: 'center', marginBottom: task.result ? 8 : 0 }}>
+                    {[0,1,2].map(i => <motion.div key={i} animate={{ opacity: [0.3,1,0.3] }} transition={{ repeat: Infinity, duration: 1.2, delay: i*0.2 }} style={{ width: 6, height: 6, borderRadius: '50%', background: agent.accent }} />)}
+                    <span style={{ color: 'rgba(148,163,184,0.5)', fontSize: 12, marginLeft: 4 }}>Streaming…</span>
+                  </div>
+                  {task.result && <Markdown text={task.result} />}
                 </div>
               )}
               {task.status === 'pending' && <span style={{ color: 'rgba(148,163,184,0.4)', fontSize: 12 }}>Queued…</span>}
@@ -729,6 +734,12 @@ const INTEGRATION_FIELDS: Record<string, { key: string; label: string; placehold
   ],
   browser: [
     { key: 'url', label: 'Target URL', placeholder: 'https://...' },
+  ],
+  obsidian: [
+    { key: 'apiUrl', label: 'REST API URL (if using plugin)', placeholder: 'http://your-tunnel.ngrok.io' },
+    { key: 'apiKey', label: 'API Key (from REST API plugin)', placeholder: '', secret: true },
+    { key: 'vaultPath', label: 'Vault Path on VPS (if git-synced)', placeholder: '/root/my-vault' },
+    { key: 'action', label: 'Default Action', placeholder: 'search | read | write | append | list' },
   ],
 }
 
@@ -1238,6 +1249,266 @@ function ChatPanel({ messages, onSend, loading }: { messages: Message[]; onSend:
   )
 }
 
+// ── Analytics View ─────────────────────────────────────────────────────────
+
+function AnalyticsView() {
+  const [data, setData] = useState<any>(null)
+  useEffect(() => { fetch('/api/analytics').then(r => r.json()).then(setData) }, [])
+  if (!data) return <div style={{ padding: 40, color: 'rgba(148,163,184,0.4)', textAlign: 'center' }}>Loading analytics…</div>
+  const { summary, byAgent, byDay, byType } = data
+  const costEstimate = ((summary?.total_tokens || 0) / 1000 * 0.0004).toFixed(2)
+  const successRate = summary?.total_tasks > 0 ? Math.round((summary.completed / summary.total_tasks) * 100) : 0
+
+  return (
+    <div style={{ padding: 24, height: '100%', overflowY: 'auto' }}>
+      <div style={{ marginBottom: 24 }}>
+        <h1 style={{ color: 'white', fontWeight: 700, fontSize: 22, margin: 0 }}>Analytics</h1>
+        <p style={{ color: 'rgba(148,163,184,0.5)', fontSize: 13, margin: '4px 0 0' }}>Token usage, task performance, agent stats</p>
+      </div>
+
+      {/* KPI row */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, marginBottom: 24 }}>
+        {[
+          { label: 'Total Tasks',    value: summary?.total_tasks || 0,    color: '#a5b4fc' },
+          { label: 'Success Rate',   value: `${successRate}%`,            color: '#10b981' },
+          { label: 'Tokens Used',    value: fmt(summary?.total_tokens || 0), color: '#f59e0b' },
+          { label: 'Est. Cost',      value: `$${costEstimate}`,           color: '#f43f5e' },
+          { label: 'Avg Duration',   value: summary?.avg_duration_secs ? `${Math.round(summary.avg_duration_secs)}s` : 'N/A', color: '#06b6d4' },
+          { label: 'Failed',         value: summary?.failed || 0,         color: '#ef4444' },
+        ].map(kpi => (
+          <div key={kpi.label} style={{ background: 'rgba(15,20,35,0.8)', border: '1px solid rgba(99,102,241,0.15)', borderRadius: 12, padding: '14px 16px' }}>
+            <div style={{ fontSize: 11, color: 'rgba(148,163,184,0.5)', marginBottom: 4 }}>{kpi.label}</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: kpi.color }}>{kpi.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Tasks per day bar chart */}
+      <div style={{ background: 'rgba(15,20,35,0.8)', border: '1px solid rgba(99,102,241,0.12)', borderRadius: 14, padding: 20, marginBottom: 16 }}>
+        <div style={{ fontWeight: 600, color: 'white', fontSize: 14, marginBottom: 14 }}>Tasks Last 14 Days</div>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 80 }}>
+          {(byDay || []).map((d: any) => {
+            const max = Math.max(...(byDay || []).map((x: any) => x.count), 1)
+            const h = Math.max((d.count / max) * 72, 4)
+            return (
+              <div key={d.day} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+                <div title={`${d.count} tasks`} style={{ width: '100%', height: h, background: 'linear-gradient(180deg,#6366f1,#4338ca)', borderRadius: 3, minHeight: 4 }} />
+                <span style={{ fontSize: 8, color: 'rgba(148,163,184,0.3)', transform: 'rotate(-45deg)', transformOrigin: 'center' }}>{d.day?.slice(5)}</span>
+              </div>
+            )
+          })}
+          {!byDay?.length && <div style={{ color: 'rgba(148,163,184,0.3)', fontSize: 12 }}>No data yet</div>}
+        </div>
+      </div>
+
+      {/* Agent breakdown */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div style={{ background: 'rgba(15,20,35,0.8)', border: '1px solid rgba(99,102,241,0.12)', borderRadius: 14, padding: 18 }}>
+          <div style={{ fontWeight: 600, color: 'white', fontSize: 14, marginBottom: 12 }}>By Agent</div>
+          {(byAgent || []).map((a: any) => (
+            <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: a.accent, flexShrink: 0 }} />
+              <span style={{ color: 'rgba(148,163,184,0.7)', fontSize: 12, flex: 1 }}>{a.name}</span>
+              <span style={{ color: 'white', fontSize: 12, fontWeight: 600 }}>{a.task_count}</span>
+              <span style={{ color: 'rgba(148,163,184,0.4)', fontSize: 11 }}>{fmt(a.tokens || 0)} tok</span>
+            </div>
+          ))}
+        </div>
+        <div style={{ background: 'rgba(15,20,35,0.8)', border: '1px solid rgba(99,102,241,0.12)', borderRadius: 14, padding: 18 }}>
+          <div style={{ fontWeight: 600, color: 'white', fontSize: 14, marginBottom: 12 }}>By Type</div>
+          {(byType || []).map((t: any) => (
+            <div key={t.type} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+              <span style={{ color: 'rgba(148,163,184,0.7)', fontSize: 12 }}>{t.type}</span>
+              <span style={{ color: '#a5b4fc', fontSize: 12, fontWeight: 600 }}>{t.count}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Pipelines View ──────────────────────────────────────────────────────────
+
+interface PipelineStep { agent_id: string; title: string; description: string; type: string; use_previous: boolean }
+interface PipelineDef  { id: number; name: string; description: string; steps: PipelineStep[]; enabled: number; created_at: string }
+
+function PipelinesView({ agents }: { agents: Agent[] }) {
+  const [pipelines, setPipelines] = useState<PipelineDef[]>([])
+  const [showCreate, setShowCreate] = useState(false)
+  const [running, setRunning] = useState<number | null>(null)
+
+  useEffect(() => { load() }, [])
+
+  async function load() {
+    const res = await fetch('/api/pipelines')
+    if (res.ok) {
+      const raw = await res.json()
+      setPipelines(raw.map((p: any) => ({ ...p, steps: JSON.parse(p.steps || '[]') })))
+    }
+  }
+
+  async function run(p: PipelineDef) {
+    setRunning(p.id)
+    await fetch(`/api/pipelines/${p.id}/run`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    setTimeout(() => setRunning(null), 2000)
+  }
+
+  async function remove(id: number) {
+    await fetch(`/api/pipelines?id=${id}`, { method: 'DELETE' })
+    load()
+  }
+
+  return (
+    <div style={{ padding: 24, height: '100%', overflowY: 'auto' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
+        <div>
+          <h1 style={{ color: 'white', fontWeight: 700, fontSize: 22, margin: 0 }}>Pipelines</h1>
+          <p style={{ color: 'rgba(148,163,184,0.5)', fontSize: 13, margin: '4px 0 0' }}>Chain agents together — output of one feeds the next</p>
+        </div>
+        <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => setShowCreate(true)}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', background: 'linear-gradient(135deg,#4338ca,#6366f1)', border: 'none', borderRadius: 9, color: 'white', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+          <Plus size={14} /> New Pipeline
+        </motion.button>
+      </div>
+
+      {pipelines.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '60px 0', color: 'rgba(148,163,184,0.3)' }}>
+          <GitBranch size={40} style={{ margin: '0 auto 12px', display: 'block', opacity: 0.3 }} />
+          <p>No pipelines yet. Create one to chain agents together.</p>
+          <p style={{ fontSize: 12, marginTop: 8 }}>Example: Research → Writer → Email</p>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {pipelines.map(p => (
+          <div key={p.id} style={{ background: 'rgba(15,20,35,0.8)', border: '1px solid rgba(99,102,241,0.15)', borderRadius: 14, padding: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <div>
+                <div style={{ color: 'white', fontWeight: 600, fontSize: 15 }}>{p.name}</div>
+                {p.description && <div style={{ color: 'rgba(148,163,184,0.5)', fontSize: 12, marginTop: 2 }}>{p.description}</div>}
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }} onClick={() => run(p)} disabled={running === p.id}
+                  style={{ padding: '6px 14px', background: running === p.id ? 'rgba(99,102,241,0.2)' : 'linear-gradient(135deg,#4338ca,#6366f1)', border: 'none', borderRadius: 7, color: 'white', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <Play size={11} />{running === p.id ? 'Starting…' : 'Run'}
+                </motion.button>
+                <button onClick={() => remove(p.id)} style={{ padding: '6px 10px', background: 'transparent', border: '1px solid rgba(244,63,94,0.2)', borderRadius: 7, color: 'rgba(244,63,94,0.5)', cursor: 'pointer' }}>
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            </div>
+            {/* Step flow */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              {p.steps.map((step, i) => {
+                const ag = agents.find(a => a.id === step.agent_id)
+                return (
+                  <React.Fragment key={i}>
+                    <div style={{ padding: '4px 10px', background: `${ag?.accent || '#6366f1'}20`, border: `1px solid ${ag?.accent || '#6366f1'}40`, borderRadius: 20, display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <div style={{ width: 6, height: 6, borderRadius: '50%', background: ag?.accent || '#6366f1' }} />
+                      <span style={{ fontSize: 11, color: 'white' }}>{ag?.name || step.agent_id}</span>
+                    </div>
+                    {i < p.steps.length - 1 && <span style={{ color: 'rgba(148,163,184,0.3)', fontSize: 12 }}>→</span>}
+                  </React.Fragment>
+                )
+              })}
+              {!p.steps.length && <span style={{ color: 'rgba(148,163,184,0.3)', fontSize: 12 }}>No steps configured</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {showCreate && <CreatePipelineModal agents={agents} onClose={() => { setShowCreate(false); load() }} />}
+    </div>
+  )
+}
+
+function CreatePipelineModal({ agents, onClose }: { agents: Agent[]; onClose: () => void }) {
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [steps, setSteps] = useState<PipelineStep[]>([{ agent_id: agents[0]?.id || '', title: '', description: '', type: 'general', use_previous: true }])
+  const [saving, setSaving] = useState(false)
+
+  function addStep() { setSteps(s => [...s, { agent_id: agents[0]?.id || '', title: '', description: '', type: 'general', use_previous: true }]) }
+  function removeStep(i: number) { setSteps(s => s.filter((_, idx) => idx !== i)) }
+  function updateStep(i: number, field: string, val: any) { setSteps(s => s.map((step, idx) => idx === i ? { ...step, [field]: val } : step)) }
+
+  async function save() {
+    if (!name.trim() || !steps.length) return
+    setSaving(true)
+    await fetch('/api/pipelines', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, description, steps }) })
+    setSaving(false)
+    onClose()
+  }
+
+  const inputStyle = { width: '100%', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, padding: '8px 10px', color: 'white', fontSize: 12, outline: 'none', boxSizing: 'border-box' as const }
+  const labelStyle = { color: 'rgba(148,163,184,0.6)', fontSize: 10, marginBottom: 4, display: 'block' as const }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300 }}>
+      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+        style={{ width: 560, maxHeight: '88vh', overflowY: 'auto', background: '#0f1623', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 16, padding: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 18 }}>
+          <span style={{ color: 'white', fontWeight: 700, fontSize: 15 }}>Create Pipeline</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'rgba(148,163,184,0.5)', cursor: 'pointer', fontSize: 18 }}>✕</button>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 20 }}>
+          <div><label style={labelStyle}>PIPELINE NAME</label><input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Lead Research & Outreach" style={inputStyle} /></div>
+          <div><label style={labelStyle}>DESCRIPTION (optional)</label><input value={description} onChange={e => setDescription(e.target.value)} placeholder="What this pipeline does" style={inputStyle} /></div>
+        </div>
+
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <span style={{ color: 'white', fontWeight: 600, fontSize: 13 }}>Steps</span>
+            <button onClick={addStep} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6, color: '#a5b4fc', fontSize: 11, cursor: 'pointer' }}>
+              <Plus size={10} /> Add Step
+            </button>
+          </div>
+          {steps.map((step, i) => (
+            <div key={i} style={{ background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.12)', borderRadius: 10, padding: 14, marginBottom: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                <span style={{ color: '#a5b4fc', fontWeight: 600, fontSize: 12 }}>Step {i + 1}</span>
+                {steps.length > 1 && <button onClick={() => removeStep(i)} style={{ background: 'none', border: 'none', color: 'rgba(244,63,94,0.5)', cursor: 'pointer', fontSize: 11 }}>Remove</button>}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                <div>
+                  <label style={labelStyle}>AGENT</label>
+                  <select value={step.agent_id} onChange={e => updateStep(i, 'agent_id', e.target.value)} style={{ ...inputStyle, fontFamily: 'inherit' }}>
+                    {agents.map(a => <option key={a.id} value={a.id} style={{ background: '#0f1623' }}>{a.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>TYPE</label>
+                  <select value={step.type} onChange={e => updateStep(i, 'type', e.target.value)} style={{ ...inputStyle, fontFamily: 'inherit' }}>
+                    {['general','code','search','scrape','browser','file','api'].map(t => <option key={t} value={t} style={{ background: '#0f1623' }}>{t}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div style={{ marginBottom: 8 }}><label style={labelStyle}>TASK TITLE</label><input value={step.title} onChange={e => updateStep(i, 'title', e.target.value)} placeholder="Step title (supports {{variables}})" style={inputStyle} /></div>
+              <div><label style={labelStyle}>TASK DESCRIPTION / PROMPT</label><textarea value={step.description} onChange={e => updateStep(i, 'description', e.target.value)} rows={3} placeholder={i > 0 ? "What to do. Previous step's output is appended automatically." : "What to do. Use {{variable_name}} for dynamic inputs."} style={{ ...inputStyle, resize: 'vertical' as const, lineHeight: 1.5 }} /></div>
+              {i > 0 && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, cursor: 'pointer', color: 'rgba(148,163,184,0.6)', fontSize: 11 }}>
+                  <input type="checkbox" checked={step.use_previous} onChange={e => updateStep(i, 'use_previous', e.target.checked)} />
+                  Pass previous step output to this step
+                </label>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={save} disabled={saving || !name.trim()}
+            style={{ flex: 1, padding: 10, background: 'linear-gradient(135deg,#4338ca,#6366f1)', border: 'none', borderRadius: 9, color: 'white', fontWeight: 600, fontSize: 13, cursor: 'pointer', opacity: !name.trim() ? 0.5 : 1 }}>
+            {saving ? 'Saving…' : 'Create Pipeline'}
+          </motion.button>
+          <button onClick={onClose} style={{ padding: '10px 16px', background: 'transparent', border: '1px solid rgba(148,163,184,0.15)', borderRadius: 9, color: 'rgba(148,163,184,0.5)', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
+
 // ── Dashboard View ─────────────────────────────────────────────────────────
 
 function DashboardView({ agents, metrics, activity, onSelectAgent }: { agents: Agent[]; metrics: Metrics | null; activity: LogEntry[]; onSelectAgent: (a: Agent) => void }) {
@@ -1469,6 +1740,7 @@ function SchedulesView({ agents }: { agents: Agent[] }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
         <div>
           <h1 style={{ color: 'white', fontWeight: 700, fontSize: 22, margin: 0 }}>Schedules</h1>
+      <ApiKeysPanel />
           <p style={{ color: 'rgba(148,163,184,0.5)', fontSize: 13, margin: '4px 0 0' }}>Automate agent tasks on a recurring schedule</p>
         </div>
         <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => setShowForm(!showForm)}
@@ -1677,13 +1949,17 @@ export default function Page() {
       case 'tasks':    return <TasksView tasks={tasks} agents={agents} />
       case 'terminal': return <TerminalView agents={agents} metrics={metrics} />
       case 'schedules': return <SchedulesView agents={agents} />
-      case 'settings': return <SettingsView />
+      case 'analytics':  return <AnalyticsView />
+      case 'pipelines':  return <PipelinesView agents={agents} />
+      case 'settings':   return <SettingsView />
       default: return null
     }
   }
 
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+
   return (
-    <div style={{ display: 'flex', height: '100vh', background: '#080c14', color: 'white', fontFamily: 'Inter, sans-serif', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', height: '100vh', background: '#080c14', color: 'white', fontFamily: 'Inter, sans-serif', overflow: 'hidden', position: 'relative' }}>
       {/* Grid bg */}
       <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', backgroundImage: 'linear-gradient(rgba(99,102,241,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(99,102,241,0.03) 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
 

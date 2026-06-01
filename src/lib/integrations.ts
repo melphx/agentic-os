@@ -210,62 +210,129 @@ export async function executeIntegration(
       throw new Error(`Unknown docs action: ${action}`)
     }
 
+
+    // ── Obsidian Vault ────────────────────────────────────────────────────
+    case 'obsidian': {
+      const { apiUrl, apiKey, vaultPath, action = 'search' } = config
+      const query = payload.query || payload.search || ''
+      const notePath = payload.path || payload.note || ''
+      const noteContent = payload.content || ''
+
+      // ── REST API mode (Obsidian Local REST API plugin) ────────────────
+      if (apiUrl) {
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {}),
+        }
+
+        if (action === 'search') {
+          const res = await fetch(`${apiUrl.replace(/\/$/, '')}/search/simple/?query=${encodeURIComponent(query)}&contextLength=200`, {
+            headers, signal: AbortSignal.timeout(10000),
+          })
+          if (!res.ok) throw new Error(`Obsidian API ${res.status}`)
+          const data = await res.json()
+          const results = Array.isArray(data) ? data.slice(0, 10) : []
+          return results.map((r: any) => `📄 ${r.filename}\n${r.matches?.map((m: any) => m.context).join(' … ') || ''}`).join('\n\n') || 'No results found'
+        }
+
+        if (action === 'read') {
+          const res = await fetch(`${apiUrl.replace(/\/$/, '')}/vault/${encodeURIComponent(notePath)}`, {
+            headers, signal: AbortSignal.timeout(10000),
+          })
+          if (!res.ok) throw new Error(`Note not found: ${notePath}`)
+          return await res.text()
+        }
+
+        if (action === 'write' || action === 'create') {
+          const res = await fetch(`${apiUrl.replace(/\/$/, '')}/vault/${encodeURIComponent(notePath)}`, {
+            method: 'PUT',
+            headers,
+            body: noteContent,
+            signal: AbortSignal.timeout(10000),
+          })
+          if (!res.ok) throw new Error(`Failed to write note: ${res.status}`)
+          return `✓ Note saved: ${notePath}`
+        }
+
+        if (action === 'append') {
+          const res = await fetch(`${apiUrl.replace(/\/$/, '')}/vault/${encodeURIComponent(notePath)}`, {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'text/markdown' },
+            body: `\n\n${noteContent}`,
+            signal: AbortSignal.timeout(10000),
+          })
+          if (!res.ok) throw new Error(`Failed to append to note: ${res.status}`)
+          return `✓ Appended to: ${notePath}`
+        }
+
+        if (action === 'list') {
+          const res = await fetch(`${apiUrl.replace(/\/$/, '')}/vault/`, {
+            headers, signal: AbortSignal.timeout(10000),
+          })
+          if (!res.ok) throw new Error(`Obsidian API ${res.status}`)
+          const data = await res.json()
+          const files = (data.files || []).filter((f: string) => f.endsWith('.md')).slice(0, 50)
+          return `Vault files (${files.length}):\n${files.join('\n')}`
+        }
+
+        throw new Error(`Unknown Obsidian action: ${action}`)
+      }
+
+      // ── File system mode (vault synced to VPS via git/rsync) ──────────
+      if (vaultPath) {
+        const { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } = await import('fs')
+        const { join, dirname } = await import('path')
+        const fullVault = vaultPath.replace(/\/$/, '')
+
+        if (action === 'search') {
+          const { execSync } = await import('child_process')
+          try {
+            const out = execSync(`grep -rl "${query.replace(/"/g, '\\"')}" "${fullVault}" --include="*.md" 2>/dev/null | head -20`).toString()
+            const files = out.trim().split('\n').filter(Boolean)
+            if (!files.length) return 'No notes found matching: ' + query
+            const snippets = files.map(f => {
+              const content = readFileSync(f, 'utf8').slice(0, 300)
+              return `📄 ${f.replace(fullVault + '/', '')}\n${content}…`
+            })
+            return snippets.join('\n\n')
+          } catch { return 'Search failed — check vault path' }
+        }
+
+        if (action === 'read') {
+          const full = join(fullVault, notePath.endsWith('.md') ? notePath : notePath + '.md')
+          if (!existsSync(full)) throw new Error(`Note not found: ${notePath}`)
+          return readFileSync(full, 'utf8')
+        }
+
+        if (action === 'write' || action === 'create') {
+          const full = join(fullVault, notePath.endsWith('.md') ? notePath : notePath + '.md')
+          mkdirSync(dirname(full), { recursive: true })
+          writeFileSync(full, noteContent)
+          return `✓ Note saved: ${notePath}`
+        }
+
+        if (action === 'append') {
+          const full = join(fullVault, notePath.endsWith('.md') ? notePath : notePath + '.md')
+          if (!existsSync(full)) writeFileSync(full, noteContent)
+          else {
+            const existing = readFileSync(full, 'utf8')
+            writeFileSync(full, existing + '\n\n' + noteContent)
+          }
+          return `✓ Appended to: ${notePath}`
+        }
+
+        if (action === 'list') {
+          const { execSync } = await import('child_process')
+          const out = execSync(`find "${fullVault}" -name "*.md" | head -50`).toString()
+          const files = out.trim().split('\n').filter(Boolean).map(f => f.replace(fullVault + '/', ''))
+          return `Vault notes (${files.length}):\n${files.join('\n')}`
+        }
+      }
+
+      throw new Error('Obsidian integration requires either apiUrl (REST API) or vaultPath (file system)')
+    }
+
     default:
       throw new Error(`Unknown integration type: ${type}`)
   }
-}
-
-// ── Google JWT helper ──────────────────────────────────────────────────────
-
-async function getGoogleToken(serviceAccount: any, scope: string): Promise<string> {
-  const { createSign } = await import('crypto')
-  const now = Math.floor(Date.now() / 1000)
-  const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url')
-  const claim  = Buffer.from(JSON.stringify({
-    iss: serviceAccount.client_email,
-    scope,
-    aud: 'https://oauth2.googleapis.com/token',
-    exp: now + 3600,
-    iat: now,
-  })).toString('base64url')
-
-  const sign = createSign('RSA-SHA256')
-  sign.update(`${header}.${claim}`)
-  const sig = sign.sign(serviceAccount.private_key, 'base64url')
-  const jwt = `${header}.${claim}.${sig}`
-
-  const res = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: jwt }),
-    signal: AbortSignal.timeout(10000),
-  })
-  const data = await res.json()
-  if (!data.access_token) throw new Error(`Google auth failed: ${JSON.stringify(data)}`)
-  return data.access_token
-}
-
-// ── Google Docs text extractor ─────────────────────────────────────────────
-
-function extractDocsText(doc: any): string {
-  const parts: string[] = []
-  for (const el of doc.body?.content || []) {
-    if (el.paragraph) {
-      for (const pe of el.paragraph.elements || []) {
-        if (pe.textRun?.content) parts.push(pe.textRun.content)
-      }
-    }
-    if (el.table) {
-      for (const row of el.table.tableRows || []) {
-        for (const cell of row.tableCells || []) {
-          for (const c of cell.content || []) {
-            for (const pe of c.paragraph?.elements || []) {
-              if (pe.textRun?.content) parts.push(pe.textRun.content)
-            }
-          }
-        }
-      }
-    }
-  }
-  return parts.join('')
 }

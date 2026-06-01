@@ -425,3 +425,189 @@ export function getIntegrationContext(agentId: string): string {
   )
   return `You have access to the following integrations. To call one, output exactly:\n{{CALL:integration_name:json_payload}}\nWhere json_payload is the data to send (use {} if none).\n\nAvailable integrations:\n${lines.join('\n')}`
 }
+
+// ── API Keys (for inbound webhook triggers) ────────────────────────────────
+
+export function ensureApiKeysTable() {
+  getDb().exec(`
+    CREATE TABLE IF NOT EXISTS api_keys (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      key_prefix TEXT NOT NULL,
+      key_hash TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      last_used TEXT
+    )
+  `)
+}
+
+export interface ApiKey { id: number; name: string; key_prefix: string; key_hash: string; created_at: string; last_used: string | null }
+
+export function getApiKeys(): ApiKey[] {
+  ensureApiKeysTable()
+  return getDb().prepare('SELECT * FROM api_keys ORDER BY created_at DESC').all() as ApiKey[]
+}
+
+export function createApiKey(name: string, keyPrefix: string, keyHash: string): ApiKey {
+  ensureApiKeysTable()
+  const info = getDb().prepare('INSERT INTO api_keys (name, key_prefix, key_hash) VALUES (?, ?, ?)').run(name, keyPrefix, keyHash)
+  return getDb().prepare('SELECT * FROM api_keys WHERE id = ?').get(info.lastInsertRowid) as ApiKey
+}
+
+export function validateApiKey(raw: string): boolean {
+  ensureApiKeysTable()
+  const { createHash } = require('crypto')
+  const hash = createHash('sha256').update(raw).digest('hex')
+  const row = getDb().prepare('SELECT id FROM api_keys WHERE key_hash = ?').get(hash)
+  if (row) {
+    getDb().prepare("UPDATE api_keys SET last_used = datetime('now') WHERE key_hash = ?").run(hash)
+    return true
+  }
+  return false
+}
+
+export function deleteApiKey(id: number) {
+  ensureApiKeysTable()
+  getDb().prepare('DELETE FROM api_keys WHERE id = ?').run(id)
+}
+
+// ── Task Templates ─────────────────────────────────────────────────────────
+
+export interface TaskTemplate {
+  id: number; agent_id: string | null; name: string
+  title_template: string; description_template: string
+  type: string; variables: string; created_at: string
+}
+
+export function ensureTemplatesTable() {
+  getDb().exec(`
+    CREATE TABLE IF NOT EXISTS task_templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      agent_id TEXT,
+      name TEXT NOT NULL,
+      title_template TEXT NOT NULL,
+      description_template TEXT NOT NULL,
+      type TEXT DEFAULT 'general',
+      variables TEXT DEFAULT '[]',
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `)
+}
+
+export function getTemplates(agentId?: string): TaskTemplate[] {
+  ensureTemplatesTable()
+  if (agentId) return getDb().prepare('SELECT * FROM task_templates WHERE agent_id = ? OR agent_id IS NULL ORDER BY name').all(agentId) as TaskTemplate[]
+  return getDb().prepare('SELECT * FROM task_templates ORDER BY name').all() as TaskTemplate[]
+}
+
+export function createTemplate(data: Omit<TaskTemplate, 'id' | 'created_at'>): TaskTemplate {
+  ensureTemplatesTable()
+  const info = getDb().prepare(`
+    INSERT INTO task_templates (agent_id, name, title_template, description_template, type, variables)
+    VALUES (@agent_id, @name, @title_template, @description_template, @type, @variables)
+  `).run(data)
+  return getDb().prepare('SELECT * FROM task_templates WHERE id = ?').get(info.lastInsertRowid) as TaskTemplate
+}
+
+export function deleteTemplate(id: number) {
+  ensureTemplatesTable()
+  getDb().prepare('DELETE FROM task_templates WHERE id = ?').run(id)
+}
+
+// ── Pipelines ──────────────────────────────────────────────────────────────
+
+export interface Pipeline {
+  id: number; name: string; description: string
+  steps: string; enabled: number; created_at: string
+}
+
+export function ensurePipelinesTable() {
+  getDb().exec(`
+    CREATE TABLE IF NOT EXISTS pipelines (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      steps TEXT NOT NULL DEFAULT '[]',
+      enabled INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `)
+}
+
+export function getPipelines(): Pipeline[] {
+  ensurePipelinesTable()
+  return getDb().prepare('SELECT * FROM pipelines ORDER BY created_at DESC').all() as Pipeline[]
+}
+
+export function getPipeline(id: number): Pipeline | null {
+  ensurePipelinesTable()
+  return (getDb().prepare('SELECT * FROM pipelines WHERE id = ?').get(id) as Pipeline) ?? null
+}
+
+export function createPipeline(data: Omit<Pipeline, 'id' | 'created_at'>): Pipeline {
+  ensurePipelinesTable()
+  const info = getDb().prepare(`
+    INSERT INTO pipelines (name, description, steps, enabled)
+    VALUES (@name, @description, @steps, @enabled)
+  `).run(data)
+  return getDb().prepare('SELECT * FROM pipelines WHERE id = ?').get(info.lastInsertRowid) as Pipeline
+}
+
+export function updatePipeline(id: number, fields: Partial<Pipeline>) {
+  ensurePipelinesTable()
+  const allowed = ['name', 'description', 'steps', 'enabled']
+  const updates = Object.entries(fields).filter(([k]) => allowed.includes(k)).map(([k]) => `${k} = @${k}`).join(', ')
+  if (!updates) return
+  getDb().prepare(`UPDATE pipelines SET ${updates} WHERE id = @id`).run({ ...fields, id })
+}
+
+export function deletePipeline(id: number) {
+  ensurePipelinesTable()
+  getDb().prepare('DELETE FROM pipelines WHERE id = ?').run(id)
+}
+
+// ── Analytics helpers ──────────────────────────────────────────────────────
+
+export function getAnalytics() {
+  const db = getDb()
+  const summary = db.prepare(`
+    SELECT
+      COUNT(*) as total_tasks,
+      SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed,
+      SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed,
+      SUM(CASE WHEN status='running' THEN 1 ELSE 0 END) as running,
+      SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) as cancelled,
+      SUM(tokens_used) as total_tokens,
+      AVG(CASE WHEN status='completed' AND started_at IS NOT NULL
+        THEN (julianday(completed_at) - julianday(started_at)) * 86400 END) as avg_duration_secs
+    FROM tasks
+  `).get() as any
+
+  const byAgent = db.prepare(`
+    SELECT a.name, a.accent, a.id,
+      COUNT(t.id) as task_count,
+      SUM(CASE WHEN t.status='completed' THEN 1 ELSE 0 END) as completed,
+      SUM(t.tokens_used) as tokens
+    FROM agents a LEFT JOIN tasks t ON t.agent_id = a.id
+    GROUP BY a.id ORDER BY task_count DESC
+  `).all() as any[]
+
+  const byDay = db.prepare(`
+    SELECT substr(created_at, 1, 10) as day, COUNT(*) as count,
+      SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed
+    FROM tasks
+    WHERE created_at >= datetime('now', '-14 days')
+    GROUP BY day ORDER BY day ASC
+  `).all() as any[]
+
+  const byType = db.prepare(`
+    SELECT type, COUNT(*) as count FROM tasks GROUP BY type ORDER BY count DESC
+  `).all() as any[]
+
+  const costPerAgent = db.prepare(`
+    SELECT agent_id, SUM(tokens_used) as tokens FROM tasks
+    WHERE status='completed' GROUP BY agent_id ORDER BY tokens DESC
+  `).all() as any[]
+
+  return { summary, byAgent, byDay, byType, costPerAgent }
+}

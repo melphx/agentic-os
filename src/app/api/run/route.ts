@@ -13,9 +13,36 @@ const execAsync = promisify(exec)
 const client = new OpenAI({
   baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
   apiKey: process.env.OPENAI_API_KEY || '',
-  timeout: 60000,   // 60s per request — prevents silent hangs
+  timeout: 60000,
   maxRetries: 1,
 })
+
+// Stream a completion and write partial result to DB for real-time UI updates
+async function streamToDb(taskId: number, agentId: string, messages: any[], maxTokens: number): Promise<{ content: string; tokens: number }> {
+  const db = getDb()
+  const stream = await client.chat.completions.create({
+    model: MODEL,
+    max_completion_tokens: maxTokens,
+    messages,
+    stream: true,
+  })
+  let full = ''
+  let usage = 0
+  for await (const chunk of stream) {
+    const delta = chunk.choices[0]?.delta?.content || ''
+    if (delta) {
+      full += delta
+      // Write partial result every ~200 chars so UI can show progress
+      if (full.length % 200 < delta.length) {
+        try { db.prepare("UPDATE tasks SET result = ? WHERE id = ?").run(full.slice(0, 8000), taskId) } catch {}
+      }
+    }
+    if (chunk.usage) usage = chunk.usage.total_tokens || 0
+  }
+  // Final write
+  try { db.prepare("UPDATE tasks SET result = ? WHERE id = ?").run(full.slice(0, 8000), taskId) } catch {}
+  return { content: full, tokens: usage }
+}
 const MODEL = process.env.OPENAI_MODEL || 'gpt-5.4'
 const AGENT_FILES_DIR = process.env.AGENT_FILES_DIR || path.join(process.cwd(), 'agent-files')
 
@@ -52,7 +79,7 @@ export function setAgentCustomPrompt(agentId: string, prompt: string) {
   customPromptCache[agentId] = prompt
 }
 
-async function ask(agentId: string, systemPrompt: string, userPrompt: string, maxTokens = 2048) {
+async function ask(agentId: string, systemPrompt: string, userPrompt: string, maxTokens = 2048, taskId?: number) {
   loadCustomPromptsFromDb()
   const memory    = getMemory(agentId, 5)
   const knowledge = getKnowledgeContent(agentId)
@@ -80,13 +107,23 @@ async function ask(agentId: string, systemPrompt: string, userPrompt: string, ma
 
   // Tool-calling loop: agent can invoke integrations up to 3 times
   for (let round = 0; round < 4; round++) {
-    const completion = await client.chat.completions.create({
-      model: MODEL,
-      max_completion_tokens: maxTokens,
-      messages,
-    })
-    totalTokens += completion.usage?.total_tokens || 0
-    const reply = completion.choices[0].message.content || ''
+    let reply = ''
+    let roundTokens = 0
+    if (taskId && round === 0) {
+      // First round: use streaming so UI shows partial output
+      const streamed = await streamToDb(taskId, agentId, messages, maxTokens)
+      reply = streamed.content
+      roundTokens = streamed.tokens
+    } else {
+      const completion = await client.chat.completions.create({
+        model: MODEL,
+        max_completion_tokens: maxTokens,
+        messages,
+      })
+      reply = completion.choices[0].message.content || ''
+      roundTokens = completion.usage?.total_tokens || 0
+    }
+    totalTokens += roundTokens''
 
     // Check if agent wants to call an integration
     const callMatch = reply.match(/\{\{CALL:([^:]+):([\s\S]+?)\}\}/)
@@ -509,7 +546,7 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
       default: {
         const { content, tokens } = await ask(agentId,
           'You are a general-purpose AI agent. Complete the task thoroughly.',
-          description,
+          description, 2048, taskId,
         )
         result = content; tokensUsed = tokens
         addLog(taskId, agentId, 'success', result.slice(0, 500))

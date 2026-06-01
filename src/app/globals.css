@@ -1,73 +1,24 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
-
-*, *::before, *::after {
-  box-sizing: border-box;
-}
-
-html, body {
-  height: 100%;
-  overflow: hidden;
-}
-
-body {
-  background: #030712;
-  color: #f8fafc;
-  font-family: 'Inter', system-ui, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-/* ── Scrollbars ─────────────────────────────────── */
-::-webkit-scrollbar       { width: 3px; height: 3px; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 99px; }
-::-webkit-scrollbar-thumb:hover { background: #6366f1; }
+::-webkit-scrollbar-thumb { background: rgba(99,102,241,0.3); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(99,102,241,0.5); }
 
-/* ── Selection ──────────────────────────────────── */
-::selection {
-  background: rgba(99, 102, 241, 0.35);
-  color: #f8fafc;
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .sidebar-desktop { display: none !important; }
+  .mobile-sidebar-open .sidebar-desktop { display: flex !important; position: fixed !important; left: 0 !important; top: 0 !important; bottom: 0 !important; z-index: 100 !important; }
+  .main-content { width: 100% !important; }
+  .chat-panel { display: none !important; }
+  .agent-detail-sidebar { width: 100% !important; border-right: none !important; }
+  .agent-detail-thread { display: none !important; }
+  .agent-detail-sidebar.thread-open { display: none !important; }
+  .agent-detail-thread.thread-open { display: flex !important; width: 100% !important; }
+  .mobile-overlay { display: block !important; }
+  .mobile-back-btn { display: flex !important; }
 }
 
-/* ── Glass utility ──────────────────────────────── */
-.glass {
-  background: rgba(15, 23, 42, 0.75);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(148, 163, 184, 0.07);
-}
-
-/* ── Gradient border ─────────────────────────────── */
-.gradient-border {
-  position: relative;
-}
-.gradient-border::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1px;
-  background: linear-gradient(135deg, #6366f1, #06b6d4, #a855f7);
-  -webkit-mask: linear-gradient(#fff 0 0) content-box,
-                linear-gradient(#fff 0 0);
-  mask: linear-gradient(#fff 0 0) content-box,
-        linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
-}
-
-/* ── Custom focus ring ──────────────────────────── */
-input:focus, textarea:focus, select:focus {
-  outline: none;
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.3);
-}
-
-/* ── Textarea auto-resize ───────────────────────── */
-textarea {
-  field-sizing: content;
+@media (min-width: 769px) {
+  .mobile-back-btn { display: none !important; }
 }
