@@ -1,3 +1,54 @@
+// ── Google JWT helper ──────────────────────────────────────────────────────
+
+async function getGoogleToken(serviceAccount: any, scope: string): Promise<string> {
+  const { createSign } = await import('crypto')
+  const now = Math.floor(Date.now() / 1000)
+  const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url')
+  const claim  = Buffer.from(JSON.stringify({
+    iss: serviceAccount.client_email,
+    scope,
+    aud: 'https://oauth2.googleapis.com/token',
+    exp: now + 3600,
+    iat: now,
+  })).toString('base64url')
+  const sign = createSign('RSA-SHA256')
+  sign.update(`${header}.${claim}`)
+  const sig = sign.sign(serviceAccount.private_key, 'base64url')
+  const jwt = `${header}.${claim}.${sig}`
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: jwt }),
+    signal: AbortSignal.timeout(10000),
+  })
+  const data = await res.json()
+  if (!data.access_token) throw new Error(`Google auth failed: ${JSON.stringify(data)}`)
+  return data.access_token
+}
+
+function extractDocsText(doc: any): string {
+  const parts: string[] = []
+  for (const el of doc.body?.content || []) {
+    if (el.paragraph) {
+      for (const pe of el.paragraph.elements || []) {
+        if (pe.textRun?.content) parts.push(pe.textRun.content)
+      }
+    }
+    if (el.table) {
+      for (const row of el.table.tableRows || []) {
+        for (const cell of row.tableCells || []) {
+          for (const c of cell.content || []) {
+            for (const pe of c.paragraph?.elements || []) {
+              if (pe.textRun?.content) parts.push(pe.textRun.content)
+            }
+          }
+        }
+      }
+    }
+  }
+  return parts.join('')
+}
+
 // ── Integration Executor ───────────────────────────────────────────────────
 // Handles all external integration calls: webhooks, GHL, N8N, Google, browser
 

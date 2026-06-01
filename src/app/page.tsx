@@ -1658,6 +1658,95 @@ function TerminalView({ agents, metrics }: { agents: Agent[]; metrics: Metrics |
 
 // ── Settings View ──────────────────────────────────────────────────────────
 
+
+// ── API Keys Panel ─────────────────────────────────────────────────────────
+
+function ApiKeysPanel() {
+  const [keys, setKeys] = useState<any[]>([])
+  const [name, setName] = useState('')
+  const [newKey, setNewKey] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
+
+  useEffect(() => { load() }, [])
+
+  async function load() {
+    const res = await fetch('/api/keys')
+    if (res.ok) setKeys(await res.json())
+  }
+
+  async function create() {
+    if (!name.trim()) return
+    setCreating(true)
+    const res = await fetch('/api/keys', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+    const data = await res.json()
+    setNewKey(data.key)
+    setName('')
+    setCreating(false)
+    load()
+  }
+
+  async function remove(id: number) {
+    await fetch(`/api/keys?id=${id}`, { method: 'DELETE' })
+    load()
+  }
+
+  return (
+    <div style={{ background: 'rgba(15,20,35,0.8)', border: '1px solid rgba(99,102,241,0.12)', borderRadius: 14, padding: 20, marginBottom: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+        <Key size={14} color="#a5b4fc" />
+        <span style={{ color: 'white', fontWeight: 600, fontSize: 14 }}>API Keys</span>
+        <span style={{ fontSize: 11, color: 'rgba(148,163,184,0.4)' }}>— trigger agents from GHL, N8N, Zapier and more</span>
+      </div>
+
+      {newKey && (
+        <div style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)', borderRadius: 10, padding: 14, marginBottom: 14 }}>
+          <div style={{ color: '#10b981', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>✓ Key created — copy it now, it won&#39;t be shown again</div>
+          <code style={{ color: 'white', fontSize: 12, wordBreak: 'break-all', background: 'rgba(0,0,0,0.3)', padding: '6px 10px', borderRadius: 6, display: 'block' }}>{newKey}</code>
+          <div style={{ fontSize: 11, color: 'rgba(148,163,184,0.5)', marginTop: 8 }}>
+            Send as header: <code style={{ color: '#a5b4fc' }}>x-api-key: {newKey}</code> to <code style={{ color: '#a5b4fc' }}>POST /api/trigger</code>
+          </div>
+          <button onClick={() => setNewKey(null)} style={{ marginTop: 8, padding: '4px 10px', background: 'transparent', border: '1px solid rgba(148,163,184,0.2)', borderRadius: 6, color: 'rgba(148,163,184,0.5)', fontSize: 11, cursor: 'pointer' }}>Dismiss</button>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+        <input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && create()}
+          placeholder="Key name e.g. GHL Webhook, N8N, Zapier"
+          style={{ flex: 1, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, padding: '8px 12px', color: 'white', fontSize: 13, outline: 'none' }} />
+        <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={create} disabled={creating || !name.trim()}
+          style={{ padding: '8px 16px', background: 'linear-gradient(135deg,#4338ca,#6366f1)', border: 'none', borderRadius: 8, color: 'white', fontSize: 12, fontWeight: 600, cursor: 'pointer', opacity: !name.trim() ? 0.5 : 1 }}>
+          {creating ? '…' : 'Generate Key'}
+        </motion.button>
+      </div>
+
+      {keys.length === 0 && <div style={{ color: 'rgba(148,163,184,0.3)', fontSize: 12, textAlign: 'center', padding: '10px 0' }}>No API keys yet</div>}
+
+      {keys.map(k => (
+        <div key={k.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(99,102,241,0.07)' }}>
+          <div>
+            <span style={{ color: 'white', fontSize: 13 }}>{k.name}</span>
+            <span style={{ color: 'rgba(148,163,184,0.3)', fontSize: 11, marginLeft: 8 }}>{k.key_prefix}…</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {k.last_used && <span style={{ color: 'rgba(148,163,184,0.3)', fontSize: 11 }}>last used {new Date(k.last_used).toLocaleDateString()}</span>}
+            <button onClick={() => remove(k.id)} style={{ background: 'none', border: 'none', color: 'rgba(244,63,94,0.4)', cursor: 'pointer' }}><Trash2 size={12} /></button>
+          </div>
+        </div>
+      ))}
+
+      <div style={{ marginTop: 14, padding: 12, background: 'rgba(99,102,241,0.05)', borderRadius: 8, fontSize: 11, color: 'rgba(148,163,184,0.5)', lineHeight: 1.7 }}>
+        <strong style={{ color: '#a5b4fc' }}>Endpoint:</strong> POST https://sandbox.phoenixhomeremodeling.net/api/trigger<br/>
+        <strong style={{ color: '#a5b4fc' }}>Headers:</strong> x-api-key: your-key, Content-Type: application/json<br/>
+        <strong style={{ color: '#a5b4fc' }}>Body:</strong> {'{'}&#34;agent_id&#34;:&#34;writer&#34;,&#34;title&#34;:&#34;Task title&#34;,&#34;description&#34;:&#34;Details&#34;,&#34;type&#34;:&#34;general&#34;{'}'}
+      </div>
+    </div>
+  )
+}
+
 function SettingsView() {
   const [openaiUrl, setOpenaiUrl] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('openaiUrl') || 'https://api.openai.com/v1' : '')
   const [model, setModel] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('openaiModel') || 'gpt-4o-mini' : '')
@@ -1673,6 +1762,7 @@ function SettingsView() {
   return (
     <div style={{ padding: 24, maxWidth: 520 }}>
       <h1 style={{ color: 'white', fontWeight: 700, fontSize: 22, margin: '0 0 24px' }}>Settings</h1>
+      <ApiKeysPanel />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
         {[
           { label: 'OPENAI BASE URL', value: openaiUrl, set: setOpenaiUrl, placeholder: 'https://api.openai.com/v1' },
@@ -1741,7 +1831,6 @@ function SchedulesView({ agents }: { agents: Agent[] }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
         <div>
           <h1 style={{ color: 'white', fontWeight: 700, fontSize: 22, margin: 0 }}>Schedules</h1>
-      <ApiKeysPanel />
           <p style={{ color: 'rgba(148,163,184,0.5)', fontSize: 13, margin: '4px 0 0' }}>Automate agent tasks on a recurring schedule</p>
         </div>
         <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => setShowForm(!showForm)}
