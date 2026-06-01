@@ -89,7 +89,7 @@ async function ask(agentId: string, systemPrompt: string, userPrompt: string, ma
     const reply = completion.choices[0].message.content || ''
 
     // Check if agent wants to call an integration
-    const callMatch = reply.match(/\{\{CALL:([^:]+):(.+?)\}\}/s)
+    const callMatch = reply.match(/\{\{CALL:([^:]+):([\s\S]+?)\}\}/)
     if (!callMatch) {
       finalContent = reply
       break
