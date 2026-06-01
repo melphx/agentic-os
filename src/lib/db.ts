@@ -337,7 +337,7 @@ export function getKnowledgeContent(agentId: string): string {
     SELECT filename, content FROM agent_knowledge WHERE agent_id = ? ORDER BY created_at DESC
   `).all(agentId) as { filename: string; content: string }[]
   if (!rows.length) return ''
-  return rows.map(r => `--- Knowledge: ${r.filename} ---\n${r.content.slice(0, 3000)}`).join('\n\n')
+  return rows.map(r => `--- Knowledge File: ${r.filename} ---\n${r.content.slice(0, 8000)}`).join('\n\n')
 }
 
 export function saveKnowledge(agentId: string, filename: string, fileType: string, fileSize: number, content: string): AgentKnowledge {

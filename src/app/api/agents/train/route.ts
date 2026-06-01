@@ -12,7 +12,7 @@ const SUPPORTED_TYPES: Record<string, string> = {
   'application/pdf': 'pdf',
 }
 
-function extractText(buffer: Buffer, mimeType: string, filename: string): string {
+async function extractText(buffer: Buffer, mimeType: string, filename: string): Promise<string> {
   const raw = buffer.toString('utf-8')
 
   // HTML: strip tags
@@ -26,29 +26,27 @@ function extractText(buffer: Buffer, mimeType: string, filename: string): string
 
   // JSON: pretty-print
   if (mimeType === 'application/json' || filename.endsWith('.json')) {
-    try {
-      const parsed = JSON.parse(raw)
-      return JSON.stringify(parsed, null, 2)
-    } catch {
-      return raw
-    }
+    try { return JSON.stringify(JSON.parse(raw), null, 2) } catch { return raw }
   }
 
-  // PDF: basic text extraction (strip binary, grab readable chars)
+  // PDF: use pdf-parse for proper text extraction
   if (mimeType === 'application/pdf' || filename.endsWith('.pdf')) {
-    // Extract text between BT and ET markers (basic PDF text extraction)
-    const text = buffer.toString('latin1')
-    const textMatches = text.match(/BT[\s\S]*?ET/g) || []
-    if (textMatches.length > 0) {
-      const extracted = textMatches
-        .join('\n')
-        .replace(/[^\x20-\x7E\n]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-      if (extracted.length > 100) return extracted
-    }
-    // Fallback: grab printable ASCII runs
-    return text.replace(/[^\x20-\x7E\n]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 50000)
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const pdfParse = require('pdf-parse')
+      const data = await pdfParse(buffer)
+      const text = data.text?.trim()
+      if (text && text.length > 50) return text.slice(0, 100000)
+    } catch {}
+    // Fallback: extract readable ASCII runs (avoids raw PDF structure)
+    const latin = buffer.toString('latin1')
+    const runs = latin.match(/[\x20-\x7E]{4,}/g) || []
+    const cleaned = runs
+      .filter(r => r.trim().split(' ').length > 1) // only keep multi-word runs
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    return cleaned.length > 100 ? cleaned.slice(0, 100000) : ''
   }
 
   // Default: return as-is
@@ -92,7 +90,7 @@ export async function POST(req: NextRequest) {
       const mimeType = file.type || 'text/plain'
       const fileType = SUPPORTED_TYPES[mimeType] || (file.name.match(/\.(md|txt|csv|json|html|pdf)$/) ? 'text' : 'text')
 
-      const content = extractText(buffer, mimeType, file.name)
+      const content = await extractText(buffer, mimeType, file.name)
       if (!content.trim()) {
         saved.push({ filename: file.name, error: 'Could not extract text from file' })
         continue

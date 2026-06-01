@@ -58,10 +58,12 @@ async function ask(agentId: string, systemPrompt: string, userPrompt: string, ma
   // Use custom prompt if set, otherwise use provided systemPrompt
   const baseSystem = customPromptCache[agentId] || systemPrompt
   let fullSystem  = baseSystem
+
+  // Inject knowledge at the TOP of the system prompt so it is never ignored
   if (knowledge) {
-    fullSystem += `\n\n=== AGENT KNOWLEDGE BASE ===\n${knowledge}\n=== END KNOWLEDGE BASE ===\nAlways reference the above knowledge when relevant to the task.`
+    fullSystem = `You have been given the following knowledge base. You MUST use this information when answering. Do not say you lack information if it appears below.\n\n=== YOUR KNOWLEDGE BASE ===\n${knowledge}\n=== END KNOWLEDGE BASE ===\n\n` + fullSystem
   }
-  if (memory)    fullSystem += `\n\nRecent memory:\n${memory}`
+  if (memory) fullSystem += `\n\nYour recent task memory:\n${memory}`
 
   const completion = await client.chat.completions.create({
     model: MODEL,
