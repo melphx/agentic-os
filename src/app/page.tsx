@@ -1,11 +1,12 @@
 'use client'
-import { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   LayoutDashboard, Bot, ListTodo, Terminal as TerminalIcon,
   Settings, Send, ChevronLeft, Play, RefreshCw, LogOut,
   AlertCircle, CheckCircle, Clock, Zap, Activity, X, Search, Bell,
   BookOpen, Trash2, Download, Cpu, SlidersHorizontal, Layers, Copy, Check, Plus, Globe, TestTube,
+  BarChart2, GitBranch, Key,
 } from 'lucide-react'
 
 // ── Types ──────────────────────────────────────────────────────────────────
