@@ -351,3 +351,77 @@ export function saveKnowledge(agentId: string, filename: string, fileType: strin
 export function deleteKnowledge(id: number, agentId: string) {
   getDb().prepare('DELETE FROM agent_knowledge WHERE id = ? AND agent_id = ?').run(id, agentId)
 }
+
+// ── Agent Integrations ─────────────────────────────────────────────────────
+
+export interface AgentIntegration {
+  id: number
+  agent_id: string
+  name: string
+  type: 'webhook' | 'n8n' | 'ghl_read' | 'ghl_write' | 'google_sheets' | 'google_docs' | 'browser'
+  description: string
+  config: string  // JSON string
+  enabled: number
+  created_at: string
+}
+
+export function ensureIntegrationsTable() {
+  getDb().exec(`
+    CREATE TABLE IF NOT EXISTS agent_integrations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      agent_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      description TEXT NOT NULL,
+      config TEXT NOT NULL DEFAULT '{}',
+      enabled INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `)
+}
+
+export function getIntegrations(agentId: string): AgentIntegration[] {
+  ensureIntegrationsTable()
+  return getDb().prepare(
+    'SELECT * FROM agent_integrations WHERE agent_id = ? AND enabled = 1 ORDER BY created_at ASC'
+  ).all(agentId) as AgentIntegration[]
+}
+
+export function getAllIntegrations(agentId: string): AgentIntegration[] {
+  ensureIntegrationsTable()
+  return getDb().prepare(
+    'SELECT * FROM agent_integrations WHERE agent_id = ? ORDER BY created_at ASC'
+  ).all(agentId) as AgentIntegration[]
+}
+
+export function createIntegration(data: Omit<AgentIntegration, 'id' | 'created_at'>): AgentIntegration {
+  ensureIntegrationsTable()
+  const info = getDb().prepare(`
+    INSERT INTO agent_integrations (agent_id, name, type, description, config, enabled)
+    VALUES (@agent_id, @name, @type, @description, @config, @enabled)
+  `).run(data)
+  return getDb().prepare('SELECT * FROM agent_integrations WHERE id = ?').get(info.lastInsertRowid) as AgentIntegration
+}
+
+export function updateIntegration(id: number, fields: Partial<AgentIntegration>) {
+  ensureIntegrationsTable()
+  const allowed = ['name', 'type', 'description', 'config', 'enabled']
+  const updates = Object.entries(fields).filter(([k]) => allowed.includes(k)).map(([k]) => `${k} = @${k}`).join(', ')
+  if (!updates) return
+  getDb().prepare(`UPDATE agent_integrations SET ${updates} WHERE id = @id`).run({ ...fields, id })
+}
+
+export function deleteIntegration(id: number, agentId: string) {
+  ensureIntegrationsTable()
+  getDb().prepare('DELETE FROM agent_integrations WHERE id = ? AND agent_id = ?').run(id, agentId)
+}
+
+// Returns a formatted string describing all integrations for injection into system prompt
+export function getIntegrationContext(agentId: string): string {
+  const integrations = getIntegrations(agentId)
+  if (!integrations.length) return ''
+  const lines = integrations.map(i =>
+    `- [${i.name}] (type: ${i.type}): ${i.description}`
+  )
+  return `You have access to the following integrations. To call one, output exactly:\n{{CALL:integration_name:json_payload}}\nWhere json_payload is the data to send (use {} if none).\n\nAvailable integrations:\n${lines.join('\n')}`
+}

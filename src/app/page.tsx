@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Bot, ListTodo, Terminal as TerminalIcon,
   Settings, Send, ChevronLeft, Play, RefreshCw, LogOut,
   AlertCircle, CheckCircle, Clock, Zap, Activity, X, Search, Bell,
-  BookOpen, Trash2, Download, Cpu, SlidersHorizontal, Layers, Copy, Check,
+  BookOpen, Trash2, Download, Cpu, SlidersHorizontal, Layers, Copy, Check, Zap, Plus, Globe, TestTube,
 } from 'lucide-react'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -676,6 +676,244 @@ function AgentPromptEditor({ agent }: { agent: Agent }) {
   )
 }
 
+// ── Agent integrations ────────────────────────────────────────────────────
+
+interface AgentIntegration {
+  id: number; agent_id: string; name: string
+  type: string; description: string; config: string; enabled: number; created_at: string
+}
+
+const INTEGRATION_ICONS: Record<string, string> = {
+  webhook: '🔗', n8n: '⚡', ghl_read: '📥', ghl_write: '📤',
+  google_sheets: '📊', google_docs: '📝', browser: '🌐',
+}
+
+const INTEGRATION_LABELS: Record<string, string> = {
+  webhook: 'Webhook', n8n: 'N8N Workflow', ghl_read: 'GHL Read',
+  ghl_write: 'GHL Write', google_sheets: 'Google Sheets', google_docs: 'Google Docs', browser: 'Browser',
+}
+
+const INTEGRATION_FIELDS: Record<string, { key: string; label: string; placeholder: string; secret?: boolean }[]> = {
+  webhook: [
+    { key: 'url', label: 'Webhook URL', placeholder: 'https://...' },
+    { key: 'method', label: 'Method', placeholder: 'POST' },
+    { key: 'apiKey', label: 'API Key (optional)', placeholder: 'Bearer token', secret: true },
+    { key: 'bodyTemplate', label: 'Body Template JSON (optional)', placeholder: '{"key":"value"}' },
+  ],
+  n8n: [
+    { key: 'url', label: 'N8N Webhook URL', placeholder: 'https://your-n8n.com/webhook/...' },
+    { key: 'method', label: 'Method', placeholder: 'POST' },
+    { key: 'apiKey', label: 'API Key (optional)', placeholder: '', secret: true },
+  ],
+  ghl_read: [
+    { key: 'apiKey', label: 'GHL API Key', placeholder: 'eyJhbGci...', secret: true },
+    { key: 'locationId', label: 'Location ID', placeholder: 'abc123...' },
+    { key: 'resource', label: 'Resource', placeholder: 'contacts | opportunities | pipelines | conversations' },
+    { key: 'limit', label: 'Limit', placeholder: '20' },
+  ],
+  ghl_write: [
+    { key: 'apiKey', label: 'GHL API Key', placeholder: 'eyJhbGci...', secret: true },
+    { key: 'locationId', label: 'Location ID', placeholder: 'abc123...' },
+    { key: 'action', label: 'Action', placeholder: 'create_contact | add_note | create_opportunity' },
+  ],
+  google_sheets: [
+    { key: 'spreadsheetId', label: 'Spreadsheet ID', placeholder: '1BxiM...' },
+    { key: 'range', label: 'Range', placeholder: 'Sheet1!A1:Z100' },
+    { key: 'action', label: 'Action', placeholder: 'read | write' },
+    { key: 'serviceAccountJson', label: 'Service Account JSON', placeholder: '{"type":"service_account",...}', secret: true },
+  ],
+  google_docs: [
+    { key: 'documentId', label: 'Document ID', placeholder: '1BxiM...' },
+    { key: 'action', label: 'Action', placeholder: 'read | append' },
+    { key: 'serviceAccountJson', label: 'Service Account JSON', placeholder: '{"type":"service_account",...}', secret: true },
+  ],
+  browser: [
+    { key: 'url', label: 'Target URL', placeholder: 'https://...' },
+  ],
+}
+
+function IntegrationsPanel({ agent }: { agent: Agent }) {
+  const [integrations, setIntegrations] = useState<AgentIntegration[]>([])
+  const [showAdd, setShowAdd] = useState(false)
+  const [testing, setTesting] = useState<number | null>(null)
+  const [testResult, setTestResult] = useState<{ id: number; ok: boolean; msg: string } | null>(null)
+
+  useEffect(() => { load() }, [agent.id])
+
+  async function load() {
+    const res = await fetch(`/api/agents/${agent.id}/integrations`)
+    if (res.ok) setIntegrations(await res.json())
+  }
+
+  async function toggle(integ: AgentIntegration) {
+    await fetch(`/api/agents/${agent.id}/integrations`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: integ.id, enabled: integ.enabled ? 0 : 1 }),
+    })
+    load()
+  }
+
+  async function remove(id: number) {
+    await fetch(`/api/agents/${agent.id}/integrations?integration_id=${id}`, { method: 'DELETE' })
+    load()
+  }
+
+  async function test(integ: AgentIntegration) {
+    setTesting(integ.id)
+    setTestResult(null)
+    try {
+      const res = await fetch(`/api/agents/${agent.id}/integrations/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: integ.type, config: integ.config, payload: {} }),
+      })
+      const data = await res.json()
+      setTestResult({ id: integ.id, ok: data.ok, msg: data.ok ? (data.result || 'OK').slice(0, 200) : (data.error || 'Failed') })
+    } catch (e: any) {
+      setTestResult({ id: integ.id, ok: false, msg: e.message })
+    } finally { setTesting(null) }
+  }
+
+  return (
+    <div style={{ padding: '16px 24px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Zap size={14} color="#a5b4fc" />
+          <span style={{ color: 'white', fontWeight: 600, fontSize: 13 }}>Integrations</span>
+          <span style={{ fontSize: 11, color: 'rgba(148,163,184,0.4)' }}>— external tools this agent can call</span>
+        </div>
+        <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }} onClick={() => setShowAdd(true)}
+          style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', background: `linear-gradient(135deg,${agent.accent_dark},${agent.accent})`, border: 'none', borderRadius: 7, color: 'white', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+          <Plus size={11} /> Add
+        </motion.button>
+      </div>
+
+      {integrations.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '24px 0', color: 'rgba(148,163,184,0.3)', fontSize: 12 }}>
+          No integrations yet. Add GHL, N8N, webhooks, Google services and more.
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {integrations.map(integ => (
+          <div key={integ.id} style={{ background: 'rgba(99,102,241,0.05)', border: `1px solid ${integ.enabled ? 'rgba(99,102,241,0.2)' : 'rgba(148,163,184,0.08)'}`, borderRadius: 10, padding: '10px 14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 16 }}>{INTEGRATION_ICONS[integ.type] || '🔌'}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ color: 'white', fontWeight: 600, fontSize: 13 }}>{integ.name}</span>
+                  <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 10, background: 'rgba(99,102,241,0.15)', color: '#a5b4fc' }}>{INTEGRATION_LABELS[integ.type] || integ.type}</span>
+                  {!integ.enabled && <span style={{ fontSize: 10, color: 'rgba(148,163,184,0.4)' }}>disabled</span>}
+                </div>
+                <p style={{ color: 'rgba(148,163,184,0.5)', fontSize: 11, margin: '2px 0 0' }}>{integ.description}</p>
+              </div>
+              <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                <button onClick={() => test(integ)} disabled={testing === integ.id}
+                  style={{ padding: '3px 8px', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 6, color: '#a5b4fc', fontSize: 10, cursor: 'pointer' }}>
+                  {testing === integ.id ? '…' : '▶ Test'}
+                </button>
+                <button onClick={() => toggle(integ)}
+                  style={{ padding: '3px 8px', background: integ.enabled ? 'rgba(16,185,129,0.1)' : 'rgba(148,163,184,0.08)', border: `1px solid ${integ.enabled ? 'rgba(16,185,129,0.3)' : 'rgba(148,163,184,0.15)'}`, borderRadius: 6, color: integ.enabled ? '#10b981' : 'rgba(148,163,184,0.4)', fontSize: 10, cursor: 'pointer' }}>
+                  {integ.enabled ? 'On' : 'Off'}
+                </button>
+                <button onClick={() => remove(integ.id)}
+                  style={{ padding: '3px 6px', background: 'transparent', border: 'none', color: 'rgba(244,63,94,0.4)', cursor: 'pointer' }}>
+                  <Trash2 size={11} />
+                </button>
+              </div>
+            </div>
+            {testResult?.id === integ.id && (
+              <div style={{ marginTop: 8, padding: '6px 10px', borderRadius: 6, background: testResult.ok ? 'rgba(16,185,129,0.08)' : 'rgba(244,63,94,0.08)', border: `1px solid ${testResult.ok ? 'rgba(16,185,129,0.2)' : 'rgba(244,63,94,0.2)'}`, color: testResult.ok ? '#10b981' : '#f43f5e', fontSize: 11, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                {testResult.ok ? '✓ ' : '✗ '}{testResult.msg}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {showAdd && <AddIntegrationModal agent={agent} onClose={() => { setShowAdd(false); load() }} />}
+    </div>
+  )
+}
+
+function AddIntegrationModal({ agent, onClose }: { agent: Agent; onClose: () => void }) {
+  const [type, setType] = useState('webhook')
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [fields, setFields] = useState<Record<string, string>>({})
+  const [saving, setSaving] = useState(false)
+
+  const fieldDefs = INTEGRATION_FIELDS[type] || []
+
+  async function save() {
+    if (!name.trim()) return
+    setSaving(true)
+    await fetch(`/api/agents/${agent.id}/integrations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, type, description, config: fields }),
+    })
+    setSaving(false)
+    onClose()
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}>
+      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+        style={{ width: 500, maxHeight: '85vh', overflowY: 'auto', background: '#0f1623', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 16, padding: 24 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+          <span style={{ color: 'white', fontWeight: 700, fontSize: 15 }}>Add Integration</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'rgba(148,163,184,0.5)', cursor: 'pointer', fontSize: 18 }}>✕</button>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div>
+            <label style={{ color: 'rgba(148,163,184,0.7)', fontSize: 11, marginBottom: 4, display: 'block' }}>TYPE</label>
+            <select value={type} onChange={e => { setType(e.target.value); setFields({}) }}
+              style={{ width: '100%', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, padding: '8px 10px', color: 'white', fontSize: 13, outline: 'none' }}>
+              {Object.entries(INTEGRATION_LABELS).map(([k, v]) => (
+                <option key={k} value={k} style={{ background: '#0f1623' }}>{INTEGRATION_ICONS[k]} {v}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label style={{ color: 'rgba(148,163,184,0.7)', fontSize: 11, marginBottom: 4, display: 'block' }}>NAME (what the agent calls it)</label>
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Get GHL Contacts"
+              style={{ width: '100%', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, padding: '8px 10px', color: 'white', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+          </div>
+
+          <div>
+            <label style={{ color: 'rgba(148,163,184,0.7)', fontSize: 11, marginBottom: 4, display: 'block' }}>DESCRIPTION (tell the agent when to use it)</label>
+            <input value={description} onChange={e => setDescription(e.target.value)} placeholder="e.g. Fetch recent contacts from GoHighLevel CRM"
+              style={{ width: '100%', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, padding: '8px 10px', color: 'white', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+          </div>
+
+          {fieldDefs.map(fd => (
+            <div key={fd.key}>
+              <label style={{ color: 'rgba(148,163,184,0.7)', fontSize: 11, marginBottom: 4, display: 'block' }}>{fd.label.toUpperCase()}</label>
+              <input
+                type={fd.secret ? 'password' : 'text'}
+                value={fields[fd.key] || ''} onChange={e => setFields(f => ({ ...f, [fd.key]: e.target.value }))}
+                placeholder={fd.placeholder}
+                style={{ width: '100%', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, padding: '8px 10px', color: 'white', fontSize: 12, outline: 'none', boxSizing: 'border-box', fontFamily: fd.key.includes('Json') ? 'monospace' : 'inherit' }} />
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
+          <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={save} disabled={saving || !name.trim()}
+            style={{ flex: 1, padding: '9px', background: `linear-gradient(135deg,${agent.accent_dark},${agent.accent})`, border: 'none', borderRadius: 9, color: 'white', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: !name.trim() ? 0.5 : 1 }}>
+            {saving ? 'Saving…' : 'Save Integration'}
+          </motion.button>
+          <button onClick={onClose} style={{ padding: '9px 16px', background: 'transparent', border: '1px solid rgba(148,163,184,0.15)', borderRadius: 9, color: 'rgba(148,163,184,0.5)', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
 // ── Quick task templates ───────────────────────────────────────────────────
 
 const AGENT_TEMPLATES: Record<string, { label: string; description: string; type: string }[]> = {
@@ -716,7 +954,7 @@ function AgentDetailView({ agent, onBack, onRunTask }: { agent: Agent; onBack: (
   // BUG FIX: track by ID only — never overwritten by polls
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null)
   const [loadingTasks, setLoadingTasks] = useState(false)
-  const [tab, setTab] = useState<'tasks' | 'train'>('tasks')
+  const [tab, setTab] = useState<'tasks' | 'train' | 'integrations'>('tasks')
 
   // Derive selected task from ID — always current data, never stale
   const selectedTask = tasks.find(t => t.id === selectedTaskId) ?? null
@@ -770,11 +1008,15 @@ function AgentDetailView({ agent, onBack, onRunTask }: { agent: Agent; onBack: (
         </div>
 
         {/* Tab switcher */}
-        <div style={{ display: 'flex', padding: '8px 10px 0', gap: 4, flexShrink: 0 }}>
-          {(['tasks', 'train'] as const).map(t => (
+        <div style={{ display: 'flex', padding: '8px 10px 0', gap: 3, flexShrink: 0 }}>
+          {([
+            { id: 'tasks', label: 'Tasks', icon: <ListTodo size={10} /> },
+            { id: 'train', label: 'Train', icon: <BookOpen size={10} /> },
+            { id: 'integrations', label: 'Tools', icon: <Zap size={10} /> },
+          ] as const).map(({ id: t, label, icon }) => (
             <button key={t} onClick={() => setTab(t)}
-              style={{ flex: 1, padding: '6px 0', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600, background: tab === t ? `${agent.accent}25` : 'transparent', color: tab === t ? agent.accent : 'rgba(148,163,184,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, transition: 'all 0.12s' }}>
-              {t === 'tasks' ? <><ListTodo size={11} /> Tasks</> : <><BookOpen size={11} /> Train</>}
+              style={{ flex: 1, padding: '5px 0', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 10, fontWeight: 600, background: tab === t ? `${agent.accent}25` : 'transparent', color: tab === t ? agent.accent : 'rgba(148,163,184,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, transition: 'all 0.12s' }}>
+              {icon}{label}
             </button>
           ))}
         </div>
@@ -838,6 +1080,10 @@ function AgentDetailView({ agent, onBack, onRunTask }: { agent: Agent; onBack: (
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
             <TrainPanel agent={agent} />
             <AgentPromptEditor agent={agent} />
+          </div>
+        ) : tab === 'integrations' ? (
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            <IntegrationsPanel agent={agent} />
           </div>
         ) : selectedTask ? (
           <TaskThreadView key={selectedTaskId!} task={selectedTask} agent={agent} onCancelled={refresh} />

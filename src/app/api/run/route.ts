@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
-import { getDb, updateAgent, addLog, recordMetric, createTask, saveMemory, getMemory, getKnowledgeContent } from '@/lib/db'
+import { getDb, updateAgent, addLog, recordMetric, createTask, saveMemory, getMemory, getKnowledgeContent, getIntegrations, getIntegrationContext } from '@/lib/db'
+import { executeIntegration } from '@/lib/integrations'
 import { exec } from 'child_process'
 import { promisify } from 'util'
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
@@ -65,18 +66,62 @@ async function ask(agentId: string, systemPrompt: string, userPrompt: string, ma
   }
   if (memory) fullSystem += `\n\nYour recent task memory:\n${memory}`
 
-  const completion = await client.chat.completions.create({
-    model: MODEL,
-    max_completion_tokens: maxTokens,
-    messages: [
-      { role: 'system', content: fullSystem },
-      { role: 'user', content: userPrompt },
-    ],
-  })
-  return {
-    content: completion.choices[0].message.content || '',
-    tokens: completion.usage?.total_tokens || 0,
+  // Inject integration tool descriptions
+  const integrationCtx = getIntegrationContext(agentId)
+  if (integrationCtx) fullSystem += `\n\n${integrationCtx}`
+
+  const messages: any[] = [
+    { role: 'system', content: fullSystem },
+    { role: 'user', content: userPrompt },
+  ]
+
+  let totalTokens = 0
+  let finalContent = ''
+
+  // Tool-calling loop: agent can invoke integrations up to 3 times
+  for (let round = 0; round < 4; round++) {
+    const completion = await client.chat.completions.create({
+      model: MODEL,
+      max_completion_tokens: maxTokens,
+      messages,
+    })
+    totalTokens += completion.usage?.total_tokens || 0
+    const reply = completion.choices[0].message.content || ''
+
+    // Check if agent wants to call an integration
+    const callMatch = reply.match(/\{\{CALL:([^:]+):(.+?)\}\}/s)
+    if (!callMatch) {
+      finalContent = reply
+      break
+    }
+
+    // Execute the integration
+    const [, integName, payloadRaw] = callMatch
+    const integrations = getIntegrations(agentId)
+    const integ = integrations.find(i => i.name.toLowerCase() === integName.toLowerCase() || i.name === integName)
+
+    let callResult: string
+    if (!integ) {
+      callResult = `Integration "${integName}" not found.`
+    } else {
+      try {
+        let payload: Record<string, any> = {}
+        try { payload = JSON.parse(payloadRaw) } catch {}
+        callResult = await executeIntegration(integ.type, JSON.parse(integ.config), payload)
+      } catch (e: any) {
+        callResult = `Integration error: ${e.message}`
+      }
+    }
+
+    // Feed result back to agent
+    messages.push({ role: 'assistant', content: reply })
+    messages.push({ role: 'user', content: `Integration result for ${integName}:
+${callResult}
+
+Now provide your final response using this data.` })
   }
+
+  return { content: finalContent || '(no response)', tokens: totalTokens }
 }
 
 // ── Vision helper ──────────────────────────────────────────────────────────
