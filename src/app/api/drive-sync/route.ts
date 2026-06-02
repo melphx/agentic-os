@@ -54,9 +54,12 @@ export async function POST(req: NextRequest) {
     for (const cfg of configs) {
       try {
         // Use OAuth token if service account not configured
-        const token = cfg.service_account_json && cfg.service_account_json !== '***'
-          ? await getGoogleToken(JSON.parse(cfg.service_account_json), 'https://www.googleapis.com/auth/drive.readonly')
-          : await getOAuthAccessToken()
+        // Use OAuth if no valid service account JSON stored
+        const saRaw = cfg.service_account_json
+        const useOAuth = !saRaw || saRaw === '***' || saRaw === 'oauth'
+        const token = useOAuth
+          ? await getOAuthAccessToken()
+          : await getGoogleToken(JSON.parse(saRaw), 'https://www.googleapis.com/auth/drive.readonly')
         // List files in folder
         const listRes = await fetch(`https://www.googleapis.com/drive/v3/files?q='${cfg.folder_id}'+in+parents+and+trashed=false&fields=files(id,name,mimeType,modifiedTime)&pageSize=50`, { headers: { Authorization: `Bearer ${token}` } })
         const listData = await listRes.json() as Record<string, any>
