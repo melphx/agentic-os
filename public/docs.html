@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude OS — Documentation</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#080c14;--surface:#0f1623;--border:rgba(99,102,241,0.15);--accent:#6366f1;--al:#a5b4fc;--text:#e2e8f0;--muted:rgba(148,163,184,0.6);--sw:272px}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:Inter,-apple-system,BlinkMacSystemFont,sans-serif;font-size:15px;line-height:1.7;display:flex;min-height:100vh}
+nav{width:var(--sw);min-width:var(--sw);background:var(--surface);border-right:1px solid var(--border);position:fixed;top:0;left:0;bottom:0;overflow-y:auto;padding:28px 0 48px;z-index:10}
+.nav-brand{padding:0 22px 22px;border-bottom:1px solid var(--border);margin-bottom:12px}
+.mark{width:34px;height:34px;background:linear-gradient(135deg,#4338ca,#6366f1);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px;margin-bottom:9px}
+.nav-brand h2{color:#fff;font-size:14px;font-weight:700}
+.nav-brand p{color:var(--muted);font-size:11px;margin-top:2px}
+.nav-cat{font-size:10px;font-weight:700;letter-spacing:.08em;color:rgba(148,163,184,.3);padding:14px 22px 3px;text-transform:uppercase}
+nav a{display:block;padding:6px 22px;color:var(--muted);text-decoration:none;font-size:13px;font-weight:500;transition:all .15s;border-left:2px solid transparent}
+nav a:hover,nav a.active{color:var(--al);border-left-color:var(--accent);background:rgba(99,102,241,.06)}
+main{margin-left:var(--sw);flex:1;max-width:860px;padding:52px 56px}
+.hero{background:linear-gradient(135deg,rgba(99,102,241,.1),rgba(6,182,212,.05));border:1px solid var(--border);border-radius:16px;padding:38px 42px;margin-bottom:44px}
+.hero h1{font-size:30px;font-weight:800;background:linear-gradient(135deg,#fff,#a5b4fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:10px}
+.sub{color:var(--muted);font-size:15px;max-width:580px;line-height:1.65}
+.badges{display:flex;gap:7px;flex-wrap:wrap;margin-top:18px}
+.badge{padding:3px 11px;border-radius:20px;font-size:11px;font-weight:600;background:rgba(99,102,241,.13);border:1px solid rgba(99,102,241,.25);color:var(--al)}
+.badge.g{background:rgba(16,185,129,.1);border-color:rgba(16,185,129,.25);color:#10b981}
+section{margin-bottom:56px;scroll-margin-top:28px}
+h2{font-size:21px;font-weight:700;color:#fff;padding-bottom:9px;border-bottom:1px solid var(--border);margin-bottom:18px;margin-top:6px}
+h3{font-size:15px;font-weight:600;color:var(--al);margin:22px 0 9px}
+p{color:var(--muted);margin-bottom:11px}
+p:last-child{margin-bottom:0}
+hr{border:none;border-top:1px solid var(--border);margin:28px 0}
+strong{color:var(--text);font-weight:600}
+table{width:100%;border-collapse:collapse;margin:14px 0 22px;font-size:13px;border:1px solid var(--border);border-radius:10px;overflow:hidden}
+th{background:rgba(99,102,241,.09);color:var(--al);font-weight:600;padding:9px 13px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border)}
+td{padding:9px 13px;border-bottom:1px solid rgba(99,102,241,.06);color:var(--muted);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td strong,td code{color:var(--text)}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12.5px;background:rgba(99,102,241,.1);color:#c4b5fd;padding:2px 6px;border-radius:4px;border:1px solid rgba(99,102,241,.2)}
+pre{background:rgba(0,0,0,.4);border:1px solid var(--border);border-radius:10px;padding:16px 18px;overflow-x:auto;margin:11px 0 18px}
+pre code{background:none;border:none;padding:0;color:#94a3b8;font-size:13px;line-height:1.65}
+ul,ol{padding-left:18px;margin:9px 0 14px}
+li{color:var(--muted);margin-bottom:5px;padding-left:3px}
+li strong{color:var(--text)}
+.note{border-radius:9px;padding:12px 16px;margin:14px 0;font-size:13.5px;line-height:1.6}
+.note-i{background:rgba(99,102,241,.07);border:1px solid rgba(99,102,241,.18);color:#c4b5fd}
+.note-t{background:rgba(16,185,129,.07);border:1px solid rgba(16,185,129,.18);color:#6ee7b7}
+.note-w{background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.18);color:#fcd34d}
+.agent-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;margin:14px 0}
+.ac{background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:14px}
+.ac .dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:7px}
+.ac h4{color:#fff;font-size:13px;font-weight:600;margin-bottom:3px}
+.ac p{font-size:12px;margin:0}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:rgba(99,102,241,.3);border-radius:2px}
+@media(max-width:768px){nav{display:none}main{margin-left:0;padding:22px 18px}.hero{padding:22px}}
+</style>
+</head>
+<body>
+<nav>
+  <div class="nav-brand"><div class="mark">&#9889;</div><h2>Claude OS</h2><p>Phoenix Home Remodeling</p></div>
+  <div class="nav-cat">Getting Started</div>
+  <a href="#start">Getting Started</a>
+  <a href="#dashboard">Dashboard</a>
+  <div class="nav-cat">Core Features</div>
+  <a href="#agents">Agents</a>
+  <a href="#tasks">Running Tasks</a>
+  <a href="#training">Training an Agent</a>
+  <a href="#integrations">Integrations</a>
+  <a href="#pipelines">Pipelines</a>
+  <a href="#projects">Projects</a>
+  <a href="#skills">Skills</a>
+  <div class="nav-cat">Automation</div>
+  <a href="#triggers">Event Triggers</a>
+  <a href="#schedules">Schedules</a>
+  <a href="#api">API Access</a>
+  <a href="#webhooks">Outbound Webhooks</a>
+  <div class="nav-cat">Platform</div>
+  <a href="#analytics">Analytics</a>
+  <a href="#search">Semantic Search</a>
+  <a href="#users">Multi-User</a>
+  <a href="#settings">Settings</a>
+  <div class="nav-cat">Operations</div>
+  <a href="#server">Server &amp; Deployment</a>
+  <a href="#troubleshooting">Troubleshooting</a>
+  <a href="#roadmap">Roadmap</a>
+</nav>
+<main>
+<div class="hero">
+  <h1>Claude OS Documentation</h1>
+  <p class="sub">Complete guide to running, managing, and automating your AI agent control center &mdash; built for Phoenix Home Remodeling.</p>
+  <div class="badges">
+    <span class="badge">Next.js 14</span><span class="badge">GPT-5.4</span><span class="badge">SQLite</span>
+    <span class="badge g">Live on VPS</span><span class="badge">Real-time Streaming</span><span class="badge">6 Default Agents</span>
+  </div>
+</div>
+
+<section id="start">
+<h2>Getting Started</h2>
+<h3>Accessing the App</h3>
+<p>Open your browser and go to:</p>
+<pre><code>https://sandbox.phoenixhomeremodeling.net</code></pre>
+<p>Log in with the credentials in <code>.env.local</code> on the server (<code>ADMIN_EMAIL</code> and <code>ADMIN_PASSWORD</code>).</p>
+<h3>First Time Setup</h3>
+<ol>
+<li>Log in and explore the 6 default agents</li>
+<li>Go to <strong>Settings &rarr; Company Knowledge Base</strong> and upload your service catalog, pricing, and FAQs</li>
+<li>Go to <strong>Settings &rarr; API Keys</strong> to generate a key for GHL or N8N</li>
+<li>Click any agent &rarr; <strong>Train tab</strong> &rarr; write a system prompt for that agent's role</li>
+</ol>
+</section>
+
+<section id="dashboard">
+<h2>The Dashboard</h2>
+<p>Shows active agents, completed tasks, tokens used, and a live activity feed. The <strong>Hermes chat panel</strong> on the right controls everything with natural language.</p>
+<table>
+<tr><th>Sidebar Item</th><th>What it does</th></tr>
+<tr><td><strong>Dashboard</strong></td><td>Overview and live activity feed</td></tr>
+<tr><td><strong>Agents</strong></td><td>View and manage individual agents</td></tr>
+<tr><td><strong>Tasks</strong></td><td>All tasks across all agents</td></tr>
+<tr><td><strong>Projects</strong></td><td>Group related tasks under a project</td></tr>
+<tr><td><strong>Pipelines</strong></td><td>Chain agents into automated workflows</td></tr>
+<tr><td><strong>Analytics</strong></td><td>Stats, token costs, charts</td></tr>
+<tr><td><strong>Triggers</strong></td><td>Auto-run agents when GHL events happen</td></tr>
+<tr><td><strong>Skills</strong></td><td>Add external AI models (Hermes, Groq, OpenClaw)</td></tr>
+<tr><td><strong>Schedules</strong></td><td>Recurring automated tasks</td></tr>
+<tr><td><strong>Settings</strong></td><td>API keys, users, company KB, webhooks, Drive sync</td></tr>
+</table>
+</section>
+
+<section id="agents">
+<h2>Agents</h2>
+<div class="agent-grid">
+  <div class="ac"><span class="dot" style="background:#06b6d4"></span><h4>Research Agent</h4><p>Web research, data gathering, summarisation</p></div>
+  <div class="ac"><span class="dot" style="background:#6366f1"></span><h4>Code Engineer</h4><p>Write, debug, and review code</p></div>
+  <div class="ac"><span class="dot" style="background:#10b981"></span><h4>Data Analyst</h4><p>Analyse data, write SQL, create reports</p></div>
+  <div class="ac"><span class="dot" style="background:#f59e0b"></span><h4>Content Writer</h4><p>Blog posts, emails, marketing copy</p></div>
+  <div class="ac"><span class="dot" style="background:#f43f5e"></span><h4>Email Manager</h4><p>Draft and manage email communications</p></div>
+  <div class="ac"><span class="dot" style="background:#a855f7"></span><h4>Security Analyst</h4><p>Vulnerability scanning, threat analysis</p></div>
+</div>
+<h3>Agent Tabs</h3>
+<table>
+<tr><th>Tab</th><th>What you can do</th></tr>
+<tr><td><strong>Tasks</strong></td><td>All tasks this agent has run — click any to open the full streaming conversation thread</td></tr>
+<tr><td><strong>Train</strong></td><td>Upload knowledge files, edit system prompt, manage Drive folders, save task templates</td></tr>
+<tr><td><strong>Tools &#9889;</strong></td><td>Configure external integrations: GHL, N8N, webhooks, Google Sheets/Docs, Obsidian</td></tr>
+</table>
+</section>
+
+<section id="tasks">
+<h2>Running Tasks</h2>
+<h3>Task Types</h3>
+<table>
+<tr><th>Type</th><th>Best for</th></tr>
+<tr><td><code>general</code></td><td>Writing, analysis, Q&amp;A — default for most tasks</td></tr>
+<tr><td><code>search</code></td><td>Research needing live web results</td></tr>
+<tr><td><code>browser</code></td><td>Visiting and reading a website</td></tr>
+<tr><td><code>code</code></td><td>Writing or executing scripts</td></tr>
+<tr><td><code>scrape</code></td><td>Extracting data from a specific URL</td></tr>
+<tr><td><code>file</code></td><td>Reading or writing files on the server</td></tr>
+<tr><td><code>api</code></td><td>Making HTTP requests to external services</td></tr>
+<tr><td><code>security</code></td><td>Running security scans</td></tr>
+</table>
+<h3>Real-time Streaming</h3>
+<p>Results appear word-by-word as the AI writes them. The task thread auto-opens the moment you click Run — no waiting for completion to see progress.</p>
+<h3>Task Actions</h3>
+<p>Available in the top-right header of every task thread:</p>
+<ul>
+<li><strong>Cancel</strong> — red &#10005; button while running or pending</li>
+<li><strong>Copy</strong> — copy result to clipboard</li>
+<li><strong>Export</strong> — download result as a <code>.md</code> file</li>
+<li><strong>Project</strong> — assign to a project via dropdown</li>
+<li><strong>Refine</strong> — chat input appears after completion to iterate on the result</li>
+<li><strong>Compact</strong> — appears after 4+ refine messages; summarises the conversation to free up context</li>
+</ul>
+<h3>Sub-agents</h3>
+<p>An agent can spawn a child agent mid-task using <code>&#123;&#123;SPAWN:agent_id:task description&#125;&#125;</code>. The child runs, completes, and the result feeds back to the parent automatically.</p>
+</section>
+
+<section id="training">
+<h2>Training an Agent</h2>
+<h3>System Prompt</h3>
+<p>The core instructions that shape every response. Go to <strong>Agent &rarr; Train &rarr; System Prompt</strong>. Every save creates a version you can roll back to via <code>/api/agents/[id]/versions</code>.</p>
+<h3>Knowledge Base (Files)</h3>
+<p>Upload PDFs, TXT, CSV, JSON, HTML, Markdown. Injected into every task the agent runs. Limit: 2MB per file.</p>
+<h3>Google Drive Folders</h3>
+<p>Link Drive folders directly to an agent in the Train tab. Files sync into the knowledge base on demand. Supports Google Docs, Sheets, Slides, PDFs, Word docs, and plain text. Requires Google OAuth connection in Settings.</p>
+<h3>Task Templates</h3>
+<p>Save reusable prompts with <code>&#123;&#123;variable&#125;&#125;</code> placeholders. Click Use &rarr; fill variables &rarr; dispatch. Templates live in the Train tab.</p>
+<h3>Company Knowledge Base</h3>
+<p>In <strong>Settings &rarr; Company Knowledge Base</strong>, upload files shared automatically by ALL agents. Perfect for service catalogs, pricing, and FAQs. Limit: 5MB per file.</p>
+</section>
+
+<section id="integrations">
+<h2>Integrations</h2>
+<p>Configure per-agent in the <strong>Tools &#9889; tab</strong>. Agents call them using <code>&#123;&#123;CALL:Name:&#123;"key":"value"&#125;&#125;&#125;</code> — up to 3 calls per task. Use the &#9654; Test button to verify each one.</p>
+<table>
+<tr><th>Type</th><th>What it does</th><th>Key fields</th></tr>
+<tr><td><strong>Webhook / N8N</strong></td><td>POST to any HTTP endpoint</td><td>URL, method, API key, body template</td></tr>
+<tr><td><strong>GHL Read</strong></td><td>Fetch contacts, opportunities, pipelines</td><td>API key, location ID, resource</td></tr>
+<tr><td><strong>GHL Write</strong></td><td>Create contacts, add notes, create opportunities</td><td>API key, location ID, action</td></tr>
+<tr><td><strong>Google Sheets</strong></td><td>Read/write spreadsheet data</td><td>Spreadsheet ID, range, service account</td></tr>
+<tr><td><strong>Google Docs</strong></td><td>Read or append to documents</td><td>Document ID, service account</td></tr>
+<tr><td><strong>Obsidian Vault</strong></td><td>Search, read, write notes</td><td>REST API URL or vault path on server</td></tr>
+</table>
+</section>
+
+<section id="pipelines">
+<h2>Pipelines</h2>
+<p>Chain agents so the output of one step becomes the input of the next.</p>
+<pre><code>Step 1: Research Agent  → "Research top remodeling trends in Phoenix"
+Step 2: Content Writer  → "Write a blog post based on the research above"
+Step 3: Email Manager   → "Draft a newsletter from this blog post"</code></pre>
+<ul>
+<li>Use <code>&#123;&#123;variable&#125;&#125;</code> in step descriptions for dynamic inputs filled at run time</li>
+<li>Toggle "Pass previous step output" to feed results forward</li>
+<li>Trigger via &#9654; Run button or API: <code>POST /api/pipelines/[id]/run</code></li>
+</ul>
+</section>
+
+<section id="projects">
+<h2>Projects</h2>
+<p>Group related tasks to track a larger piece of work across multiple agents and sessions.</p>
+<h3>Creating a Project</h3>
+<p>Go to <strong>Projects</strong> in the sidebar &rarr; <strong>+ New</strong>. Give it a name and optional description.</p>
+<h3>Adding Tasks to a Project</h3>
+<p>Open any task thread &rarr; click the <strong>Project</strong> button in the top-right header &rarr; select a project from the dropdown. The task appears immediately in that project's view.</p>
+<h3>Project Statuses</h3>
+<table>
+<tr><th>Status</th><th>Meaning</th></tr>
+<tr><td><strong>active</strong></td><td>Work in progress</td></tr>
+<tr><td><strong>paused</strong></td><td>On hold</td></tr>
+<tr><td><strong>completed</strong></td><td>Done</td></tr>
+</table>
+</section>
+
+<section id="skills">
+<h2>Skills</h2>
+<p>External AI model endpoints your agents can call mid-task. Go to <strong>Skills</strong> in the sidebar to add them.</p>
+<p>Agents call skills using: <code>&#123;&#123;SKILL:skill_name:your prompt&#125;&#125;</code></p>
+<h3>Quick-Add Presets</h3>
+<table>
+<tr><th>Skill</th><th>Description</th><th>Setup</th></tr>
+<tr><td><strong>Hermes 3 (Ollama)</strong></td><td>Free, local, runs on your VPS</td><td><code>ollama pull nous-hermes3</code></td></tr>
+<tr><td><strong>Groq (Llama 3)</strong></td><td>~500 tokens/sec, free tier available</td><td>Key from console.groq.com</td></tr>
+<tr><td><strong>Together AI</strong></td><td>Many open models, low cost</td><td>Key from api.together.xyz</td></tr>
+<tr><td><strong>OpenClaw</strong></td><td>OpenClaw model endpoint</td><td>Key from OpenClaw</td></tr>
+</table>
+<h3>Example Usage</h3>
+<pre><code>"Write a blog post about kitchen remodeling. Use
+{{SKILL:Groq Fast:Give me 5 catchy headlines for
+a kitchen remodeling blog post in Phoenix}} to get
+headlines first, then pick the best and write the full post."</code></pre>
+<p>The agent calls Groq, gets headlines, picks the best, and continues writing — all in one task.</p>
+<div class="note note-i">Skills are OpenAI-compatible endpoints. Any model that supports the OpenAI chat completions API works here.</div>
+</section>
+
+<section id="triggers">
+<h2>Event Triggers</h2>
+<p>Auto-run agents when something happens in GHL. Polls every 5 minutes. Configure in <strong>Triggers</strong> in the sidebar.</p>
+<table>
+<tr><th>Event</th><th>What fires</th></tr>
+<tr><td><strong>GHL New Contact</strong></td><td>Creates a task from your template and runs the selected agent</td></tr>
+<tr><td><strong>GHL New Opportunity</strong></td><td>Same, triggered by new opportunities</td></tr>
+</table>
+<p>Template variables: <code>&#123;&#123;name&#125;&#125;</code>, <code>&#123;&#123;email&#125;&#125;</code>, <code>&#123;&#123;phone&#125;&#125;</code>, <code>&#123;&#123;value&#125;&#125;</code>, <code>&#123;&#123;stage&#125;&#125;</code></p>
+<div class="note note-w">First check covers the past hour. Subsequent checks only catch items created since the last check.</div>
+</section>
+
+<section id="schedules">
+<h2>Schedules</h2>
+<p>Run tasks automatically on a recurring basis. Cron format: <code>minute hour day month weekday</code></p>
+<table>
+<tr><th>Expression</th><th>Meaning</th></tr>
+<tr><td><code>0 9 * * *</code></td><td>Every day at 9 AM</td></tr>
+<tr><td><code>0 9 * * 1</code></td><td>Every Monday at 9 AM</td></tr>
+<tr><td><code>0 8 1 * *</code></td><td>First of every month at 8 AM</td></tr>
+<tr><td><code>*/30 * * * *</code></td><td>Every 30 minutes</td></tr>
+</table>
+</section>
+
+<section id="api">
+<h2>API Access</h2>
+<p>Trigger agents from GHL, N8N, Zapier, or any system that can send HTTP requests.</p>
+<pre><code>POST https://sandbox.phoenixhomeremodeling.net/api/trigger
+x-api-key: cos_live_your_key_here
+Content-Type: application/json
+
+{
+  "agent_id": "writer",
+  "title": "Write follow-up for new lead",
+  "description": "Write a personalised follow-up for John Smith...",
+  "type": "general",
+  "priority": 1
+}</code></pre>
+<table>
+<tr><th>Agent</th><th>ID</th></tr>
+<tr><td>Research Agent</td><td><code>research</code></td></tr>
+<tr><td>Code Engineer</td><td><code>code</code></td></tr>
+<tr><td>Data Analyst</td><td><code>data</code></td></tr>
+<tr><td>Content Writer</td><td><code>writer</code></td></tr>
+<tr><td>Email Manager</td><td><code>email</code></td></tr>
+<tr><td>Security Analyst</td><td><code>security</code></td></tr>
+</table>
+<p>Generate keys in <strong>Settings &rarr; API Keys</strong>. The full key is shown once only — copy immediately.</p>
+</section>
+
+<section id="webhooks">
+<h2>Outbound Webhooks</h2>
+<p>When a task completes, Claude OS POSTs the result to your configured URL — GHL, N8N, Slack, or your own endpoint. Configure in <strong>Settings &rarr; Outbound Webhooks</strong>.</p>
+<pre><code>{
+  "event": "task.completed",
+  "task_id": 42,
+  "agent_id": "writer",
+  "title": "Write follow-up email",
+  "result": "Dear John...",
+  "tokens_used": 850,
+  "timestamp": "2026-06-03T14:22:11Z"
+}</code></pre>
+<p>Available events: <code>task.completed</code>, <code>task.failed</code>, or both.</p>
+</section>
+
+<section id="analytics">
+<h2>Analytics</h2>
+<table>
+<tr><th>Metric</th><th>Description</th></tr>
+<tr><td>Total Tasks</td><td>All tasks run across all agents</td></tr>
+<tr><td>Success Rate</td><td>Percentage completed without error</td></tr>
+<tr><td>Tokens Used</td><td>Total AI tokens consumed</td></tr>
+<tr><td>Estimated Cost</td><td>Approximate dollar cost based on token usage</td></tr>
+<tr><td>Avg Duration</td><td>How long tasks typically take to complete</td></tr>
+<tr><td>14-Day Chart</td><td>Task volume per day as a bar chart</td></tr>
+<tr><td>By Agent</td><td>Which agents are most active and their token usage</td></tr>
+<tr><td>By Type</td><td>Breakdown by task type</td></tr>
+</table>
+</section>
+
+<section id="search">
+<h2>Semantic Search</h2>
+<p>AI-powered search across all past task results by meaning, not keywords. Press <strong>Ctrl+Shift+F</strong> anywhere in the app to open it.</p>
+<p>Example: searching <em>"kitchen leads Phoenix"</em> finds tasks about kitchen remodeling leads even if those exact words aren't in the results. Results show a percentage match score.</p>
+<div class="note note-i">Every completed task is automatically indexed. Powered by OpenAI's text-embedding-3-small model.</div>
+</section>
+
+<section id="users">
+<h2>Multi-User</h2>
+<p>Add team members in <strong>Settings &rarr; Team Members</strong>. Each user logs in with their own email and password.</p>
+<table>
+<tr><th>Role</th><th>Permissions</th></tr>
+<tr><td><strong>admin</strong></td><td>Full access — agents, settings, users, API keys, everything</td></tr>
+<tr><td><strong>operator</strong></td><td>Create and run tasks, manage integrations, view all results</td></tr>
+<tr><td><strong>viewer</strong></td><td>View tasks and results only — cannot dispatch or configure</td></tr>
+</table>
+</section>
+
+<section id="settings">
+<h2>Settings</h2>
+<p>Environment variables are in <code>/root/agentic-os/.env.local</code> on the server:</p>
+<table>
+<tr><th>Variable</th><th>Purpose</th></tr>
+<tr><td><code>OPENAI_API_KEY</code></td><td>Your OpenAI API key</td></tr>
+<tr><td><code>OPENAI_MODEL</code></td><td>Model to use (currently <code>gpt-5.4</code>)</td></tr>
+<tr><td><code>OPENAI_BASE_URL</code></td><td>API endpoint (default: OpenAI)</td></tr>
+<tr><td><code>JWT_SECRET</code></td><td>Secret for login session tokens</td></tr>
+<tr><td><code>ADMIN_EMAIL</code></td><td>Primary admin login email</td></tr>
+<tr><td><code>ADMIN_PASSWORD</code></td><td>Primary admin login password</td></tr>
+<tr><td><code>INTERNAL_URL</code></td><td>Internal server URL (default: http://localhost:3000)</td></tr>
+<tr><td><code>TAVILY_API_KEY</code></td><td>For web search tasks</td></tr>
+</table>
+<div class="note note-w">Restart after any env change: <code>pm2 restart claude-os</code></div>
+<h3>Settings Panels</h3>
+<ul>
+<li><strong>Team Members</strong> — add users with admin/operator/viewer roles</li>
+<li><strong>Company Knowledge Base</strong> — files shared by all agents automatically</li>
+<li><strong>Outbound Webhooks</strong> — POST task results to external systems</li>
+<li><strong>Google Drive Sync</strong> — connect Drive folders and sync files</li>
+<li><strong>API Keys</strong> — generate keys for external systems to trigger agents</li>
+</ul>
+</section>
+
+<section id="server">
+<h2>Server &amp; Deployment</h2>
+<table>
+<tr><th>Item</th><th>Value</th></tr>
+<tr><td>Domain</td><td><code>sandbox.phoenixhomeremodeling.net</code></td></tr>
+<tr><td>App directory</td><td><code>/root/agentic-os</code></td></tr>
+<tr><td>Database</td><td><code>/root/agentic-os/data/claude-os.db</code></td></tr>
+<tr><td>Process manager</td><td>PM2</td></tr>
+<tr><td>Docs</td><td><code>https://sandbox.phoenixhomeremodeling.net/docs.html</code></td></tr>
+</table>
+<h3>Deploy Updates</h3>
+<pre><code>cd /root/agentic-os && git pull && npm install && npm run build && pm2 restart claude-os</code></pre>
+<h3>Useful Commands</h3>
+<pre><code># View live logs
+pm2 logs claude-os
+
+# Clear stuck tasks
+node -e "
+const db = require('better-sqlite3')('data/claude-os.db');
+db.prepare(\"UPDATE tasks SET status='failed',completed_at=datetime('now') WHERE status IN ('running','pending')\").run();
+db.prepare(\"UPDATE agents SET status='idle',current_task=NULL,progress=0\").run();
+console.log('Cleared');
+"
+
+# Database backup
+cp data/claude-os.db data/backup-$(date +%Y%m%d).db</code></pre>
+</section>
+
+<section id="troubleshooting">
+<h2>Troubleshooting</h2>
+<h3>Task stuck on Running</h3>
+<p>Run the clear command above. Tasks also auto-fail after 3 minutes via the global timeout.</p>
+<h3>Agent doesn't know about uploaded files</h3>
+<pre><code>cd /root/agentic-os
+node -e "const db=require('better-sqlite3')('data/claude-os.db');
+console.log(db.prepare('SELECT agent_id,filename,length(content) as chars FROM agent_knowledge').all())"</code></pre>
+<p>If <code>chars</code> is under 100, the file wasn't extracted properly. Re-upload it. PDFs need <code>npm install pdf-parse</code>.</p>
+<h3>Build fails</h3>
+<pre><code>git fetch origin && git reset --hard origin/master && npm install && npm run build && pm2 restart claude-os</code></pre>
+<h3>Google Drive returns 0 files</h3>
+<p>Copy the folder ID from the URL — the part after <code>/folders/</code>. Shared Drives are supported. Make sure the folder is shared with your connected Google account.</p>
+<h3>OpenAI API test</h3>
+<pre><code>cd /root/agentic-os
+export $(grep -E "^OPENAI_API_KEY|^OPENAI_MODEL" .env.local | xargs)
+node -e "
+const OpenAI = require('openai').default;
+new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 10000 })
+  .chat.completions.create({ model: process.env.OPENAI_MODEL, max_completion_tokens: 5, messages:[{role:'user',content:'hi'}] })
+  .then(r => console.log('OK:', r.choices[0].message.content))
+  .catch(e => console.error('FAIL:', e.message));
+"</code></pre>
+</section>
+
+<section id="roadmap">
+<h2>Roadmap</h2>
+<table>
+<tr><th>Feature</th><th>Status</th></tr>
+<tr><td>Human approval gates in pipelines</td><td>Planned</td></tr>
+<tr><td>Conditional pipeline branching (if/else)</td><td>Planned</td></tr>
+<tr><td>Bulk task dispatch from CSV</td><td>Planned</td></tr>
+<tr><td>Hermes/OpenClaw skill registry browser</td><td>Planned</td></tr>
+<tr><td>Auto-write task results to GHL contact notes</td><td>Planned</td></tr>
+<tr><td>Agent prompt versioning UI</td><td>Planned</td></tr>
+<tr><td>Per-agent token budget UI</td><td>Planned</td></tr>
+<tr><td>Output templates (PDF, Google Doc)</td><td>Planned</td></tr>
+<tr><td>Scheduled Google Drive sync</td><td>Planned</td></tr>
+<tr><td>Mobile app with push notifications</td><td>Planned</td></tr>
+</table>
+</section>
+
+<hr>
+<p style="color:rgba(148,163,184,.25);font-size:12px;text-align:center;padding:20px 0 0">
+  Claude OS &mdash; Built for Phoenix Home Remodeling &middot; Last updated June 2026
+</p>
+</main>
+<script>
+const obs=new IntersectionObserver(entries=>{entries.forEach(e=>{if(e.isIntersecting){document.querySelectorAll('nav a').forEach(l=>l.classList.remove('active'));const a=document.querySelector('nav a[href="#'+e.target.id+'"]');if(a)a.classList.add('active')}})},{rootMargin:'-15% 0px -75% 0px'});
+document.querySelectorAll('section[id]').forEach(s=>obs.observe(s));
+</script>
+</body>
+</html>

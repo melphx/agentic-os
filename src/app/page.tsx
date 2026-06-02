@@ -504,6 +504,32 @@ function TaskThreadView({ task, agent, onCancelled }: { task: Task; agent: Agent
     refineMsgCache.set(task.id, refineMessages)
   }, [refineMessages, task.id])
 
+  const [compacting, setCompacting] = useState(false)
+
+  async function compact() {
+    if (compacting || refineMessages.length < 2) return
+    setCompacting(true)
+    try {
+      const history = refineMessages.map(m => `${m.role === 'user' ? 'User' : 'Agent'}: ${m.content}`).join('
+
+')
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: `Summarise this conversation in 2-3 sentences, preserving all key decisions, outputs, and context:
+
+${history}` }],
+          systemOverride: 'You are a conversation summariser. Produce a dense, factual summary that captures all important context. Start with "Summary of previous conversation:"',
+        }),
+      })
+      const data = await res.json()
+      const summary: Message = { role: 'assistant', content: data.content, ts: Date.now() }
+      setRefineMessages([summary])
+    } catch {}
+    setCompacting(false)
+  }
+
   async function cancelTask() {
     if (cancelling) return
     setCancelling(true)
@@ -588,6 +614,7 @@ function TaskThreadView({ task, agent, onCancelled }: { task: Task; agent: Agent
                 <Download size={12} /> Export
               </button>
             )}
+            <AddToProjectButton taskId={task.id} />
           </div>
         </div>
       </div>
@@ -645,6 +672,14 @@ function TaskThreadView({ task, agent, onCancelled }: { task: Task; agent: Agent
       </div>
 
       {/* Reply input — only shown when task is done */}
+      {refineMessages.length >= 4 && (liveStatus === 'completed' || liveStatus === 'failed') && (
+        <div style={{ padding: '4px 16px 0', display: 'flex', justifyContent: 'flex-end' }}>
+          <button onClick={compact} disabled={compacting}
+            style={{ fontSize: 10, color: 'rgba(148,163,184,0.35)', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3 }}>
+            {compacting ? '…' : '⬡ Compact conversation'}
+          </button>
+        </div>
+      )}
       {(liveStatus === 'completed' || liveStatus === 'failed') && (
         <div style={{ padding: '10px 16px 16px', borderTop: '1px solid rgba(99,102,241,0.1)', display: 'flex', gap: 8, flexShrink: 0 }}>
           <input ref={inputRef} value={input} onChange={e => setInput(e.target.value)}
@@ -662,6 +697,52 @@ function TaskThreadView({ task, agent, onCancelled }: { task: Task; agent: Agent
 }
 
 // ── Copy button helper ─────────────────────────────────────────────────────
+
+function AddToProjectButton({ taskId }: { taskId: number }) {
+  const [projects, setProjects] = useState<any[]>([])
+  const [open, setOpen] = useState(false)
+  const [added, setAdded] = useState<number | null>(null)
+
+  async function load() {
+    const r = await fetch('/api/projects')
+    if (r.ok) setProjects(await r.json())
+  }
+
+  async function add(projectId: number, projectName: string) {
+    await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'add_task', project_id: projectId, task_id: taskId }),
+    })
+    setAdded(projectId)
+    setOpen(false)
+    setTimeout(() => setAdded(null), 2000)
+  }
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button onClick={() => { setOpen(o => !o); load() }} title="Add to project"
+        style={{ background: 'none', border: 'none', color: added ? '#10b981' : 'rgba(148,163,184,0.4)', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
+        <Layers size={12} /> {added ? 'Added ✓' : 'Project'}
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: '#0f1623', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 10, minWidth: 180, zIndex: 50, boxShadow: '0 8px 24px rgba(0,0,0,0.4)' }}>
+          {projects.length === 0
+            ? <p style={{ color: 'rgba(148,163,184,0.4)', fontSize: 12, padding: '10px 14px', margin: 0 }}>No projects yet</p>
+            : projects.map((p: any) => (
+              <button key={p.id} onClick={() => add(p.id, p.name)}
+                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 14px', background: 'none', border: 'none', color: 'white', fontSize: 12, cursor: 'pointer', borderBottom: '1px solid rgba(99,102,241,0.07)' }}
+                onMouseEnter={e => (e.currentTarget.style.background = 'rgba(99,102,241,0.08)')}
+                onMouseLeave={e => (e.currentTarget.style.background = 'none')}>
+                {p.name}
+              </button>
+            ))
+          }
+        </div>
+      )}
+    </div>
+  )
+}
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
