@@ -61,7 +61,15 @@ export async function POST(req: NextRequest) {
           ? await getOAuthAccessToken()
           : await getGoogleToken(JSON.parse(saRaw), 'https://www.googleapis.com/auth/drive.readonly')
         // List files in folder
-        const listRes = await fetch(`https://www.googleapis.com/drive/v3/files?q='${cfg.folder_id}'+in+parents+and+trashed=false&fields=files(id,name,mimeType,modifiedTime)&pageSize=50`, { headers: { Authorization: `Bearer ${token}` } })
+        // supportsAllDrives + includeItemsFromAllDrives enables Shared Drive support
+        const listParams = new URLSearchParams({
+          q: `'${cfg.folder_id}' in parents and trashed=false`,
+          fields: 'files(id,name,mimeType,modifiedTime)',
+          pageSize: '100',
+          supportsAllDrives: 'true',
+          includeItemsFromAllDrives: 'true',
+        })
+        const listRes = await fetch(`https://www.googleapis.com/drive/v3/files?${listParams}`, { headers: { Authorization: `Bearer ${token}` } })
         const listData = await listRes.json() as Record<string, any>
         const files: any[] = listData.files || []
         let synced = 0
@@ -69,13 +77,13 @@ export async function POST(req: NextRequest) {
           let content = ''
           // Export based on mime type
           if (file.mimeType === 'application/vnd.google-apps.document') {
-            const r = await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=text/plain`, { headers: { Authorization: `Bearer ${token}` } })
+            const r = await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=text/plain&supportsAllDrives=true`, { headers: { Authorization: `Bearer ${token}` } })
             content = await r.text()
           } else if (file.mimeType === 'application/vnd.google-apps.spreadsheet') {
-            const r = await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=text/csv`, { headers: { Authorization: `Bearer ${token}` } })
+            const r = await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=text/csv&supportsAllDrives=true`, { headers: { Authorization: `Bearer ${token}` } })
             content = await r.text()
           } else if (file.mimeType?.startsWith('text/') || file.name?.match(/\.(txt|md|csv|json)$/)) {
-            const r = await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`, { headers: { Authorization: `Bearer ${token}` } })
+            const r = await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&supportsAllDrives=true`, { headers: { Authorization: `Bearer ${token}` } })
             content = await r.text()
           }
           if (content.trim().length > 50) {
