@@ -1022,7 +1022,7 @@ const AGENT_TEMPLATES: Record<string, { label: string; description: string; type
 
 // ── Agent Detail ───────────────────────────────────────────────────────────
 
-function AgentDetailView({ agent, onBack, onRunTask }: { agent: Agent; onBack: () => void; onRunTask: (a: Agent, prefill?: Partial<{ title: string; description: string; type: string }>) => void }) {
+function AgentDetailView({ agent, onBack, onRunTask, newTaskId, onNewTaskConsumed }: { agent: Agent; onBack: () => void; onRunTask: (a: Agent, prefill?: Partial<{ title: string; description: string; type: string }>) => void; newTaskId?: number | null; onNewTaskConsumed?: () => void }) {
   const [tasks, setTasks] = useState<Task[]>(agent.tasks || [])
   // BUG FIX: track by ID only — never overwritten by polls
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null)
@@ -1038,12 +1038,19 @@ function AgentDetailView({ agent, onBack, onRunTask }: { agent: Agent; onBack: (
     if (res.ok) {
       const d = await res.json()
       setTasks(d.tasks || [])
-      // Do NOT touch selectedTaskId — user's selection is preserved
     }
     setLoadingTasks(false)
   }
 
   useEffect(() => { refresh() }, [agent.id])
+
+  // Auto-select newly dispatched task so SSE connects before task completes
+  useEffect(() => {
+    if (!newTaskId) return
+    setSelectedTaskId(newTaskId)
+    // Refresh task list to include the new task, then clear the signal
+    refresh().then(() => onNewTaskConsumed?.())
+  }, [newTaskId])
 
   // Auto-poll while any task is running
   useEffect(() => {
@@ -2000,6 +2007,7 @@ export default function Page() {
   const [activity, setActivity]       = useState<LogEntry[]>([])
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null)
   const [runAgent, setRunAgent]       = useState<Agent | null>(null)
+  const [newTaskId, setNewTaskId]      = useState<number | null>(null)
   const [messages, setMessages]       = useState<Message[]>([])
   const [chatLoading, setChatLoading] = useState(false)
   const [toasts, setToasts]           = useState<Toast[]>([])
@@ -2070,9 +2078,15 @@ export default function Page() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     })
-    if (res.ok) addToast('Task dispatched: ' + data.title, 'success')
-    else addToast('Failed to dispatch task', 'error')
-    setTimeout(fetchAll, 1000)
+    if (res.ok) {
+      const json = await res.json()
+      addToast('Task dispatched: ' + data.title, 'success')
+      // Auto-select the new task so SSE connects immediately (before task completes)
+      if (json.taskId) setNewTaskId(json.taskId)
+      setTimeout(fetchAll, 800)
+    } else {
+      addToast('Failed to dispatch task', 'error')
+    }
   }
 
   async function handleLogout() {
@@ -2085,7 +2099,7 @@ export default function Page() {
 
   function mainContent() {
     if (liveSelectedAgent) return (
-      <AgentDetailView agent={liveSelectedAgent} onBack={() => setSelectedAgent(null)} onRunTask={a => setRunAgent(a)} />
+      <AgentDetailView agent={liveSelectedAgent} onBack={() => setSelectedAgent(null)} onRunTask={a => setRunAgent(a)} newTaskId={newTaskId} onNewTaskConsumed={() => setNewTaskId(null)} />
     )
     switch (view) {
       case 'dashboard': return <DashboardView agents={agents} metrics={metrics} activity={activity} onSelectAgent={a => { setSelectedAgent(a); setView('agents') }} />
