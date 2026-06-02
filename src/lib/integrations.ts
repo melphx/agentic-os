@@ -14,9 +14,11 @@ async function getGoogleToken(serviceAccount: Record<string, string>, scope: str
     exp: now + 3600,
     iat: now,
   })).toString('base64url')
+  const privateKey = (serviceAccount.private_key || '').replace(/\\n/g, '\n')
+  if (!privateKey) throw new Error('No private_key in service account')
   const sign = createSign('RSA-SHA256')
   sign.update(`${header}.${claim}`)
-  const sig = sign.sign(serviceAccount.private_key, 'base64url')
+  const sig = sign.sign(privateKey, 'base64url')
   const jwt = `${header}.${claim}.${sig}`
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',

@@ -7,8 +7,11 @@ async function getGoogleToken(sa: Record<string, string>, scope: string): Promis
   const now = Math.floor(Date.now() / 1000)
   const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url')
   const claim  = Buffer.from(JSON.stringify({ iss: sa.client_email, scope, aud: 'https://oauth2.googleapis.com/token', exp: now + 3600, iat: now })).toString('base64url')
+  // Unescape newlines — service account keys stored in DB often have literal \\n instead of real newlines
+  const privateKey = (sa.private_key || '').replace(/\\n/g, '\n')
+  if (!privateKey) throw new Error('No private_key found in service account JSON')
   const sign = createSign('RSA-SHA256'); sign.update(`${header}.${claim}`)
-  const jwt = `${header}.${claim}.${sign.sign(sa.private_key, 'base64url')}`
+  const jwt = `${header}.${claim}.${sign.sign(privateKey, 'base64url')}`
   const res = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: jwt }) })
   const d = await res.json() as Record<string, string>
   if (!d.access_token) throw new Error(`Auth failed: ${JSON.stringify(d)}`)
