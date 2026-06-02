@@ -214,6 +214,7 @@ const NAV = [
   { id: 'skills',     icon: <Cpu size={18} />,              label: 'Skills'     },
   { id: 'terminal',   icon: <TerminalIcon size={18} />,    label: 'Terminal'   },
   { id: 'schedules',  icon: <Clock size={18} />,           label: 'Schedules'  },
+  { id: 'hermes',    icon: <span style={{fontSize:16}}>⚡</span>, label: 'Hermes'    },
   { id: 'settings',   icon: <Settings size={18} />,        label: 'Settings'   },
 ]
 
@@ -2655,6 +2656,115 @@ function AddSkillModal({ onClose }: { onClose: () => void }) {
 }
 
 
+// ── Hermes Full View ────────────────────────────────────────────────────────
+
+function HermesView({ messages, onSend, loading }: { messages: Message[]; onSend: (text: string) => void; loading: boolean }) {
+  const [input, setInput] = useState('')
+  const endRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+  useEffect(() => { inputRef.current?.focus() }, [])
+
+  function send() {
+    const text = input.trim()
+    if (!text || loading) return
+    setInput('')
+    onSend(text)
+  }
+
+  const QUICK_ACTIONS = [
+    { label: '📊 System status',        prompt: 'Give me a full system overview: agents status, recent tasks, token usage, and any issues.' },
+    { label: '🚀 Dispatch task',         prompt: 'I want to dispatch a task. Ask me which agent and what to do.' },
+    { label: '🔍 Search tasks',          prompt: 'Search all my past task results for something specific. What should I search for?' },
+    { label: '📋 Create pipeline',       prompt: 'Help me create a new pipeline. What agents do you want to chain together?' },
+    { label: '📁 Create project',        prompt: 'Help me set up a new project to track a group of related tasks.' },
+    { label: '⚙️ Agent help',            prompt: 'Which agent should I use for my current task? Describe what you need and I'll recommend.' },
+  ]
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg, #080c14)' }}>
+      {/* Header */}
+      <div style={{ padding: '20px 28px 16px', borderBottom: '1px solid rgba(99,102,241,0.1)', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: 'linear-gradient(135deg,#4338ca,#6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>⚡</div>
+          <div>
+            <h1 style={{ color: 'white', fontWeight: 700, fontSize: 18, margin: 0 }}>Hermes</h1>
+            <p style={{ color: 'rgba(148,163,184,0.5)', fontSize: 12, margin: 0 }}>Your AI command center — dispatch tasks, manage agents, get answers</p>
+          </div>
+          {loading && (
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, alignItems: 'center' }}>
+              {[0,1,2].map(i => <motion.div key={i} animate={{ opacity:[0.3,1,0.3] }} transition={{ repeat:Infinity, duration:1.2, delay:i*0.2 }} style={{ width:5, height:5, borderRadius:'50%', background:'#6366f1' }} />)}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+        {/* Welcome state */}
+        {messages.length === 0 && (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '40px 20px' }}>
+            <div style={{ fontSize: 48, marginBottom: 16 }}>⚡</div>
+            <h2 style={{ color: 'white', fontWeight: 700, fontSize: 22, margin: '0 0 8px' }}>How can I help?</h2>
+            <p style={{ color: 'rgba(148,163,184,0.5)', fontSize: 14, maxWidth: 400, margin: '0 0 32px' }}>
+              I can dispatch tasks to your agents, create pipelines, search past results, and manage your entire system.
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, width: '100%', maxWidth: 500 }}>
+              {QUICK_ACTIONS.map(a => (
+                <motion.button key={a.label} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => { onSend(a.prompt) }}
+                  style={{ padding: '10px 14px', background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.15)', borderRadius: 10, color: 'rgba(148,163,184,0.8)', fontSize: 12, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' }}>
+                  {a.label}
+                </motion.button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Conversation */}
+        {messages.map((m, i) => (
+          <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start', gap: 10, alignItems: 'flex-start' }}>
+            {m.role === 'assistant' && (
+              <div style={{ width: 28, height: 28, borderRadius: 8, background: 'linear-gradient(135deg,#4338ca,#6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0, marginTop: 2 }}>⚡</div>
+            )}
+            <div style={{ maxWidth: '75%', padding: '10px 14px', borderRadius: m.role === 'user' ? '14px 14px 4px 14px' : '4px 14px 14px 14px', background: m.role === 'user' ? 'linear-gradient(135deg,#4338ca,#6366f1)' : 'rgba(15,20,35,0.9)', border: m.role === 'assistant' ? '1px solid rgba(99,102,241,0.12)' : 'none', color: 'white', fontSize: 13.5, lineHeight: 1.6 }}>
+              {m.role === 'assistant' ? <Markdown text={m.content} /> : m.content}
+            </div>
+          </div>
+        ))}
+
+        {loading && messages.length > 0 && (
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+            <div style={{ width: 28, height: 28, borderRadius: 8, background: 'linear-gradient(135deg,#4338ca,#6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>⚡</div>
+            <div style={{ padding: '10px 14px', borderRadius: '4px 14px 14px 14px', background: 'rgba(15,20,35,0.9)', border: '1px solid rgba(99,102,241,0.12)', display: 'flex', gap: 5 }}>
+              {[0,1,2].map(i => <motion.div key={i} animate={{ opacity:[0.3,1,0.3] }} transition={{ repeat:Infinity, duration:1.2, delay:i*0.2 }} style={{ width:6, height:6, borderRadius:'50%', background:'#6366f1' }} />)}
+            </div>
+          </div>
+        )}
+
+        <div ref={endRef} />
+      </div>
+
+      {/* Input */}
+      <div style={{ padding: '12px 20px 20px', borderTop: '1px solid rgba(99,102,241,0.1)', flexShrink: 0 }}>
+        <div style={{ display: 'flex', gap: 8, background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.15)', borderRadius: 14, padding: '8px 8px 8px 16px', alignItems: 'center' }}>
+          <input ref={inputRef} value={input} onChange={e => setInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
+            placeholder="Message Hermes… (dispatch tasks, manage agents, search results)"
+            style={{ flex: 1, background: 'none', border: 'none', color: 'white', fontSize: 14, outline: 'none', lineHeight: 1.5 }} />
+          <motion.button whileTap={{ scale: 0.9 }} onClick={send} disabled={loading || !input.trim()}
+            style={{ width: 36, height: 36, borderRadius: 10, background: input.trim() ? 'linear-gradient(135deg,#4338ca,#6366f1)' : 'rgba(99,102,241,0.1)', border: 'none', color: 'white', cursor: input.trim() ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, opacity: loading ? 0.5 : 1, transition: 'all 0.15s' }}>
+            <Send size={15} />
+          </motion.button>
+        </div>
+        <p style={{ color: 'rgba(148,163,184,0.25)', fontSize: 11, margin: '6px 0 0', textAlign: 'center' }}>Hermes can dispatch tasks, create pipelines, and control your agents</p>
+      </div>
+    </div>
+  )
+}
+
+
 // ── Dashboard View ─────────────────────────────────────────────────────────
 
 function DashboardView({ agents, metrics, activity, onSelectAgent }: { agents: Agent[]; metrics: Metrics | null; activity: LogEntry[]; onSelectAgent: (a: Agent) => void }) {
@@ -3321,6 +3431,7 @@ export default function Page() {
       case 'terminal': return <TerminalView agents={agents} metrics={metrics} />
       case 'schedules': return <SchedulesView agents={agents} />
       case 'analytics':  return <AnalyticsView />
+      case 'hermes':     return <HermesView messages={messages} onSend={handleSend} loading={chatLoading} />
       case 'projects':   return <ProjectsView agents={agents} onSelectAgent={a => { setSelectedAgent(a); setView('agents') }} />
       case 'triggers':   return <TriggersPanel agents={agents} />
       case 'skills':     return <SkillsView />
