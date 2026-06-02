@@ -28,19 +28,22 @@ async function streamToDb(taskId: number, agentId: string, messages: any[], maxT
   })
   let full = ''
   let usage = 0
+  let writeTimer: ReturnType<typeof setTimeout> | null = null
+  const flush = () => {
+    try { db.prepare("UPDATE tasks SET result = ? WHERE id = ?").run(full.slice(0, 8000), taskId) } catch {}
+  }
   for await (const chunk of stream) {
     const delta = chunk.choices[0]?.delta?.content || ''
     if (delta) {
       full += delta
-      // Write partial result every ~200 chars so UI can show progress
-      if (full.length % 200 < delta.length) {
-        try { db.prepare("UPDATE tasks SET result = ? WHERE id = ?").run(full.slice(0, 8000), taskId) } catch {}
-      }
+      // Debounce writes: flush at most every 150ms to keep DB overhead low
+      if (!writeTimer) writeTimer = setTimeout(() => { flush(); writeTimer = null }, 150)
     }
     if (chunk.usage) usage = chunk.usage.total_tokens || 0
   }
+  if (writeTimer) clearTimeout(writeTimer)
   // Final write
-  try { db.prepare("UPDATE tasks SET result = ? WHERE id = ?").run(full.slice(0, 8000), taskId) } catch {}
+  flush()
   return { content: full, tokens: usage }
 }
 const MODEL = process.env.OPENAI_MODEL || 'gpt-5.4'

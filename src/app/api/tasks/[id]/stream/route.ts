@@ -46,11 +46,11 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
               return
             }
           }
-          setTimeout(poll, 800)
+          setTimeout(poll, 250)
         } catch { controller.close(); closed = true }
       }
 
-      setTimeout(poll, 500)
+      setTimeout(poll, 100)
 
       req.signal.addEventListener('abort', () => { closed = true; try { controller.close() } catch {} })
     }
