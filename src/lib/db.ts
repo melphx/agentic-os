@@ -770,3 +770,38 @@ export function updateDriveSyncConfig(id: number, fields: Partial<DriveSyncConfi
 }
 
 export function deleteDriveSyncConfig(id: number) { ensureDriveSyncTable(); getDb().prepare('DELETE FROM drive_sync_configs WHERE id=?').run(id) }
+
+// ── Google OAuth Tokens ────────────────────────────────────────────────────
+
+export function ensureGoogleOAuthTable() {
+  getDb().exec(`CREATE TABLE IF NOT EXISTS google_oauth (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id TEXT NOT NULL,
+    client_secret TEXT NOT NULL,
+    refresh_token TEXT,
+    access_token TEXT,
+    expires_at INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`)
+}
+
+export function getGoogleOAuth(): { client_id: string; client_secret: string; refresh_token: string | null; access_token: string | null; expires_at: number } | null {
+  ensureGoogleOAuthTable()
+  return (getDb().prepare('SELECT * FROM google_oauth ORDER BY id DESC LIMIT 1').get() as any) ?? null
+}
+
+export function saveGoogleOAuth(clientId: string, clientSecret: string) {
+  ensureGoogleOAuthTable()
+  getDb().prepare('DELETE FROM google_oauth').run()
+  getDb().prepare('INSERT INTO google_oauth (client_id, client_secret) VALUES (?,?)').run(clientId, clientSecret)
+}
+
+export function updateGoogleTokens(refreshToken: string, accessToken: string, expiresAt: number) {
+  ensureGoogleOAuthTable()
+  getDb().prepare('UPDATE google_oauth SET refresh_token=?, access_token=?, expires_at=?').run(refreshToken, accessToken, expiresAt)
+}
+
+export function clearGoogleOAuth() {
+  ensureGoogleOAuthTable()
+  getDb().prepare('DELETE FROM google_oauth').run()
+}

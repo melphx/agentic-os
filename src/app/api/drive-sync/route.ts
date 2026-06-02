@@ -1,6 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
-import { getDriveSyncConfigs, createDriveSyncConfig, deleteDriveSyncConfig, updateDriveSyncConfig, saveKnowledge, saveCompanyKnowledge } from '@/lib/db'
+import { getDriveSyncConfigs, createDriveSyncConfig, deleteDriveSyncConfig, updateDriveSyncConfig, saveKnowledge, saveCompanyKnowledge, getGoogleOAuth, updateGoogleTokens } from '@/lib/db'
+
+// Get token using OAuth refresh token (for org-managed accounts without service account)
+async function getOAuthAccessToken(): Promise<string> {
+  const oauth = getGoogleOAuth()
+  if (!oauth?.refresh_token) throw new Error('Google Drive not connected. Go to Settings → Google Drive and connect your account.')
+  // Return cached token if still valid (5 min buffer)
+  if (oauth.access_token && oauth.expires_at > Date.now() + 300000) return oauth.access_token
+  // Refresh it
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: oauth.refresh_token, client_id: oauth.client_id, client_secret: oauth.client_secret }),
+  })
+  const data = await res.json() as Record<string, any>
+  if (!data.access_token) throw new Error(`Token refresh failed: ${JSON.stringify(data)}`)
+  updateGoogleTokens(oauth.refresh_token, data.access_token, Date.now() + (data.expires_in || 3600) * 1000)
+  return data.access_token
+}
 
 async function getGoogleToken(sa: Record<string, string>, scope: string): Promise<string> {
   const { createSign } = await import('crypto')
@@ -35,8 +53,10 @@ export async function POST(req: NextRequest) {
     const results: string[] = []
     for (const cfg of configs) {
       try {
-        const sa = JSON.parse(cfg.service_account_json)
-        const token = await getGoogleToken(sa, 'https://www.googleapis.com/auth/drive.readonly')
+        // Use OAuth token if service account not configured
+        const token = cfg.service_account_json && cfg.service_account_json !== '***'
+          ? await getGoogleToken(JSON.parse(cfg.service_account_json), 'https://www.googleapis.com/auth/drive.readonly')
+          : await getOAuthAccessToken()
         // List files in folder
         const listRes = await fetch(`https://www.googleapis.com/drive/v3/files?q='${cfg.folder_id}'+in+parents+and+trashed=false&fields=files(id,name,mimeType,modifiedTime)&pageSize=50`, { headers: { Authorization: `Bearer ${token}` } })
         const listData = await listRes.json() as Record<string, any>

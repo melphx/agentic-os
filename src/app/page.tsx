@@ -1834,8 +1834,16 @@ function DriveSyncPanel({ agents }: { agents: Agent[] }) {
   const [showAdd, setShowAdd] = useState(false)
   const [syncing, setSyncing] = useState<number | null>(null)
   const [syncResult, setSyncResult] = useState<string[]>([])
+  const [oauthStatus, setOauthStatus] = useState<{connected:boolean;has_credentials:boolean} | null>(null)
+  const [showOauthSetup, setShowOauthSetup] = useState(false)
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load(); checkOauth() }, [])
+
+  async function checkOauth() {
+    const r = await fetch('/api/drive-sync/oauth?action=status')
+    if (r.ok) setOauthStatus(await r.json())
+  }
+
   async function load() { const r = await fetch('/api/drive-sync'); if(r.ok) setConfigs(await r.json()) }
 
   async function sync(id?: number) {
@@ -1856,7 +1864,14 @@ function DriveSyncPanel({ agents }: { agents: Agent[] }) {
           <span style={{ color: 'white', fontWeight: 600, fontSize: 14 }}>Google Drive Sync</span>
           <span style={{ fontSize: 11, color: 'rgba(148,163,184,0.4)' }}>— pull files into knowledge base</span>
         </div>
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          {oauthStatus && (
+            oauthStatus.connected
+              ? <span style={{ fontSize: 11, color: '#10b981', display: 'flex', alignItems: 'center', gap: 4 }}>✓ Google Connected
+                  <button onClick={async () => { await fetch('/api/drive-sync/oauth?action=disconnect'); checkOauth() }} style={{ background: 'none', border: 'none', color: 'rgba(244,63,94,0.5)', cursor: 'pointer', fontSize: 10, marginLeft: 4 }}>Disconnect</button>
+                </span>
+              : <button onClick={() => setShowOauthSetup(true)} style={{ padding: '5px 12px', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.25)', borderRadius: 7, color: '#10b981', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>🔗 Connect Google</button>
+          )}
           {configs.length > 0 && <button onClick={() => sync()} disabled={syncing !== null} style={{ padding: '5px 12px', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 7, color: '#a5b4fc', fontSize: 11, cursor: 'pointer' }}>{syncing !== null ? 'Syncing…' : '↻ Sync All'}</button>}
           <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }} onClick={() => setShowAdd(true)}
             style={{ padding: '5px 12px', background: 'linear-gradient(135deg,#4338ca,#6366f1)', border: 'none', borderRadius: 7, color: 'white', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
@@ -1890,6 +1905,73 @@ function DriveSyncPanel({ agents }: { agents: Agent[] }) {
       })}
 
       {showAdd && <AddDriveFolderModal agents={agents} onClose={() => { setShowAdd(false); load() }} />}
+      {showOauthSetup && <GoogleOAuthSetupModal onClose={() => { setShowOauthSetup(false); checkOauth() }} />}
+    </div>
+  )
+}
+
+function GoogleOAuthSetupModal({ onClose }: { onClose: () => void }) {
+  const [clientId, setClientId] = useState('')
+  const [clientSecret, setClientSecret] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  async function saveCredentials() {
+    if (!clientId.trim() || !clientSecret.trim()) return
+    setSaving(true)
+    await fetch('/api/drive-sync/oauth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret }),
+    })
+    setSaving(false); setSaved(true)
+  }
+
+  const inp = { background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, padding: '8px 10px', color: 'white', fontSize: 12, outline: 'none', width: '100%', boxSizing: 'border-box' as const }
+  const lbl = { color: 'rgba(148,163,184,0.6)', fontSize: 10, marginBottom: 4, display: 'block' as const }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300 }}>
+      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+        style={{ width: 500, background: '#0f1623', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 16, padding: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 18 }}>
+          <span style={{ color: 'white', fontWeight: 700, fontSize: 15 }}>Connect Google Drive</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'rgba(148,163,184,0.5)', cursor: 'pointer', fontSize: 18 }}>✕</button>
+        </div>
+
+        {!saved ? (
+          <>
+            <div style={{ background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.15)', borderRadius: 10, padding: 14, marginBottom: 16, fontSize: 12, color: 'rgba(148,163,184,0.7)', lineHeight: 1.7 }}>
+              <strong style={{ color: 'white' }}>Before you start:</strong><br/>
+              1. Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" style={{ color: '#a5b4fc' }}>Google Cloud Console → Credentials</a><br/>
+              2. Edit your OAuth client → add this redirect URI:<br/>
+              <code style={{ background: 'rgba(0,0,0,0.3)', padding: '3px 8px', borderRadius: 4, color: '#c4b5fd', fontSize: 11 }}>https://sandbox.phoenixhomeremodeling.net/api/drive-sync/oauth</code><br/>
+              3. Save, then paste your Client ID and Secret below.
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+              <div><label style={lbl}>CLIENT ID</label><input value={clientId} onChange={e => setClientId(e.target.value)} placeholder="413578649111-...apps.googleusercontent.com" style={inp} /></div>
+              <div><label style={lbl}>CLIENT SECRET</label><input type="password" value={clientSecret} onChange={e => setClientSecret(e.target.value)} placeholder="GOCSPX-..." style={inp} /></div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={saveCredentials} disabled={saving || !clientId.trim() || !clientSecret.trim()}
+                style={{ flex: 1, padding: 10, background: 'linear-gradient(135deg,#4338ca,#6366f1)', border: 'none', borderRadius: 9, color: 'white', fontWeight: 600, fontSize: 13, cursor: 'pointer', opacity: (!clientId.trim()||!clientSecret.trim())?0.5:1 }}>
+                {saving ? 'Saving…' : 'Save Credentials'}
+              </motion.button>
+              <button onClick={onClose} style={{ padding: '10px 16px', background: 'transparent', border: '1px solid rgba(148,163,184,0.15)', borderRadius: 9, color: 'rgba(148,163,184,0.5)', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+            </div>
+          </>
+        ) : (
+          <div style={{ textAlign: 'center', padding: '20px 0' }}>
+            <p style={{ color: '#10b981', fontSize: 15, fontWeight: 600, marginBottom: 12 }}>✓ Credentials saved</p>
+            <p style={{ color: 'rgba(148,163,184,0.6)', fontSize: 13, marginBottom: 20 }}>Now click the button below to authorize access to your Google Drive.</p>
+            <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+              onClick={() => window.location.href = '/api/drive-sync/oauth?action=start'}
+              style={{ padding: '12px 32px', background: 'linear-gradient(135deg,#4338ca,#6366f1)', border: 'none', borderRadius: 10, color: 'white', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
+              🔗 Authorize Google Drive Access
+            </motion.button>
+          </div>
+        )}
+      </motion.div>
     </div>
   )
 }
