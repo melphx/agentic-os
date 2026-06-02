@@ -1161,6 +1161,7 @@ function AgentDetailView({ agent, onBack, onRunTask, newTaskId, onNewTaskConsume
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
             <TrainPanel agent={agent} />
             <TaskTemplatesPanel agent={agent} onUseTemplate={(title, desc, type) => onRunTask(agent, { title, description: desc, type })} />
+          <AgentDrivePanel agent={agent} />
           <AgentPromptEditor agent={agent} />
           </div>
         ) : tab === 'integrations' ? (
@@ -1976,51 +1977,87 @@ function GoogleOAuthSetupModal({ onClose }: { onClose: () => void }) {
   )
 }
 
-function AddDriveFolderModal({ agents, onClose }: { agents: Agent[]; onClose: () => void }) {
+function AddDriveFolderModal({ agents, onClose, defaultAgentId }: { agents: Agent[]; onClose: () => void; defaultAgentId?: string }) {
   const [name, setName] = useState('')
   const [folderId, setFolderId] = useState('')
   const [saJson, setSaJson] = useState('')
-  const [agentId, setAgentId] = useState('')
+  const [agentId, setAgentId] = useState(defaultAgentId || '')
   const [saving, setSaving] = useState(false)
+  const [oauthConnected, setOauthConnected] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/drive-sync/oauth?action=status')
+      .then(r => r.json())
+      .then(d => setOauthConnected(d.connected))
+      .catch(() => {})
+  }, [])
 
   async function save() {
-    if (!name.trim() || !folderId.trim() || !saJson.trim()) return
+    if (!name.trim() || !folderId.trim()) return
+    if (!oauthConnected && !saJson.trim()) return
     setSaving(true)
-    await fetch('/api/drive-sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, folder_id: folderId, service_account_json: saJson, agent_id: agentId || null }) })
+    await fetch('/api/drive-sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, folder_id: folderId, service_account_json: saJson || 'oauth', agent_id: agentId || null }),
+    })
     setSaving(false); onClose()
   }
 
   const inp = { background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, padding: '8px 10px', color: 'white', fontSize: 12, outline: 'none', width: '100%', boxSizing: 'border-box' as const }
   const lbl = { color: 'rgba(148,163,184,0.6)', fontSize: 10, marginBottom: 4, display: 'block' as const }
+  const canSave = name.trim() && folderId.trim() && (oauthConnected || saJson.trim())
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300 }}>
       <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
         style={{ width: 500, maxHeight: '88vh', overflowY: 'auto', background: '#0f1623', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 16, padding: 24 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 18 }}>
-          <span style={{ color: 'white', fontWeight: 700, fontSize: 15 }}>Connect Drive Folder</span>
+          <span style={{ color: 'white', fontWeight: 700, fontSize: 15 }}>Add Drive Folder</span>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'rgba(148,163,184,0.5)', cursor: 'pointer', fontSize: 18 }}>✕</button>
         </div>
+
+        {oauthConnected && (
+          <div style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 8, padding: '8px 12px', marginBottom: 14, fontSize: 12, color: '#10b981' }}>
+            ✓ Using your connected Google account — no service account needed
+          </div>
+        )}
+
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div><label style={lbl}>NAME</label><input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. PHR Marketing Materials" style={inp} /></div>
-          <div><label style={lbl}>GOOGLE DRIVE FOLDER ID (from the URL)</label><input value={folderId} onChange={e => setFolderId(e.target.value)} placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs..." style={inp} /></div>
-          <div><label style={lbl}>SYNC INTO (blank = Company Knowledge Base, all agents)</label>
+          <div>
+            <label style={lbl}>GOOGLE DRIVE FOLDER ID</label>
+            <input value={folderId} onChange={e => setFolderId(e.target.value)} placeholder="Paste the folder ID from the Drive URL" style={inp} />
+            <p style={{ color: 'rgba(148,163,184,0.35)', fontSize: 11, margin: '5px 0 0' }}>
+              Open the folder in Google Drive → copy the ID from the URL:<br/>
+              drive.google.com/drive/folders/<strong style={{ color: '#a5b4fc' }}>THIS_PART_HERE</strong>
+            </p>
+          </div>
+          <div><label style={lbl}>SYNC INTO</label>
             <select value={agentId} onChange={e => setAgentId(e.target.value)} style={{ ...inp, fontFamily: 'inherit' }}>
               <option value="">Company Knowledge Base (all agents)</option>
               {agents.map(a => <option key={a.id} value={a.id} style={{ background: '#0f1623' }}>{a.name} only</option>)}
             </select>
           </div>
-          <div><label style={lbl}>GOOGLE SERVICE ACCOUNT JSON</label>
-            <textarea value={saJson} onChange={e => setSaJson(e.target.value)} rows={5} placeholder={'{  "type": "service_account",  "project_id": "...",  "private_key": "..."  ...}'} style={{ ...inp, resize: 'vertical' as const, fontFamily: 'monospace', lineHeight: 1.4 }} />
-          </div>
-          <div style={{ background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.12)', borderRadius: 8, padding: 10, fontSize: 11, color: 'rgba(148,163,184,0.5)', lineHeight: 1.6 }}>
-            💡 To get a service account: Google Cloud Console → IAM → Service Accounts → Create → Download JSON. Then share your Drive folder with the service account email.
-          </div>
+
+          {!oauthConnected && (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '4px 0' }}>
+                <div style={{ flex: 1, height: 1, background: 'rgba(99,102,241,0.15)' }} />
+                <span style={{ color: 'rgba(148,163,184,0.3)', fontSize: 11 }}>OR use service account</span>
+                <div style={{ flex: 1, height: 1, background: 'rgba(99,102,241,0.15)' }} />
+              </div>
+              <div><label style={lbl}>SERVICE ACCOUNT JSON (optional if not using OAuth)</label>
+                <textarea value={saJson} onChange={e => setSaJson(e.target.value)} rows={4} placeholder='{"type":"service_account","private_key":"..."}' style={{ ...inp, resize: 'vertical' as const, fontFamily: 'monospace', lineHeight: 1.4 }} />
+              </div>
+            </>
+          )}
         </div>
+
         <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
-          <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={save} disabled={saving || !name.trim() || !folderId.trim() || !saJson.trim()}
-            style={{ flex: 1, padding: 10, background: 'linear-gradient(135deg,#4338ca,#6366f1)', border: 'none', borderRadius: 9, color: 'white', fontWeight: 600, fontSize: 13, cursor: 'pointer', opacity: (!name.trim()||!folderId.trim()||!saJson.trim())?0.5:1 }}>
-            {saving ? 'Saving…' : 'Connect Folder'}
+          <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={save} disabled={saving || !canSave}
+            style={{ flex: 1, padding: 10, background: 'linear-gradient(135deg,#4338ca,#6366f1)', border: 'none', borderRadius: 9, color: 'white', fontWeight: 600, fontSize: 13, cursor: 'pointer', opacity: !canSave ? 0.5 : 1 }}>
+            {saving ? 'Saving…' : 'Add Folder'}
           </motion.button>
           <button onClick={onClose} style={{ padding: '10px 16px', background: 'transparent', border: '1px solid rgba(148,163,184,0.15)', borderRadius: 9, color: 'rgba(148,163,184,0.5)', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
         </div>
@@ -2176,6 +2213,93 @@ function FillVariablesModal({ template, onClose, onSubmit }: { template: any; on
           <button onClick={onClose} style={{ padding: '10px 16px', background: 'transparent', border: '1px solid rgba(148,163,184,0.15)', borderRadius: 9, color: 'rgba(148,163,184,0.5)', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
         </div>
       </motion.div>
+    </div>
+  )
+}
+
+
+// ── Per-Agent Google Drive Panel ──────────────────────────────────────────
+
+function AgentDrivePanel({ agent }: { agent: Agent }) {
+  const [configs, setConfigs] = useState<any[]>([])
+  const [oauthConnected, setOauthConnected] = useState(false)
+  const [showAdd, setShowAdd] = useState(false)
+  const [syncing, setSyncing] = useState<number | null>(null)
+  const [syncMsg, setSyncMsg] = useState<string | null>(null)
+
+  useEffect(() => {
+    load()
+    fetch('/api/drive-sync/oauth?action=status').then(r => r.json()).then(d => setOauthConnected(d.connected)).catch(() => {})
+  }, [agent.id])
+
+  async function load() {
+    const r = await fetch('/api/drive-sync')
+    if (r.ok) {
+      const all = await r.json()
+      setConfigs(all.filter((c: any) => c.agent_id === agent.id))
+    }
+  }
+
+  async function toggle(cfg: any) {
+    // Toggle = just remove (simplest approach — re-add to enable)
+    if (!window.confirm(`Remove "${cfg.name}" from this agent?`)) return
+    await fetch(`/api/drive-sync?id=${cfg.id}`, { method: 'DELETE' })
+    load()
+  }
+
+  async function sync(id: number) {
+    setSyncing(id); setSyncMsg(null)
+    const r = await fetch('/api/drive-sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'sync', id }) })
+    const d = await r.json()
+    setSyncMsg((d.results || []).join(' · '))
+    setSyncing(null)
+    setTimeout(() => setSyncMsg(null), 4000)
+  }
+
+  return (
+    <div style={{ padding: '16px 24px', borderTop: '1px solid rgba(99,102,241,0.1)', marginTop: 4 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Globe size={14} color="#a5b4fc" />
+          <span style={{ color: 'white', fontWeight: 600, fontSize: 13 }}>Google Drive Folders</span>
+          {oauthConnected
+            ? <span style={{ fontSize: 10, color: '#10b981', padding: '1px 7px', borderRadius: 10, background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)' }}>Connected</span>
+            : <span style={{ fontSize: 10, color: 'rgba(148,163,184,0.4)' }}>Not connected — go to Settings</span>
+          }
+        </div>
+        {oauthConnected && (
+          <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }} onClick={() => setShowAdd(true)}
+            style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 9px', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 6, color: '#a5b4fc', fontSize: 11, cursor: 'pointer' }}>
+            <Plus size={10} /> Add Folder
+          </motion.button>
+        )}
+      </div>
+
+      {syncMsg && <div style={{ padding: '6px 10px', borderRadius: 7, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)', color: '#10b981', fontSize: 11, marginBottom: 10 }}>{syncMsg}</div>}
+
+      {configs.length === 0 && oauthConnected && (
+        <p style={{ color: 'rgba(148,163,184,0.3)', fontSize: 12, margin: 0 }}>No Drive folders linked. Add one and files will be injected into every task this agent runs.</p>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {configs.map((cfg: any) => (
+          <div key={cfg.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px', background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.1)', borderRadius: 8 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ color: 'white', fontSize: 12, fontWeight: 500 }}>{cfg.name}</div>
+              {cfg.last_synced && <div style={{ color: 'rgba(148,163,184,0.3)', fontSize: 11 }}>Last synced {new Date(cfg.last_synced).toLocaleString()}</div>}
+            </div>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <button onClick={() => sync(cfg.id)} disabled={syncing === cfg.id}
+                style={{ padding: '3px 8px', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 5, color: '#a5b4fc', fontSize: 10, cursor: 'pointer' }}>
+                {syncing === cfg.id ? '…' : '↻ Sync'}
+              </button>
+              <button onClick={() => toggle(cfg)} style={{ padding: '3px 6px', background: 'transparent', border: 'none', color: 'rgba(244,63,94,0.4)', cursor: 'pointer' }}><Trash2 size={11} /></button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {showAdd && <AddDriveFolderModal agents={[agent]} defaultAgentId={agent.id} onClose={() => { setShowAdd(false); load() }} />}
     </div>
   )
 }
