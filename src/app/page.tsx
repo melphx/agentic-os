@@ -440,8 +440,11 @@ function TrainPanel({ agent }: { agent: Agent }) {
 const refineMsgCache = new Map<number, Message[]>()
 
 function TaskThreadView({ task, agent, onCancelled }: { task: Task; agent: Agent; onCancelled?: () => void }) {
-  const resultPreview = (task.result || task.error || '').slice(0, 4000)
-  // Load cached messages for this task so switching tasks doesn't lose history
+  const [streamedResult, setStreamedResult] = useState<string>(task.result || '')
+  const [streamStatus, setStreamStatus] = useState<string>(task.status)
+  const liveResult = streamedResult || task.result || ''
+  const liveStatus = streamStatus || task.status
+  const resultPreview = liveResult.slice(0, 4000)
   const [refineMessages, setRefineMessages] = useState<Message[]>(() => refineMsgCache.get(task.id) || [])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -449,8 +452,39 @@ function TaskThreadView({ task, agent, onCancelled }: { task: Task; agent: Agent
   const endRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const taskIdRef = useRef(task.id)
+  const esRef = useRef<EventSource | null>(null)
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [refineMessages])
+  // SSE subscription — connects when task is running/pending, streams result in real time
+  useEffect(() => {
+    if (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
+      setStreamedResult(task.result || '')
+      setStreamStatus(task.status)
+      if (esRef.current) { esRef.current.close(); esRef.current = null }
+      return
+    }
+    if (task.status !== 'running' && task.status !== 'pending') return
+    if (esRef.current) return
+    const es = new EventSource(`/api/tasks/${task.id}/stream`)
+    esRef.current = es
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data)
+        if (data.type === 'task' && data.task) {
+          if (data.task.result) setStreamedResult(data.task.result)
+          setStreamStatus(data.task.status)
+        }
+        if (data.type === 'done') {
+          setStreamStatus(data.status)
+          es.close(); esRef.current = null
+          onCancelled?.()
+        }
+      } catch {}
+    }
+    es.onerror = () => { es.close(); esRef.current = null }
+    return () => { es.close(); esRef.current = null }
+  }, [task.id, task.status])
+
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [refineMessages, liveResult])
 
   // Only reset messages when task ID genuinely changes (not on re-renders with same task)
   useEffect(() => {
@@ -517,8 +551,8 @@ function TaskThreadView({ task, agent, onCancelled }: { task: Task; agent: Agent
     }
   }
 
-  const statusColor = task.status === 'completed' ? '#10b981' : task.status === 'failed' ? '#f43f5e' : task.status === 'running' ? '#a5b4fc' : '#94a3b8'
-  const statusBg    = task.status === 'completed' ? 'rgba(16,185,129,0.12)' : task.status === 'failed' ? 'rgba(244,63,94,0.12)' : task.status === 'running' ? 'rgba(99,102,241,0.12)' : 'rgba(148,163,184,0.08)'
+  const statusColor = liveStatus === 'completed' ? '#10b981' : liveStatus === 'failed' ? '#f43f5e' : liveStatus === 'running' ? '#a5b4fc' : '#94a3b8'
+  const statusBg    = liveStatus === 'completed' ? 'rgba(16,185,129,0.12)' : liveStatus === 'failed' ? 'rgba(244,63,94,0.12)' : liveStatus === 'running' ? 'rgba(99,102,241,0.12)' : 'rgba(148,163,184,0.08)'
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -526,9 +560,9 @@ function TaskThreadView({ task, agent, onCancelled }: { task: Task; agent: Agent
       <div style={{ padding: '14px 20px 10px', borderBottom: '1px solid rgba(99,102,241,0.1)', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <span style={{ color: 'white', fontWeight: 600, fontSize: 14, flex: 1, minWidth: 0 }}>{task.title}</span>
-          <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: statusBg, color: statusColor, fontWeight: 600, flexShrink: 0 }}>{task.status}</span>
+          <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: statusBg, color: statusColor, fontWeight: 600, flexShrink: 0 }}>{liveStatus}</span>
           <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: 'rgba(99,102,241,0.1)', color: '#a5b4fc', flexShrink: 0 }}>{task.type}</span>
-          {(task.status === 'running' || task.status === 'pending') && (
+          {(liveStatus === 'running' || liveStatus === 'pending') && (
             <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }} onClick={cancelTask} disabled={cancelling}
               style={{ padding: '2px 10px', borderRadius: 20, background: 'rgba(244,63,94,0.12)', border: '1px solid rgba(244,63,94,0.3)', color: '#f43f5e', fontSize: 10, fontWeight: 600, cursor: cancelling ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
               {cancelling ? '…' : '✕ Cancel'}
@@ -566,21 +600,21 @@ function TaskThreadView({ task, agent, onCancelled }: { task: Task; agent: Agent
         </div>
 
         {/* Agent result as "assistant" message */}
-        {(task.result || task.error || task.status === 'running' || task.status === 'pending') && (
+        {(liveResult || task.error || liveStatus === 'running' || liveStatus === 'pending') && (
           <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
             <AgentAvatar agent={agent} size={28} />
             <div style={{ flex: 1, padding: '10px 14px', borderRadius: '4px 14px 14px 14px', background: 'rgba(15,20,35,0.85)', border: '1px solid rgba(99,102,241,0.12)', color: 'white', fontSize: 13, lineHeight: 1.55 }}>
-              {task.status === 'running' && (
+              {liveStatus === 'running' && (
                 <div>
-                  <div style={{ display: 'flex', gap: 5, alignItems: 'center', marginBottom: task.result ? 8 : 0 }}>
+                  <div style={{ display: 'flex', gap: 5, alignItems: 'center', marginBottom: liveResult ? 8 : 0 }}>
                     {[0,1,2].map(i => <motion.div key={i} animate={{ opacity: [0.3,1,0.3] }} transition={{ repeat: Infinity, duration: 1.2, delay: i*0.2 }} style={{ width: 6, height: 6, borderRadius: '50%', background: agent.accent }} />)}
-                    <span style={{ color: 'rgba(148,163,184,0.5)', fontSize: 12, marginLeft: 4 }}>Streaming…</span>
+                    <span style={{ color: 'rgba(148,163,184,0.5)', fontSize: 12, marginLeft: 4 }}>{liveResult ? 'Writing…' : 'Starting…'}</span>
                   </div>
-                  {task.result && <Markdown text={task.result} />}
+                  {liveResult && <Markdown text={liveResult} />}
                 </div>
               )}
-              {task.status === 'pending' && <span style={{ color: 'rgba(148,163,184,0.4)', fontSize: 12 }}>Queued…</span>}
-              {task.result && <Markdown text={task.result} />}
+              {liveStatus === 'pending' && <span style={{ color: 'rgba(148,163,184,0.4)', fontSize: 12 }}>Queued…</span>}
+              {(liveStatus === 'completed' || liveStatus === 'failed' || liveStatus === 'cancelled') && liveResult && <Markdown text={liveResult} />}
               {task.error && <span style={{ color: '#f43f5e' }}>{task.error}</span>}
             </div>
           </div>
@@ -608,7 +642,7 @@ function TaskThreadView({ task, agent, onCancelled }: { task: Task; agent: Agent
       </div>
 
       {/* Reply input — only shown when task is done */}
-      {(task.status === 'completed' || task.status === 'failed') && (
+      {(liveStatus === 'completed' || liveStatus === 'failed') && (
         <div style={{ padding: '10px 16px 16px', borderTop: '1px solid rgba(99,102,241,0.1)', display: 'flex', gap: 8, flexShrink: 0 }}>
           <input ref={inputRef} value={input} onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
