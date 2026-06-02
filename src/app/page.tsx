@@ -2517,7 +2517,7 @@ function SkillsView() {
             <code style={{ fontSize:11, color:'rgba(148,163,184,0.3)', background:'rgba(99,102,241,0.05)', padding:'3px 8px', borderRadius:5, display:'inline-block' }}>
               {"{{SKILL:"}{s.name}{":your prompt}}"}
             </code>
-            {testResult?.id===s.id && (
+            {testResult && testResult.id===s.id && (
               <div style={{ marginTop:8, padding:'6px 10px', borderRadius:6, background:testResult.ok?'rgba(16,185,129,0.08)':'rgba(244,63,94,0.08)', border:`1px solid ${testResult.ok?'rgba(16,185,129,0.2)':'rgba(244,63,94,0.2)'}`, color:testResult.ok?'#10b981':'#f43f5e', fontSize:11 }}>
                 {testResult.msg}
               </div>
