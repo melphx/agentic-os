@@ -2009,10 +2009,12 @@ function SaveTemplateModal({ agent, onClose }: { agent: Agent; onClose: () => vo
   const [type, setType] = useState('general')
   const [saving, setSaving] = useState(false)
 
+  // Hoist extractVars to component scope so JSX can use it too
+  const extractVars = (s: string) => { const r: string[] = []; let m; const re = /\{\{(\w+)\}\}/g; while ((m = re.exec(s)) !== null) r.push(m[1]); return r }
+
   async function save() {
     if (!name.trim()) return
     setSaving(true)
-    const extractVars = (s: string) => { const r: string[] = []; let m; const re = /\{\{(\w+)\}\}/g; while ((m = re.exec(s)) !== null) r.push(m[1]); return r }
     const vars = Array.from(new Set([...extractVars(title), ...extractVars(desc)]))
     await fetch('/api/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agent_id: agent.id, name, title_template: title, description_template: desc, type, variables: vars }) })
     setSaving(false); onClose()
