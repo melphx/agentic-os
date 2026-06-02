@@ -2660,6 +2660,12 @@ function AddSkillModal({ onClose }: { onClose: () => void }) {
 
 function HermesView({ messages, onSend, loading }: { messages: Message[]; onSend: (text: string) => void; loading: boolean }) {
   const [input, setInput] = useState('')
+  const [backend, setBackend] = useState<string | null>(null)
+
+  useEffect(() => {
+    fetch('/api/hermes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: [{ role: 'user', content: 'ping' }] }) })
+      .then(r => r.json()).then(d => { if (d.backend) setBackend(d.backend) }).catch(() => {})
+  }, [])
   const endRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
