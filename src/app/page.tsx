@@ -2679,7 +2679,7 @@ function HermesView({ messages, onSend, loading }: { messages: Message[]; onSend
     { label: '🔍 Search tasks',          prompt: 'Search all my past task results for something specific. What should I search for?' },
     { label: '📋 Create pipeline',       prompt: 'Help me create a new pipeline. What agents do you want to chain together?' },
     { label: '📁 Create project',        prompt: 'Help me set up a new project to track a group of related tasks.' },
-    { label: '⚙️ Agent help',            prompt: 'Which agent should I use for my current task? Describe what you need and I'll recommend.' },
+    { label: '⚙️ Agent help',            prompt: "Which agent should I use for my current task? Describe what you need and I'll recommend." },
   ]
 
   return (
