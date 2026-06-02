@@ -2012,7 +2012,7 @@ function SaveTemplateModal({ agent, onClose }: { agent: Agent; onClose: () => vo
   async function save() {
     if (!name.trim()) return
     setSaving(true)
-    const vars = [...new Set([...title.matchAll(/\{\{(\w+)\}\}/g), ...desc.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]))]
+    const vars = Array.from(new Set([...title.matchAll(/\{\{(\w+)\}\}/g), ...desc.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1])))
     await fetch('/api/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agent_id: agent.id, name, title_template: title, description_template: desc, type, variables: vars }) })
     setSaving(false); onClose()
   }
@@ -2037,7 +2037,7 @@ function SaveTemplateModal({ agent, onClose }: { agent: Agent; onClose: () => vo
               {['general','search','browser','code','scrape','file','api'].map(t => <option key={t} value={t} style={{ background: '#0f1623' }}>{t}</option>)}
             </select>
           </div>
-          <p style={{ color: 'rgba(99,102,241,0.6)', fontSize: 11, margin: 0 }}>Variables detected: {[...new Set([...title.matchAll(/\{\{(\w+)\}\}/g), ...desc.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]))].map(v => `{{${v}}}`).join(', ') || 'none'}</p>
+          <p style={{ color: 'rgba(99,102,241,0.6)', fontSize: 11, margin: 0 }}>Variables detected: {Array.from(new Set([...title.matchAll(/\{\{(\w+)\}\}/g), ...desc.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]))).map(v => `{{${v}}}`).join(', ') || 'none'}</p>
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
           <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={save} disabled={saving || !name.trim()}
@@ -2052,7 +2052,7 @@ function SaveTemplateModal({ agent, onClose }: { agent: Agent; onClose: () => vo
 }
 
 function FillVariablesModal({ template, onClose, onSubmit }: { template: any; onClose: () => void; onSubmit: (title: string, desc: string) => void }) {
-  const vars: string[] = [...new Set([...template.title_template.matchAll(/\{\{(\w+)\}\}/g), ...template.description_template.matchAll(/\{\{(\w+)\}\}/g)].map((m: RegExpMatchArray) => m[1]))]
+  const vars: string[] = Array.from(new Set([...template.title_template.matchAll(/\{\{(\w+)\}\}/g), ...template.description_template.matchAll(/\{\{(\w+)\}\}/g)].map((m: RegExpMatchArray) => m[1])))
   const [values, setValues] = useState<Record<string, string>>(Object.fromEntries(vars.map(v => [v, ''])))
 
   function submit() {
