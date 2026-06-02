@@ -2692,11 +2692,12 @@ function HermesView({ messages, onSend, loading }: { messages: Message[]; onSend
             <h1 style={{ color: 'white', fontWeight: 700, fontSize: 18, margin: 0 }}>Hermes</h1>
             <p style={{ color: 'rgba(148,163,184,0.5)', fontSize: 12, margin: 0 }}>Your AI command center — dispatch tasks, manage agents, get answers</p>
           </div>
-          {loading && (
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, alignItems: 'center' }}>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+            {backend && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, background: backend === 'hermes-agent' ? 'rgba(16,185,129,0.12)' : 'rgba(99,102,241,0.12)', color: backend === 'hermes-agent' ? '#10b981' : '#a5b4fc', border: `1px solid ${backend === 'hermes-agent' ? 'rgba(16,185,129,0.25)' : 'rgba(99,102,241,0.25)'}` }}>{backend === 'hermes-agent' ? '⚡ Hermes Agent' : 'GPT-5.4'}</span>}
+            {loading && <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
               {[0,1,2].map(i => <motion.div key={i} animate={{ opacity:[0.3,1,0.3] }} transition={{ repeat:Infinity, duration:1.2, delay:i*0.2 }} style={{ width:5, height:5, borderRadius:'50%', background:'#6366f1' }} />)}
-            </div>
-          )}
+            </div>}
+          </div>
         </div>
       </div>
 
