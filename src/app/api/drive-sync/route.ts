@@ -76,15 +76,51 @@ export async function POST(req: NextRequest) {
         for (const file of files) {
           let content = ''
           // Export based on mime type
+          const dlHeaders = { Authorization: `Bearer ${token}` }
+          const exportUrl = (mime: string) => `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=${encodeURIComponent(mime)}&supportsAllDrives=true`
+          const mediaUrl = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&supportsAllDrives=true`
+
           if (file.mimeType === 'application/vnd.google-apps.document') {
-            const r = await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=text/plain&supportsAllDrives=true`, { headers: { Authorization: `Bearer ${token}` } })
-            content = await r.text()
+            // Google Docs → plain text
+            content = await (await fetch(exportUrl('text/plain'), { headers: dlHeaders })).text()
           } else if (file.mimeType === 'application/vnd.google-apps.spreadsheet') {
-            const r = await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=text/csv&supportsAllDrives=true`, { headers: { Authorization: `Bearer ${token}` } })
-            content = await r.text()
-          } else if (file.mimeType?.startsWith('text/') || file.name?.match(/\.(txt|md|csv|json)$/)) {
-            const r = await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&supportsAllDrives=true`, { headers: { Authorization: `Bearer ${token}` } })
-            content = await r.text()
+            // Google Sheets → CSV
+            content = await (await fetch(exportUrl('text/csv'), { headers: dlHeaders })).text()
+          } else if (file.mimeType === 'application/vnd.google-apps.presentation') {
+            // Google Slides → plain text
+            content = await (await fetch(exportUrl('text/plain'), { headers: dlHeaders })).text()
+          } else if (file.mimeType === 'application/vnd.google-apps.form') {
+            // Google Forms → plain text via export
+            content = await (await fetch(exportUrl('application/zip'), { headers: dlHeaders })).text().catch(() => '')
+          } else if (file.mimeType === 'application/pdf' || file.name?.endsWith('.pdf')) {
+            // PDF → use pdf-parse
+            try {
+              const buf = Buffer.from(await (await fetch(mediaUrl, { headers: dlHeaders })).arrayBuffer())
+              const pdfParse = require('pdf-parse')
+              const parsed = await pdfParse(buf)
+              content = parsed.text?.trim() || ''
+            } catch { content = '' }
+          } else if (
+            file.mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+            file.name?.endsWith('.docx')
+          ) {
+            // Word doc → extract text via basic XML parsing
+            try {
+              const buf = Buffer.from(await (await fetch(mediaUrl, { headers: dlHeaders })).arrayBuffer())
+              const JSZip = require('jszip')
+              const zip = await JSZip.loadAsync(buf)
+              const xml = await zip.file('word/document.xml')?.async('string') || ''
+              content = xml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+            } catch { content = '' }
+          } else if (
+            file.mimeType?.startsWith('text/') ||
+            file.name?.match(/\.(txt|md|csv|json|html|xml)$/)
+          ) {
+            // Plain text files
+            content = await (await fetch(mediaUrl, { headers: dlHeaders })).text()
+          } else {
+            // Unsupported type — skip
+            content = ''
           }
           if (content.trim().length > 50) {
             if (cfg.agent_id) {
