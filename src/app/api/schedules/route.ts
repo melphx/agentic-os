@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
 import { getSchedules, createSchedule, updateSchedule, getDb } from '@/lib/db'
-import { registerCron, stopCron } from '@/lib/scheduler'
+import { registerCron, stopCron, pollEventTriggers } from '@/lib/scheduler'
 import cron from 'node-cron'
 
 export async function GET(req: NextRequest) {

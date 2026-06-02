@@ -209,6 +209,7 @@ const NAV = [
   { id: 'tasks',      icon: <ListTodo size={18} />,        label: 'Tasks'      },
   { id: 'pipelines',  icon: <GitBranch size={18} />,       label: 'Pipelines'  },
   { id: 'analytics',  icon: <BarChart2 size={18} />,       label: 'Analytics'  },
+  { id: 'triggers',   icon: <Zap size={18} />,              label: 'Triggers'   },
   { id: 'terminal',   icon: <TerminalIcon size={18} />,    label: 'Terminal'   },
   { id: 'schedules',  icon: <Clock size={18} />,           label: 'Schedules'  },
   { id: 'settings',   icon: <Settings size={18} />,        label: 'Settings'   },
@@ -1159,7 +1160,8 @@ function AgentDetailView({ agent, onBack, onRunTask, newTaskId, onNewTaskConsume
         {tab === 'train' ? (
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
             <TrainPanel agent={agent} />
-            <AgentPromptEditor agent={agent} />
+            <TaskTemplatesPanel agent={agent} onUseTemplate={(title, desc, type) => onRunTask(agent, { title, description: desc, type })} />
+          <AgentPromptEditor agent={agent} />
           </div>
         ) : tab === 'integrations' ? (
           <div style={{ flex: 1, overflowY: 'auto' }}>
@@ -1578,6 +1580,521 @@ function CreatePipelineModal({ agents, onClose }: { agents: Agent[]; onClose: ()
 }
 
 
+// ── Company Knowledge Base Panel ──────────────────────────────────────────
+
+function CompanyKbPanel() {
+  const [files, setFiles] = useState<any[]>([])
+  const [uploading, setUploading] = useState(false)
+  const [msg, setMsg] = useState<{text:string;ok:boolean}|null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { load() }, [])
+  async function load() { const r = await fetch('/api/company-knowledge'); if(r.ok) setFiles(await r.json()) }
+
+  async function upload(files: FileList|null) {
+    if (!files?.length) return
+    setUploading(true); setMsg(null)
+    const fd = new FormData()
+    Array.from(files).forEach(f => fd.append('files', f))
+    const r = await fetch('/api/company-knowledge', { method: 'POST', body: fd })
+    const d = await r.json()
+    setMsg({ text: `✅ ${(d.saved||[]).filter((s:any)=>!s.error).length} file(s) uploaded`, ok: true })
+    setUploading(false); load()
+    setTimeout(() => setMsg(null), 3000)
+  }
+
+  async function remove(id: number) { await fetch(`/api/company-knowledge?id=${id}`, { method: 'DELETE' }); load() }
+
+  return (
+    <div style={{ background: 'rgba(15,20,35,0.8)', border: '1px solid rgba(99,102,241,0.12)', borderRadius: 14, padding: 20, marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+        <BookOpen size={14} color="#a5b4fc" />
+        <span style={{ color: 'white', fontWeight: 600, fontSize: 14 }}>Company Knowledge Base</span>
+        <span style={{ fontSize: 11, color: 'rgba(148,163,184,0.4)' }}>— shared by ALL agents automatically</span>
+      </div>
+      <div onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); upload(e.dataTransfer.files) }}
+        onClick={() => inputRef.current?.click()}
+        style={{ border: '2px dashed rgba(99,102,241,0.25)', borderRadius: 10, padding: '16px', textAlign: 'center', cursor: 'pointer', marginBottom: 12, background: 'rgba(99,102,241,0.04)' }}>
+        <input ref={inputRef} type="file" multiple accept=".pdf,.txt,.md,.csv,.json,.html" style={{ display: 'none' }} onChange={e => upload(e.target.files)} />
+        <p style={{ color: 'rgba(148,163,184,0.5)', fontSize: 12, margin: 0 }}>{uploading ? 'Uploading…' : 'Drop files here or click — PDF, TXT, MD, CSV, JSON'}</p>
+      </div>
+      {msg && <div style={{ padding: '6px 12px', borderRadius: 8, background: msg.ok?'rgba(16,185,129,0.08)':'rgba(244,63,94,0.08)', border: `1px solid ${msg.ok?'rgba(16,185,129,0.2)':'rgba(244,63,94,0.2)'}`, color: msg.ok?'#10b981':'#f43f5e', fontSize: 12, marginBottom: 10 }}>{msg.text}</div>}
+      {files.length === 0 && <p style={{ color: 'rgba(148,163,184,0.3)', fontSize: 12, textAlign: 'center', margin: 0 }}>No company files yet. Upload your service catalog, pricing, FAQs, etc.</p>}
+      {files.map((f:any) => (
+        <div key={f.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid rgba(99,102,241,0.07)' }}>
+          <div>
+            <span style={{ color: 'white', fontSize: 13 }}>{f.filename}</span>
+            <span style={{ color: 'rgba(148,163,184,0.3)', fontSize: 11, marginLeft: 8 }}>{(f.file_size/1024).toFixed(1)} KB</span>
+          </div>
+          <button onClick={() => remove(f.id)} style={{ background: 'none', border: 'none', color: 'rgba(244,63,94,0.4)', cursor: 'pointer' }}><Trash2 size={12} /></button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Outbound Webhooks Panel ────────────────────────────────────────────────
+
+function WebhooksPanel() {
+  const [webhooks, setWebhooks] = useState<any[]>([])
+  const [name, setName] = useState('')
+  const [url, setUrl] = useState('')
+  const [events, setEvents] = useState('task.completed')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => { load() }, [])
+  async function load() { const r = await fetch('/api/webhooks'); if(r.ok) setWebhooks(await r.json()) }
+
+  async function create() {
+    if (!name.trim() || !url.trim()) return
+    setSaving(true)
+    await fetch('/api/webhooks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, url, events }) })
+    setName(''); setUrl(''); setSaving(false); load()
+  }
+
+  async function remove(id: number) { await fetch(`/api/webhooks?id=${id}`, { method: 'DELETE' }); load() }
+
+  const inputStyle = { background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, padding: '8px 10px', color: 'white', fontSize: 12, outline: 'none', width: '100%', boxSizing: 'border-box' as const }
+
+  return (
+    <div style={{ background: 'rgba(15,20,35,0.8)', border: '1px solid rgba(99,102,241,0.12)', borderRadius: 14, padding: 20, marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+        <Globe size={14} color="#a5b4fc" />
+        <span style={{ color: 'white', fontWeight: 600, fontSize: 14 }}>Outbound Webhooks</span>
+        <span style={{ fontSize: 11, color: 'rgba(148,163,184,0.4)' }}>— POST task results to external systems</span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="Name (e.g. GHL Webhook)" style={inputStyle} />
+        <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://your-endpoint.com/webhook" style={inputStyle} />
+        <select value={events} onChange={e => setEvents(e.target.value)} style={{ ...inputStyle, fontFamily: 'inherit' }}>
+          <option value="task.completed">task.completed</option>
+          <option value="task.failed">task.failed</option>
+          <option value="task.completed,task.failed">task.completed + task.failed</option>
+        </select>
+        <motion.button whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }} onClick={create} disabled={saving || !name.trim() || !url.trim()}
+          style={{ padding: '8px', background: 'linear-gradient(135deg,#4338ca,#6366f1)', border: 'none', borderRadius: 8, color: 'white', fontSize: 12, fontWeight: 600, cursor: 'pointer', opacity: (!name.trim()||!url.trim())?0.5:1 }}>
+          {saving ? 'Adding…' : 'Add Webhook'}
+        </motion.button>
+      </div>
+      {webhooks.length === 0 && <p style={{ color: 'rgba(148,163,184,0.3)', fontSize: 12, textAlign: 'center', margin: 0 }}>No webhooks yet</p>}
+      {webhooks.map((w:any) => (
+        <div key={w.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(99,102,241,0.07)' }}>
+          <div>
+            <span style={{ color: 'white', fontSize: 13 }}>{w.name}</span>
+            <span style={{ color: 'rgba(148,163,184,0.3)', fontSize: 11, display: 'block' }}>{w.url.slice(0, 50)}…</span>
+            <span style={{ color: '#a5b4fc', fontSize: 10 }}>{w.events}</span>
+          </div>
+          <button onClick={() => remove(w.id)} style={{ background: 'none', border: 'none', color: 'rgba(244,63,94,0.4)', cursor: 'pointer' }}><Trash2 size={12} /></button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Event Triggers Panel ───────────────────────────────────────────────────
+
+function TriggersPanel({ agents }: { agents: Agent[] }) {
+  const [triggers, setTriggers] = useState<any[]>([])
+  const [showAdd, setShowAdd] = useState(false)
+
+  useEffect(() => { load() }, [])
+  async function load() { const r = await fetch('/api/triggers'); if(r.ok) setTriggers(await r.json()) }
+
+  async function toggle(t: any) {
+    await fetch('/api/triggers', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: t.id, enabled: t.enabled ? 0 : 1 }) })
+    load()
+  }
+
+  async function remove(id: number) { await fetch(`/api/triggers?id=${id}`, { method: 'DELETE' }); load() }
+
+  const EVENT_LABELS: Record<string, string> = {
+    'ghl.contact.created': '🟢 GHL New Contact',
+    'ghl.opportunity.created': '💰 GHL New Opportunity',
+  }
+
+  return (
+    <div style={{ padding: 24, height: '100%', overflowY: 'auto' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
+        <div>
+          <h1 style={{ color: 'white', fontWeight: 700, fontSize: 22, margin: 0 }}>Event Triggers</h1>
+          <p style={{ color: 'rgba(148,163,184,0.5)', fontSize: 13, margin: '4px 0 0' }}>Auto-run agents when things happen in GHL</p>
+        </div>
+        <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => setShowAdd(true)}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', background: 'linear-gradient(135deg,#4338ca,#6366f1)', border: 'none', borderRadius: 9, color: 'white', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+          <Plus size={14} /> New Trigger
+        </motion.button>
+      </div>
+
+      {triggers.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '60px 0', color: 'rgba(148,163,184,0.3)' }}>
+          <Zap size={40} style={{ margin: '0 auto 12px', display: 'block', opacity: 0.3 }} />
+          <p>No triggers yet.</p>
+          <p style={{ fontSize: 12, marginTop: 8 }}>Example: New GHL contact → Research agent writes a personalised follow-up</p>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {triggers.map((t:any) => {
+          const cfg = JSON.parse(t.config || '{}')
+          const ag = agents.find((a:Agent) => a.id === cfg.agent_id)
+          return (
+            <div key={t.id} style={{ background: 'rgba(15,20,35,0.8)', border: `1px solid ${t.enabled ? 'rgba(99,102,241,0.2)' : 'rgba(148,163,184,0.08)'}`, borderRadius: 14, padding: 18 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ color: 'white', fontWeight: 600, fontSize: 14 }}>{t.name}</span>
+                    <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, background: t.enabled?'rgba(16,185,129,0.12)':'rgba(148,163,184,0.08)', color: t.enabled?'#10b981':'rgba(148,163,184,0.4)' }}>{t.enabled?'Active':'Paused'}</span>
+                  </div>
+                  <p style={{ color: 'rgba(148,163,184,0.5)', fontSize: 12, margin: '4px 0 0' }}>{EVENT_LABELS[t.event_type] || t.event_type} → {ag?.name || cfg.agent_id || 'No agent'}</p>
+                  {t.last_check && <p style={{ color: 'rgba(148,163,184,0.3)', fontSize: 11, margin: '2px 0 0' }}>Last checked: {new Date(t.last_check).toLocaleString()}</p>}
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button onClick={() => toggle(t)} style={{ padding: '5px 12px', background: t.enabled?'rgba(16,185,129,0.1)':'rgba(99,102,241,0.1)', border: `1px solid ${t.enabled?'rgba(16,185,129,0.25)':'rgba(99,102,241,0.25)'}`, borderRadius: 7, color: t.enabled?'#10b981':'#a5b4fc', fontSize: 11, cursor: 'pointer' }}>
+                    {t.enabled ? 'Pause' : 'Activate'}
+                  </button>
+                  <button onClick={() => remove(t.id)} style={{ padding: '5px 8px', background: 'transparent', border: '1px solid rgba(244,63,94,0.2)', borderRadius: 7, color: 'rgba(244,63,94,0.5)', cursor: 'pointer' }}><Trash2 size={11} /></button>
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {showAdd && <AddTriggerModal agents={agents} onClose={() => { setShowAdd(false); load() }} />}
+    </div>
+  )
+}
+
+function AddTriggerModal({ agents, onClose }: { agents: Agent[]; onClose: () => void }) {
+  const [name, setName] = useState('')
+  const [eventType, setEventType] = useState('ghl.contact.created')
+  const [agentId, setAgentId] = useState(agents[0]?.id || '')
+  const [apiKey, setApiKey] = useState('')
+  const [locationId, setLocationId] = useState('')
+  const [template, setTemplate] = useState('New GHL contact: {{name}} ({{email}}, {{phone}}). Research this lead and draft a personalised follow-up email for Phoenix Home Remodeling.')
+  const [saving, setSaving] = useState(false)
+
+  async function save() {
+    if (!name.trim() || !apiKey.trim() || !locationId.trim()) return
+    setSaving(true)
+    await fetch('/api/triggers', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, event_type: eventType, config: { apiKey, locationId, agent_id: agentId, task_description_template: template }, action_type: 'task', action_id: agentId }),
+    })
+    setSaving(false); onClose()
+  }
+
+  const inp = { background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, padding: '8px 10px', color: 'white', fontSize: 12, outline: 'none', width: '100%', boxSizing: 'border-box' as const }
+  const lbl = { color: 'rgba(148,163,184,0.6)', fontSize: 10, marginBottom: 4, display: 'block' as const }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300 }}>
+      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+        style={{ width: 520, maxHeight: '88vh', overflowY: 'auto', background: '#0f1623', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 16, padding: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 18 }}>
+          <span style={{ color: 'white', fontWeight: 700, fontSize: 15 }}>New Event Trigger</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'rgba(148,163,184,0.5)', cursor: 'pointer', fontSize: 18 }}>✕</button>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div><label style={lbl}>TRIGGER NAME</label><input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. New Lead Auto-Research" style={inp} /></div>
+          <div><label style={lbl}>WHEN THIS HAPPENS</label>
+            <select value={eventType} onChange={e => setEventType(e.target.value)} style={{ ...inp, fontFamily: 'inherit' }}>
+              <option value="ghl.contact.created">GHL — New Contact Created</option>
+              <option value="ghl.opportunity.created">GHL — New Opportunity Created</option>
+            </select>
+          </div>
+          <div><label style={lbl}>GHL API KEY</label><input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="eyJhbGci..." style={inp} /></div>
+          <div><label style={lbl}>GHL LOCATION ID</label><input value={locationId} onChange={e => setLocationId(e.target.value)} placeholder="abc123..." style={inp} /></div>
+          <div><label style={lbl}>RUN THIS AGENT</label>
+            <select value={agentId} onChange={e => setAgentId(e.target.value)} style={{ ...inp, fontFamily: 'inherit' }}>
+              {agents.map(a => <option key={a.id} value={a.id} style={{ background: '#0f1623' }}>{a.name}</option>)}
+            </select>
+          </div>
+          <div><label style={lbl}>TASK DESCRIPTION TEMPLATE (use {"{{"}) {"{{name}}"}, {"{{email}}"}, {"{{phone}}"} {"{{value}}"}, {"{{stage}}"})</label>
+            <textarea value={template} onChange={e => setTemplate(e.target.value)} rows={4} style={{ ...inp, resize: 'vertical' as const, lineHeight: 1.5, fontFamily: 'inherit' }} />
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
+          <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={save} disabled={saving || !name.trim() || !apiKey.trim() || !locationId.trim()}
+            style={{ flex: 1, padding: 10, background: 'linear-gradient(135deg,#4338ca,#6366f1)', border: 'none', borderRadius: 9, color: 'white', fontWeight: 600, fontSize: 13, cursor: 'pointer', opacity: (!name.trim()||!apiKey.trim()||!locationId.trim())?0.5:1 }}>
+            {saving ? 'Creating…' : 'Create Trigger'}
+          </motion.button>
+          <button onClick={onClose} style={{ padding: '10px 16px', background: 'transparent', border: '1px solid rgba(148,163,184,0.15)', borderRadius: 9, color: 'rgba(148,163,184,0.5)', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+        </div>
+        <p style={{ color: 'rgba(148,163,184,0.3)', fontSize: 11, marginTop: 12, textAlign: 'center' }}>Triggers poll GHL every 5 minutes. First check covers the past hour.</p>
+      </motion.div>
+    </div>
+  )
+}
+
+// ── Google Drive Sync Panel ────────────────────────────────────────────────
+
+function DriveSyncPanel({ agents }: { agents: Agent[] }) {
+  const [configs, setConfigs] = useState<any[]>([])
+  const [showAdd, setShowAdd] = useState(false)
+  const [syncing, setSyncing] = useState<number | null>(null)
+  const [syncResult, setSyncResult] = useState<string[]>([])
+
+  useEffect(() => { load() }, [])
+  async function load() { const r = await fetch('/api/drive-sync'); if(r.ok) setConfigs(await r.json()) }
+
+  async function sync(id?: number) {
+    setSyncing(id || 0); setSyncResult([])
+    const r = await fetch('/api/drive-sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'sync', id }) })
+    const d = await r.json()
+    setSyncResult(d.results || [])
+    setSyncing(null); load()
+  }
+
+  async function remove(id: number) { await fetch(`/api/drive-sync?id=${id}`, { method: 'DELETE' }); load() }
+
+  return (
+    <div style={{ background: 'rgba(15,20,35,0.8)', border: '1px solid rgba(99,102,241,0.12)', borderRadius: 14, padding: 20, marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Globe size={14} color="#a5b4fc" />
+          <span style={{ color: 'white', fontWeight: 600, fontSize: 14 }}>Google Drive Sync</span>
+          <span style={{ fontSize: 11, color: 'rgba(148,163,184,0.4)' }}>— pull files into knowledge base</span>
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {configs.length > 0 && <button onClick={() => sync()} disabled={syncing !== null} style={{ padding: '5px 12px', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 7, color: '#a5b4fc', fontSize: 11, cursor: 'pointer' }}>{syncing !== null ? 'Syncing…' : '↻ Sync All'}</button>}
+          <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }} onClick={() => setShowAdd(true)}
+            style={{ padding: '5px 12px', background: 'linear-gradient(135deg,#4338ca,#6366f1)', border: 'none', borderRadius: 7, color: 'white', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+            <Plus size={10} style={{ display: 'inline', marginRight: 4 }} />Add Folder
+          </motion.button>
+        </div>
+      </div>
+
+      {syncResult.length > 0 && (
+        <div style={{ background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.15)', borderRadius: 8, padding: 10, marginBottom: 12 }}>
+          {syncResult.map((r,i) => <p key={i} style={{ color: r.includes('ERROR')?'#f43f5e':'#10b981', fontSize: 12, margin: '2px 0' }}>{r}</p>)}
+        </div>
+      )}
+
+      {configs.length === 0 && <p style={{ color: 'rgba(148,163,184,0.3)', fontSize: 12, textAlign: 'center', margin: 0 }}>No Drive folders connected. Add a folder to auto-sync files into agent knowledge.</p>}
+      {configs.map((c:any) => {
+        const ag = agents.find((a:Agent) => a.id === c.agent_id)
+        return (
+          <div key={c.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 0', borderBottom: '1px solid rgba(99,102,241,0.07)' }}>
+            <div>
+              <span style={{ color: 'white', fontSize: 13 }}>{c.name}</span>
+              <span style={{ color: 'rgba(148,163,184,0.3)', fontSize: 11, marginLeft: 8 }}>{ag ? `→ ${ag.name}` : '→ Company KB'}</span>
+              {c.last_synced && <p style={{ color: 'rgba(148,163,184,0.3)', fontSize: 11, margin: '2px 0 0' }}>Last synced: {new Date(c.last_synced).toLocaleString()}</p>}
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={() => sync(c.id)} disabled={syncing !== null} style={{ padding: '4px 10px', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 6, color: '#a5b4fc', fontSize: 11, cursor: 'pointer' }}>Sync</button>
+              <button onClick={() => remove(c.id)} style={{ background: 'none', border: 'none', color: 'rgba(244,63,94,0.4)', cursor: 'pointer' }}><Trash2 size={12} /></button>
+            </div>
+          </div>
+        )
+      })}
+
+      {showAdd && <AddDriveFolderModal agents={agents} onClose={() => { setShowAdd(false); load() }} />}
+    </div>
+  )
+}
+
+function AddDriveFolderModal({ agents, onClose }: { agents: Agent[]; onClose: () => void }) {
+  const [name, setName] = useState('')
+  const [folderId, setFolderId] = useState('')
+  const [saJson, setSaJson] = useState('')
+  const [agentId, setAgentId] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  async function save() {
+    if (!name.trim() || !folderId.trim() || !saJson.trim()) return
+    setSaving(true)
+    await fetch('/api/drive-sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, folder_id: folderId, service_account_json: saJson, agent_id: agentId || null }) })
+    setSaving(false); onClose()
+  }
+
+  const inp = { background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, padding: '8px 10px', color: 'white', fontSize: 12, outline: 'none', width: '100%', boxSizing: 'border-box' as const }
+  const lbl = { color: 'rgba(148,163,184,0.6)', fontSize: 10, marginBottom: 4, display: 'block' as const }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300 }}>
+      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+        style={{ width: 500, maxHeight: '88vh', overflowY: 'auto', background: '#0f1623', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 16, padding: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 18 }}>
+          <span style={{ color: 'white', fontWeight: 700, fontSize: 15 }}>Connect Drive Folder</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'rgba(148,163,184,0.5)', cursor: 'pointer', fontSize: 18 }}>✕</button>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div><label style={lbl}>NAME</label><input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. PHR Marketing Materials" style={inp} /></div>
+          <div><label style={lbl}>GOOGLE DRIVE FOLDER ID (from the URL)</label><input value={folderId} onChange={e => setFolderId(e.target.value)} placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs..." style={inp} /></div>
+          <div><label style={lbl}>SYNC INTO (blank = Company Knowledge Base, all agents)</label>
+            <select value={agentId} onChange={e => setAgentId(e.target.value)} style={{ ...inp, fontFamily: 'inherit' }}>
+              <option value="">Company Knowledge Base (all agents)</option>
+              {agents.map(a => <option key={a.id} value={a.id} style={{ background: '#0f1623' }}>{a.name} only</option>)}
+            </select>
+          </div>
+          <div><label style={lbl}>GOOGLE SERVICE ACCOUNT JSON</label>
+            <textarea value={saJson} onChange={e => setSaJson(e.target.value)} rows={5} placeholder={'{  "type": "service_account",  "project_id": "...",  "private_key": "..."  ...}'} style={{ ...inp, resize: 'vertical' as const, fontFamily: 'monospace', lineHeight: 1.4 }} />
+          </div>
+          <div style={{ background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.12)', borderRadius: 8, padding: 10, fontSize: 11, color: 'rgba(148,163,184,0.5)', lineHeight: 1.6 }}>
+            💡 To get a service account: Google Cloud Console → IAM → Service Accounts → Create → Download JSON. Then share your Drive folder with the service account email.
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
+          <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={save} disabled={saving || !name.trim() || !folderId.trim() || !saJson.trim()}
+            style={{ flex: 1, padding: 10, background: 'linear-gradient(135deg,#4338ca,#6366f1)', border: 'none', borderRadius: 9, color: 'white', fontWeight: 600, fontSize: 13, cursor: 'pointer', opacity: (!name.trim()||!folderId.trim()||!saJson.trim())?0.5:1 }}>
+            {saving ? 'Saving…' : 'Connect Folder'}
+          </motion.button>
+          <button onClick={onClose} style={{ padding: '10px 16px', background: 'transparent', border: '1px solid rgba(148,163,184,0.15)', borderRadius: 9, color: 'rgba(148,163,184,0.5)', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
+// ── Task Templates Panel ───────────────────────────────────────────────────
+
+function TaskTemplatesPanel({ agent, onUseTemplate }: { agent: Agent; onUseTemplate: (title: string, description: string, type: string) => void }) {
+  const [templates, setTemplates] = useState<any[]>([])
+  const [showSave, setShowSave] = useState(false)
+  const [varModal, setVarModal] = useState<any | null>(null)
+
+  useEffect(() => { load() }, [agent.id])
+  async function load() { const r = await fetch(`/api/templates?agent_id=${agent.id}`); if(r.ok) setTemplates(await r.json()) }
+  async function remove(id: number) { await fetch(`/api/templates?id=${id}`, { method: 'DELETE' }); load() }
+
+  function use(tpl: any) {
+    const vars: string[] = JSON.parse(tpl.variables || '[]')
+    if (vars.length) { setVarModal(tpl); return }
+    onUseTemplate(tpl.title_template, tpl.description_template, tpl.type)
+  }
+
+  return (
+    <div style={{ padding: '16px 24px', borderTop: '1px solid rgba(99,102,241,0.1)', marginTop: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Layers size={14} color="#a5b4fc" />
+          <span style={{ color: 'white', fontWeight: 600, fontSize: 13 }}>Task Templates</span>
+        </div>
+        <button onClick={() => setShowSave(true)} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 9px', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 6, color: '#a5b4fc', fontSize: 11, cursor: 'pointer' }}>
+          <Plus size={10} /> Save Template
+        </button>
+      </div>
+
+      {templates.length === 0 && <p style={{ color: 'rgba(148,163,184,0.3)', fontSize: 12, margin: 0 }}>No templates yet. Save a reusable task with {'{{'} {"{{variables}}"} {'}}'} for quick dispatch.</p>}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {templates.map((tpl:any) => (
+          <div key={tpl.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px', background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.1)', borderRadius: 8 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ color: 'white', fontSize: 12, fontWeight: 500 }}>{tpl.name}</div>
+              <div style={{ color: 'rgba(148,163,184,0.4)', fontSize: 11, marginTop: 1 }}>{tpl.type} · {tpl.title_template.slice(0, 40)}</div>
+            </div>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => use(tpl)}
+                style={{ padding: '3px 10px', background: `linear-gradient(135deg,${agent.accent_dark},${agent.accent})`, border: 'none', borderRadius: 6, color: 'white', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+                Use
+              </motion.button>
+              <button onClick={() => remove(tpl.id)} style={{ background: 'none', border: 'none', color: 'rgba(244,63,94,0.4)', cursor: 'pointer' }}><Trash2 size={11} /></button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {showSave && <SaveTemplateModal agent={agent} onClose={() => { setShowSave(false); load() }} />}
+      {varModal && <FillVariablesModal template={varModal} onClose={() => setVarModal(null)} onSubmit={(title, desc) => { onUseTemplate(title, desc, varModal.type); setVarModal(null) }} />}
+    </div>
+  )
+}
+
+function SaveTemplateModal({ agent, onClose }: { agent: Agent; onClose: () => void }) {
+  const [name, setName] = useState('')
+  const [title, setTitle] = useState('')
+  const [desc, setDesc] = useState('')
+  const [type, setType] = useState('general')
+  const [saving, setSaving] = useState(false)
+
+  async function save() {
+    if (!name.trim()) return
+    setSaving(true)
+    const vars = [...new Set([...title.matchAll(/\{\{(\w+)\}\}/g), ...desc.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]))]
+    await fetch('/api/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agent_id: agent.id, name, title_template: title, description_template: desc, type, variables: vars }) })
+    setSaving(false); onClose()
+  }
+
+  const inp = { background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, padding: '8px 10px', color: 'white', fontSize: 12, outline: 'none', width: '100%', boxSizing: 'border-box' as const }
+  const lbl = { color: 'rgba(148,163,184,0.6)', fontSize: 10, marginBottom: 4, display: 'block' as const }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300 }}>
+      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+        style={{ width: 480, background: '#0f1623', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 16, padding: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+          <span style={{ color: 'white', fontWeight: 700, fontSize: 15 }}>Save Task Template</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'rgba(148,163,184,0.5)', cursor: 'pointer', fontSize: 18 }}>✕</button>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div><label style={lbl}>TEMPLATE NAME</label><input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Lead Follow-up Email" style={inp} /></div>
+          <div><label style={lbl}>TASK TITLE (use {"{{variable}}"} for dynamic parts)</label><input value={title} onChange={e => setTitle(e.target.value)} placeholder="Write follow-up for {{lead_name}}" style={inp} /></div>
+          <div><label style={lbl}>TASK DESCRIPTION</label><textarea value={desc} onChange={e => setDesc(e.target.value)} rows={4} placeholder={"Write a personalised follow-up email for {{lead_name}} who is interested in {{service}}. Budget: {{budget}}."} style={{ ...inp, resize: 'vertical' as const, lineHeight: 1.5, fontFamily: 'inherit' }} /></div>
+          <div><label style={lbl}>TYPE</label>
+            <select value={type} onChange={e => setType(e.target.value)} style={{ ...inp, fontFamily: 'inherit' }}>
+              {['general','search','browser','code','scrape','file','api'].map(t => <option key={t} value={t} style={{ background: '#0f1623' }}>{t}</option>)}
+            </select>
+          </div>
+          <p style={{ color: 'rgba(99,102,241,0.6)', fontSize: 11, margin: 0 }}>Variables detected: {[...new Set([...title.matchAll(/\{\{(\w+)\}\}/g), ...desc.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]))].map(v => `{{${v}}}`).join(', ') || 'none'}</p>
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+          <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={save} disabled={saving || !name.trim()}
+            style={{ flex: 1, padding: 10, background: `linear-gradient(135deg,${agent.accent_dark},${agent.accent})`, border: 'none', borderRadius: 9, color: 'white', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+            {saving ? 'Saving…' : 'Save Template'}
+          </motion.button>
+          <button onClick={onClose} style={{ padding: '10px 16px', background: 'transparent', border: '1px solid rgba(148,163,184,0.15)', borderRadius: 9, color: 'rgba(148,163,184,0.5)', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
+function FillVariablesModal({ template, onClose, onSubmit }: { template: any; onClose: () => void; onSubmit: (title: string, desc: string) => void }) {
+  const vars: string[] = [...new Set([...template.title_template.matchAll(/\{\{(\w+)\}\}/g), ...template.description_template.matchAll(/\{\{(\w+)\}\}/g)].map((m: RegExpMatchArray) => m[1]))]
+  const [values, setValues] = useState<Record<string, string>>(Object.fromEntries(vars.map(v => [v, ''])))
+
+  function submit() {
+    let title = template.title_template
+    let desc = template.description_template
+    for (const [k, v] of Object.entries(values)) {
+      title = title.replace(new RegExp(`\{\{${k}\}\}`, 'g'), v)
+      desc  = desc.replace(new RegExp(`\{\{${k}\}\}`, 'g'), v)
+    }
+    onSubmit(title, desc)
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 400 }}>
+      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+        style={{ width: 420, background: '#0f1623', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 16, padding: 24 }}>
+        <div style={{ marginBottom: 16 }}>
+          <span style={{ color: 'white', fontWeight: 700, fontSize: 15 }}>Fill in Variables</span>
+          <p style={{ color: 'rgba(148,163,184,0.5)', fontSize: 12, marginTop: 4 }}>{template.name}</p>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+          {vars.map(v => (
+            <div key={v}>
+              <label style={{ color: 'rgba(148,163,184,0.6)', fontSize: 10, marginBottom: 4, display: 'block', textTransform: 'uppercase' }}>{v.replace(/_/g, ' ')}</label>
+              <input value={values[v]} onChange={e => setValues(prev => ({ ...prev, [v]: e.target.value }))} placeholder={`Enter ${v}`}
+                style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, padding: '8px 10px', color: 'white', fontSize: 13, outline: 'none', width: '100%', boxSizing: 'border-box' }} />
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={submit}
+            style={{ flex: 1, padding: 10, background: 'linear-gradient(135deg,#4338ca,#6366f1)', border: 'none', borderRadius: 9, color: 'white', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+            Run Task
+          </motion.button>
+          <button onClick={onClose} style={{ padding: '10px 16px', background: 'transparent', border: '1px solid rgba(148,163,184,0.15)', borderRadius: 9, color: 'rgba(148,163,184,0.5)', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
+
 // ── Dashboard View ─────────────────────────────────────────────────────────
 
 function DashboardView({ agents, metrics, activity, onSelectAgent }: { agents: Agent[]; metrics: Metrics | null; activity: LogEntry[]; onSelectAgent: (a: Agent) => void }) {
@@ -1815,7 +2332,7 @@ function ApiKeysPanel() {
   )
 }
 
-function SettingsView() {
+function SettingsView({ agents = [] }: { agents?: Agent[] }) {
   const [openaiUrl, setOpenaiUrl] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('openaiUrl') || 'https://api.openai.com/v1' : '')
   const [model, setModel] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('openaiModel') || 'gpt-4o-mini' : '')
   const [saved, setSaved]         = useState(false)
@@ -1830,6 +2347,9 @@ function SettingsView() {
   return (
     <div style={{ padding: 24, maxWidth: 520 }}>
       <h1 style={{ color: 'white', fontWeight: 700, fontSize: 22, margin: '0 0 24px' }}>Settings</h1>
+      <CompanyKbPanel />
+      <WebhooksPanel />
+      <DriveSyncPanel agents={agents} />
       <ApiKeysPanel />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
         {[
@@ -2115,8 +2635,9 @@ export default function Page() {
       case 'terminal': return <TerminalView agents={agents} metrics={metrics} />
       case 'schedules': return <SchedulesView agents={agents} />
       case 'analytics':  return <AnalyticsView />
+      case 'triggers':   return <TriggersPanel agents={agents} />
       case 'pipelines':  return <PipelinesView agents={agents} />
-      case 'settings':   return <SettingsView />
+      case 'settings':   return <SettingsView agents={agents} />
       default: return null
     }
   }

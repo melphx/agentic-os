@@ -611,3 +611,162 @@ export function getAnalytics() {
 
   return { summary, byAgent, byDay, byType, costPerAgent }
 }
+
+// ── Outbound Webhooks ──────────────────────────────────────────────────────
+
+export interface OutboundWebhook {
+  id: number; name: string; url: string; headers: string
+  events: string; agent_filter: string | null; enabled: number; created_at: string
+}
+
+export function ensureWebhooksTable() {
+  getDb().exec(`CREATE TABLE IF NOT EXISTS outbound_webhooks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL, url TEXT NOT NULL,
+    headers TEXT DEFAULT '{}',
+    events TEXT DEFAULT 'task.completed',
+    agent_filter TEXT,
+    enabled INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`)
+}
+
+export function getWebhooks(): OutboundWebhook[] {
+  ensureWebhooksTable()
+  return getDb().prepare('SELECT * FROM outbound_webhooks WHERE enabled=1').all() as OutboundWebhook[]
+}
+
+export function getAllWebhooks(): OutboundWebhook[] {
+  ensureWebhooksTable()
+  return getDb().prepare('SELECT * FROM outbound_webhooks ORDER BY created_at DESC').all() as OutboundWebhook[]
+}
+
+export function createWebhook(data: Omit<OutboundWebhook, 'id' | 'created_at'>): OutboundWebhook {
+  ensureWebhooksTable()
+  const info = getDb().prepare(`INSERT INTO outbound_webhooks (name,url,headers,events,agent_filter,enabled) VALUES (@name,@url,@headers,@events,@agent_filter,@enabled)`).run(data)
+  return getDb().prepare('SELECT * FROM outbound_webhooks WHERE id=?').get(info.lastInsertRowid) as OutboundWebhook
+}
+
+export function deleteWebhook(id: number) { ensureWebhooksTable(); getDb().prepare('DELETE FROM outbound_webhooks WHERE id=?').run(id) }
+
+// ── Event Triggers ─────────────────────────────────────────────────────────
+
+export interface EventTrigger {
+  id: number; name: string; event_type: string
+  config: string; action_type: string; action_id: string | null
+  last_check: string | null; enabled: number; created_at: string
+}
+
+export function ensureTriggersTable() {
+  getDb().exec(`CREATE TABLE IF NOT EXISTS event_triggers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    config TEXT DEFAULT '{}',
+    action_type TEXT DEFAULT 'task',
+    action_id TEXT,
+    last_check TEXT,
+    enabled INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`)
+}
+
+export function getTriggers(): EventTrigger[] {
+  ensureTriggersTable()
+  return getDb().prepare('SELECT * FROM event_triggers ORDER BY created_at DESC').all() as EventTrigger[]
+}
+
+export function getActiveTriggers(): EventTrigger[] {
+  ensureTriggersTable()
+  return getDb().prepare("SELECT * FROM event_triggers WHERE enabled=1").all() as EventTrigger[]
+}
+
+export function createTrigger(data: Omit<EventTrigger, 'id' | 'created_at' | 'last_check'>): EventTrigger {
+  ensureTriggersTable()
+  const info = getDb().prepare(`INSERT INTO event_triggers (name,event_type,config,action_type,action_id,enabled) VALUES (@name,@event_type,@config,@action_type,@action_id,@enabled)`).run(data)
+  return getDb().prepare('SELECT * FROM event_triggers WHERE id=?').get(info.lastInsertRowid) as EventTrigger
+}
+
+export function updateTrigger(id: number, fields: Partial<EventTrigger>) {
+  ensureTriggersTable()
+  const allowed = ['enabled','last_check','name','config']
+  const updates = Object.entries(fields).filter(([k]) => allowed.includes(k)).map(([k]) => `${k}=@${k}`).join(',')
+  if (!updates) return
+  getDb().prepare(`UPDATE event_triggers SET ${updates} WHERE id=@id`).run({ ...fields, id })
+}
+
+export function deleteTrigger(id: number) { ensureTriggersTable(); getDb().prepare('DELETE FROM event_triggers WHERE id=?').run(id) }
+
+// ── Company Knowledge Base (shared across all agents) ─────────────────────
+
+export interface CompanyKnowledge {
+  id: number; filename: string; file_type: string; file_size: number; content: string; created_at: string
+}
+
+export function ensureCompanyKbTable() {
+  getDb().exec(`CREATE TABLE IF NOT EXISTS company_knowledge (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    filename TEXT NOT NULL, file_type TEXT DEFAULT 'text',
+    file_size INTEGER DEFAULT 0, content TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`)
+}
+
+export function getCompanyKnowledge(): CompanyKnowledge[] {
+  ensureCompanyKbTable()
+  return getDb().prepare('SELECT id,filename,file_type,file_size,created_at FROM company_knowledge ORDER BY created_at DESC').all() as CompanyKnowledge[]
+}
+
+export function getCompanyKnowledgeContent(): string {
+  ensureCompanyKbTable()
+  const rows = getDb().prepare('SELECT filename,content FROM company_knowledge ORDER BY created_at DESC').all() as { filename: string; content: string }[]
+  if (!rows.length) return ''
+  return rows.map(r => `--- Company KB: ${r.filename} ---\n${r.content.slice(0, 5000)}`).join('\n\n')
+}
+
+export function saveCompanyKnowledge(filename: string, fileType: string, fileSize: number, content: string): CompanyKnowledge {
+  ensureCompanyKbTable()
+  const info = getDb().prepare('INSERT INTO company_knowledge (filename,file_type,file_size,content) VALUES (?,?,?,?)').run(filename, fileType, fileSize, content)
+  return getDb().prepare('SELECT * FROM company_knowledge WHERE id=?').get(info.lastInsertRowid) as CompanyKnowledge
+}
+
+export function deleteCompanyKnowledge(id: number) { ensureCompanyKbTable(); getDb().prepare('DELETE FROM company_knowledge WHERE id=?').run(id) }
+
+// ── Drive Sync Configs ─────────────────────────────────────────────────────
+
+export interface DriveSyncConfig {
+  id: number; agent_id: string | null; name: string
+  folder_id: string; service_account_json: string
+  last_synced: string | null; enabled: number; created_at: string
+}
+
+export function ensureDriveSyncTable() {
+  getDb().exec(`CREATE TABLE IF NOT EXISTS drive_sync_configs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id TEXT, name TEXT NOT NULL, folder_id TEXT NOT NULL,
+    service_account_json TEXT NOT NULL,
+    last_synced TEXT, enabled INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`)
+}
+
+export function getDriveSyncConfigs(): DriveSyncConfig[] {
+  ensureDriveSyncTable()
+  return getDb().prepare('SELECT * FROM drive_sync_configs ORDER BY created_at DESC').all() as DriveSyncConfig[]
+}
+
+export function createDriveSyncConfig(data: Omit<DriveSyncConfig, 'id' | 'created_at' | 'last_synced'>): DriveSyncConfig {
+  ensureDriveSyncTable()
+  const info = getDb().prepare(`INSERT INTO drive_sync_configs (agent_id,name,folder_id,service_account_json,enabled) VALUES (@agent_id,@name,@folder_id,@service_account_json,@enabled)`).run(data)
+  return getDb().prepare('SELECT * FROM drive_sync_configs WHERE id=?').get(info.lastInsertRowid) as DriveSyncConfig
+}
+
+export function updateDriveSyncConfig(id: number, fields: Partial<DriveSyncConfig>) {
+  ensureDriveSyncTable()
+  const allowed = ['enabled','last_synced']
+  const updates = Object.entries(fields).filter(([k]) => allowed.includes(k)).map(([k]) => `${k}=@${k}`).join(',')
+  if (!updates) return
+  getDb().prepare(`UPDATE drive_sync_configs SET ${updates} WHERE id=@id`).run({ ...fields, id })
+}
+
+export function deleteDriveSyncConfig(id: number) { ensureDriveSyncTable(); getDb().prepare('DELETE FROM drive_sync_configs WHERE id=?').run(id) }

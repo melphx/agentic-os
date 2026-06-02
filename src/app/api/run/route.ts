@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
-import { getDb, updateAgent, addLog, recordMetric, createTask, saveMemory, getMemory, getKnowledgeContent, getIntegrations, getIntegrationContext } from '@/lib/db'
+import { getDb, updateAgent, addLog, recordMetric, createTask, saveMemory, getMemory, getKnowledgeContent, getIntegrations, getIntegrationContext, getCompanyKnowledgeContent, getWebhooks } from '@/lib/db'
 import { executeIntegration } from '@/lib/integrations'
 import { exec } from 'child_process'
 import { promisify } from 'util'
@@ -86,11 +86,16 @@ async function ask(agentId: string, systemPrompt: string, userPrompt: string, ma
   loadCustomPromptsFromDb()
   const memory    = getMemory(agentId, 5)
   const knowledge = getKnowledgeContent(agentId)
+  const companyKb = getCompanyKnowledgeContent()
   // Use custom prompt if set, otherwise use provided systemPrompt
   const baseSystem = customPromptCache[agentId] || systemPrompt
   let fullSystem  = baseSystem
 
-  // Inject knowledge at the TOP of the system prompt so it is never ignored
+  // Inject company KB first (shared across all agents)
+  if (companyKb) {
+    fullSystem = `=== COMPANY KNOWLEDGE BASE (always reference this) ===\n${companyKb}\n=== END COMPANY KB ===\n\n` + fullSystem
+  }
+  // Inject agent-specific knowledge
   if (knowledge) {
     fullSystem = `You have been given the following knowledge base. You MUST use this information when answering. Do not say you lack information if it appears below.\n\n=== YOUR KNOWLEDGE BASE ===\n${knowledge}\n=== END KNOWLEDGE BASE ===\n\n` + fullSystem
   }
@@ -427,6 +432,29 @@ async function securityScan(agentId: string, taskId: number, description: string
 
 // ── Main task runner ───────────────────────────────────────────────────────
 
+// ── Outbound webhook dispatcher ────────────────────────────────────────────
+
+async function fireOutboundWebhooks(event: string, payload: Record<string, unknown>) {
+  try {
+    const webhooks = getWebhooks().filter(w => {
+      const events = w.events.split(',').map(e => e.trim())
+      const agentOk = !w.agent_filter || w.agent_filter === payload.agent_id
+      return events.includes(event) && agentOk
+    })
+    for (const wh of webhooks) {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      try { Object.assign(headers, JSON.parse(wh.headers)) } catch {}
+      fetch(wh.url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ event, ...payload, timestamp: new Date().toISOString() }),
+        signal: AbortSignal.timeout(10000),
+      }).catch(() => {})
+    }
+  } catch {}
+}
+
+
 const TASK_TIMEOUT_MS = 3 * 60 * 1000  // 3 minutes global cap per task
 
 async function runTask(taskId: number, agentId: string, type: string, description: string) {
@@ -564,6 +592,9 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
     db.prepare(`UPDATE agents SET tasks_completed=tasks_completed+1, tokens_used=tokens_used+?, status='idle', current_task=NULL, updated_at=datetime('now') WHERE id=?`)
       .run(tokensUsed, agentId)
     recordMetric(agentId, 'tokens', tokensUsed)
+
+    // Fire outbound webhooks
+    fireOutboundWebhooks('task.completed', { task_id: taskId, agent_id: agentId, title: description.slice(0,100), result: result.slice(0,2000), tokens_used: tokensUsed }).catch(() => {})
 
     // Save memory summary — fire and forget, don't block task completion
     ask(agentId,
