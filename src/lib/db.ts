@@ -805,3 +805,176 @@ export function clearGoogleOAuth() {
   ensureGoogleOAuthTable()
   getDb().prepare('DELETE FROM google_oauth').run()
 }
+
+// ── Projects ───────────────────────────────────────────────────────────────
+
+export interface Project {
+  id: number; name: string; description: string
+  status: string; agent_ids: string; created_at: string
+}
+
+export function ensureProjectsTable() {
+  getDb().exec(`
+    CREATE TABLE IF NOT EXISTS projects (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL, description TEXT DEFAULT '',
+      status TEXT DEFAULT 'active',
+      agent_ids TEXT DEFAULT '[]',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS project_tasks (
+      project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+      task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+      PRIMARY KEY (project_id, task_id)
+    )
+  `)
+}
+
+export function getProjects(): Project[] { ensureProjectsTable(); return getDb().prepare('SELECT * FROM projects ORDER BY created_at DESC').all() as Project[] }
+export function getProject(id: number): Project | null { ensureProjectsTable(); return (getDb().prepare('SELECT * FROM projects WHERE id=?').get(id) as Project) ?? null }
+export function createProject(data: Omit<Project,'id'|'created_at'>): Project {
+  ensureProjectsTable()
+  const info = getDb().prepare('INSERT INTO projects (name,description,status,agent_ids) VALUES (@name,@description,@status,@agent_ids)').run(data)
+  return getDb().prepare('SELECT * FROM projects WHERE id=?').get(info.lastInsertRowid) as Project
+}
+export function updateProject(id: number, fields: Partial<Project>) {
+  ensureProjectsTable()
+  const allowed = ['name','description','status','agent_ids']
+  const updates = Object.entries(fields).filter(([k]) => allowed.includes(k)).map(([k]) => `${k}=@${k}`).join(',')
+  if (!updates) return
+  getDb().prepare(`UPDATE projects SET ${updates} WHERE id=@id`).run({ ...fields, id })
+}
+export function deleteProject(id: number) { ensureProjectsTable(); getDb().prepare('DELETE FROM projects WHERE id=?').run(id) }
+export function addTaskToProject(projectId: number, taskId: number) { ensureProjectsTable(); getDb().prepare('INSERT OR IGNORE INTO project_tasks (project_id,task_id) VALUES (?,?)').run(projectId, taskId) }
+export function getProjectTasks(projectId: number): Task[] {
+  ensureProjectsTable()
+  return getDb().prepare('SELECT t.* FROM tasks t JOIN project_tasks pt ON pt.task_id=t.id WHERE pt.project_id=? ORDER BY t.created_at DESC').all(projectId) as Task[]
+}
+
+// ── Multi-user roles ───────────────────────────────────────────────────────
+
+export function ensureUserRoles() {
+  getDb().exec(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'admin'`).toString()
+}
+export function getUsers() {
+  try { return getDb().prepare('SELECT id,email,role,created_at FROM users ORDER BY created_at ASC').all() } catch { return [] }
+}
+export function updateUserRole(id: number, role: string) {
+  try { getDb().prepare("UPDATE users SET role=? WHERE id=?").run(role, id) } catch {}
+}
+
+// ── Agent prompt versioning ────────────────────────────────────────────────
+
+export function ensureVersionsTable() {
+  getDb().exec(`CREATE TABLE IF NOT EXISTS agent_prompt_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id TEXT NOT NULL, prompt TEXT NOT NULL,
+    note TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now'))
+  )`)
+}
+export function savePromptVersion(agentId: string, prompt: string, note = '') {
+  ensureVersionsTable()
+  getDb().prepare('INSERT INTO agent_prompt_versions (agent_id,prompt,note) VALUES (?,?,?)').run(agentId, prompt, note)
+  // Keep last 20 versions per agent
+  getDb().prepare(`DELETE FROM agent_prompt_versions WHERE agent_id=? AND id NOT IN (SELECT id FROM agent_prompt_versions WHERE agent_id=? ORDER BY created_at DESC LIMIT 20)`).run(agentId, agentId)
+}
+export function getPromptVersions(agentId: string) {
+  ensureVersionsTable()
+  return getDb().prepare('SELECT * FROM agent_prompt_versions WHERE agent_id=? ORDER BY created_at DESC').all(agentId)
+}
+
+// ── Agent budgets ──────────────────────────────────────────────────────────
+
+export function ensureBudgetsTable() {
+  getDb().exec(`CREATE TABLE IF NOT EXISTS agent_budgets (
+    agent_id TEXT PRIMARY KEY, monthly_token_limit INTEGER DEFAULT 0,
+    current_month TEXT DEFAULT '', tokens_this_month INTEGER DEFAULT 0
+  )`)
+}
+export function getBudget(agentId: string) {
+  ensureBudgetsTable()
+  return (getDb().prepare('SELECT * FROM agent_budgets WHERE agent_id=?').get(agentId) as any) ?? { agent_id: agentId, monthly_token_limit: 0, tokens_this_month: 0 }
+}
+export function setBudget(agentId: string, limit: number) {
+  ensureBudgetsTable()
+  getDb().prepare('INSERT OR REPLACE INTO agent_budgets (agent_id,monthly_token_limit,current_month,tokens_this_month) VALUES (?,?,strftime(\'%Y-%m\',\'now\'),(SELECT COALESCE(tokens_this_month,0) FROM agent_budgets WHERE agent_id=? AND current_month=strftime(\'%Y-%m\',\'now\')))').run(agentId, limit, agentId)
+}
+export function trackTokenUsage(agentId: string, tokens: number): boolean {
+  ensureBudgetsTable()
+  const month = new Date().toISOString().slice(0,7)
+  getDb().prepare(`INSERT INTO agent_budgets (agent_id,monthly_token_limit,current_month,tokens_this_month) VALUES (?,0,?,?)
+    ON CONFLICT(agent_id) DO UPDATE SET
+      tokens_this_month = CASE WHEN current_month=? THEN tokens_this_month+? ELSE ? END,
+      current_month = ?`).run(agentId, month, tokens, month, tokens, tokens, month)
+  const budget = getBudget(agentId)
+  return budget.monthly_token_limit === 0 || budget.tokens_this_month <= budget.monthly_token_limit
+}
+
+// ── Skills (external AI endpoints) ────────────────────────────────────────
+
+export interface Skill {
+  id: number; name: string; description: string
+  base_url: string; api_key: string; model: string
+  system_prompt: string; enabled: number; created_at: string
+}
+export function ensureSkillsTable() {
+  getDb().exec(`CREATE TABLE IF NOT EXISTS skills (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL, description TEXT DEFAULT '',
+    base_url TEXT NOT NULL, api_key TEXT DEFAULT '',
+    model TEXT NOT NULL, system_prompt TEXT DEFAULT '',
+    enabled INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`)
+}
+export function getSkills(): Skill[] { ensureSkillsTable(); return getDb().prepare('SELECT * FROM skills WHERE enabled=1').all() as Skill[] }
+export function getAllSkills(): Skill[] { ensureSkillsTable(); return getDb().prepare('SELECT * FROM skills ORDER BY created_at DESC').all() as Skill[] }
+export function createSkill(data: Omit<Skill,'id'|'created_at'>): Skill {
+  ensureSkillsTable()
+  const info = getDb().prepare('INSERT INTO skills (name,description,base_url,api_key,model,system_prompt,enabled) VALUES (@name,@description,@base_url,@api_key,@model,@system_prompt,@enabled)').run(data)
+  return getDb().prepare('SELECT * FROM skills WHERE id=?').get(info.lastInsertRowid) as Skill
+}
+export function deleteSkill(id: number) { ensureSkillsTable(); getDb().prepare('DELETE FROM skills WHERE id=?').run(id) }
+
+// ── Task embeddings (for semantic search) ─────────────────────────────────
+
+export function ensureEmbeddingsTable() {
+  getDb().exec(`CREATE TABLE IF NOT EXISTS task_embeddings (
+    task_id INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+    embedding TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now'))
+  )`)
+}
+export function saveEmbedding(taskId: number, embedding: number[]) {
+  ensureEmbeddingsTable()
+  getDb().prepare('INSERT OR REPLACE INTO task_embeddings (task_id,embedding) VALUES (?,?)').run(taskId, JSON.stringify(embedding))
+}
+export function getEmbeddings(): { task_id: number; embedding: string }[] {
+  ensureEmbeddingsTable()
+  return getDb().prepare('SELECT task_id, embedding FROM task_embeddings').all() as any[]
+}
+
+// ── Output templates ───────────────────────────────────────────────────────
+
+export interface OutputTemplate {
+  id: number; name: string; format: string; template: string
+  agent_id: string | null; created_at: string
+}
+export function ensureOutputTemplatesTable() {
+  getDb().exec(`CREATE TABLE IF NOT EXISTS output_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL, format TEXT DEFAULT 'markdown',
+    template TEXT NOT NULL, agent_id TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`)
+}
+export function getOutputTemplates(agentId?: string): OutputTemplate[] {
+  ensureOutputTemplatesTable()
+  if (agentId) return getDb().prepare('SELECT * FROM output_templates WHERE agent_id=? OR agent_id IS NULL').all(agentId) as OutputTemplate[]
+  return getDb().prepare('SELECT * FROM output_templates ORDER BY created_at DESC').all() as OutputTemplate[]
+}
+export function createOutputTemplate(data: Omit<OutputTemplate,'id'|'created_at'>): OutputTemplate {
+  ensureOutputTemplatesTable()
+  const info = getDb().prepare('INSERT INTO output_templates (name,format,template,agent_id) VALUES (@name,@format,@template,@agent_id)').run(data)
+  return getDb().prepare('SELECT * FROM output_templates WHERE id=?').get(info.lastInsertRowid) as OutputTemplate
+}
+export function deleteOutputTemplate(id: number) { ensureOutputTemplatesTable(); getDb().prepare('DELETE FROM output_templates WHERE id=?').run(id) }

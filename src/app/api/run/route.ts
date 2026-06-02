@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
-import { getDb, updateAgent, addLog, recordMetric, createTask, saveMemory, getMemory, getKnowledgeContent, getIntegrations, getIntegrationContext, getCompanyKnowledgeContent, getWebhooks } from '@/lib/db'
+import { getDb, updateAgent, addLog, recordMetric, createTask, saveMemory, getMemory, getKnowledgeContent, getIntegrations, getIntegrationContext, getCompanyKnowledgeContent, getWebhooks, getSkills, trackTokenUsage, saveEmbedding } from '@/lib/db'
 import { executeIntegration } from '@/lib/integrations'
 import { exec } from 'child_process'
 import { promisify } from 'util'
@@ -132,6 +132,51 @@ async function ask(agentId: string, systemPrompt: string, userPrompt: string, ma
       roundTokens = completion.usage?.total_tokens || 0
     }
     totalTokens += roundTokens
+
+    // Check for skill calls {{SKILL:name:prompt}}
+    const skillMatch = reply.match(/\{\{SKILL:([^:]+):([\s\S]+?)\}\}/)
+    if (skillMatch) {
+      const [, skillName, skillPrompt] = skillMatch
+      const skills = getSkills()
+      const skill = skills.find(s => s.name.toLowerCase() === skillName.toLowerCase())
+      let skillResult = `Skill '${skillName}' not found`
+      if (skill) {
+        try {
+          const sc = new (await import('openai')).default({ baseURL: skill.base_url, apiKey: skill.api_key || 'none', timeout: 30000 })
+          const smsgs: any[] = []
+          if (skill.system_prompt) smsgs.push({ role: 'system', content: skill.system_prompt })
+          smsgs.push({ role: 'user', content: skillPrompt })
+          const sr = await sc.chat.completions.create({ model: skill.model, max_completion_tokens: 2048, messages: smsgs })
+          skillResult = sr.choices[0].message.content || ''
+          totalTokens += sr.usage?.total_tokens || 0
+        } catch (e: any) { skillResult = `Skill error: ${e.message}` }
+      }
+      messages.push({ role: 'assistant', content: reply })
+      messages.push({ role: 'user', content: `Skill result from ${skillName}:\n${skillResult}\n\nContinue your response.` })
+      continue
+    }
+
+    // Check for sub-agent spawning {{SPAWN:agent_id:description}}
+    const spawnMatch = reply.match(/\{\{SPAWN:([^:]+):([\s\S]+?)\}\}/)
+    if (spawnMatch) {
+      const [, spawnAgentId, spawnDesc] = spawnMatch
+      const baseUrl = process.env.INTERNAL_URL || 'http://localhost:3000'
+      const secret = process.env.JWT_SECRET || ''
+      const spawnTask = createTask({ agent_id: spawnAgentId, title: spawnDesc.slice(0,80), description: spawnDesc, type: 'general', priority: 1, status: 'pending' })
+      await fetch(`${baseUrl}/api/run`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-internal-scheduler': secret }, body: JSON.stringify({ agent_id: spawnAgentId, title: spawnDesc.slice(0,80), description: spawnDesc, type: 'general', priority: 1 }) })
+      // Wait for child task (max 3 min)
+      let childResult = ''
+      const start = Date.now()
+      while (Date.now() - start < 180000) {
+        await new Promise(r => setTimeout(r, 2000))
+        const row = getDb().prepare('SELECT status,result FROM tasks WHERE id=?').get(spawnTask.id) as any
+        if (row?.status === 'completed') { childResult = row.result || ''; break }
+        if (['failed','cancelled'].includes(row?.status)) { childResult = `Sub-task failed`; break }
+      }
+      messages.push({ role: 'assistant', content: reply })
+      messages.push({ role: 'user', content: `Sub-agent (${spawnAgentId}) completed:\n${childResult}\n\nContinue your response.` })
+      continue
+    }
 
     // Check if agent wants to call an integration
     const callMatch = reply.match(/\{\{CALL:([^:]+):([\s\S]+?)\}\}/)
@@ -459,6 +504,12 @@ const TASK_TIMEOUT_MS = 3 * 60 * 1000  // 3 minutes global cap per task
 
 async function runTask(taskId: number, agentId: string, type: string, description: string) {
   const db = getDb()
+  // Budget check
+  const withinBudget = trackTokenUsage(agentId, 0)  // check without adding
+  if (!withinBudget) {
+    db.prepare(`UPDATE tasks SET status='failed', completed_at=datetime('now'), error='Monthly token budget exceeded for this agent' WHERE id=?`).run(taskId)
+    return
+  }
   db.prepare(`UPDATE tasks SET status='running', started_at=datetime('now') WHERE id=?`).run(taskId)
   updateAgent(agentId, { status: 'active', current_task: description.slice(0, 80) })
   addLog(taskId, agentId, 'info', `Task started: ${description.slice(0, 120)}`)
@@ -576,7 +627,7 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
 
       default: {
         const { content, tokens } = await ask(agentId,
-          'You are a general-purpose AI agent. Complete the task thoroughly.',
+          'You are a general-purpose AI agent. Complete the task thoroughly. You can call skills with {{SKILL:skill_name:your_prompt}} and spawn sub-agents with {{SPAWN:agent_id:task_description}}.',
           description, 2048, taskId,
         )
         result = content; tokensUsed = tokens
@@ -592,6 +643,14 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
     db.prepare(`UPDATE agents SET tasks_completed=tasks_completed+1, tokens_used=tokens_used+?, status='idle', current_task=NULL, updated_at=datetime('now') WHERE id=?`)
       .run(tokensUsed, agentId)
     recordMetric(agentId, 'tokens', tokensUsed)
+    trackTokenUsage(agentId, tokensUsed)
+
+    // Save embedding for semantic search (fire and forget)
+    if (result.length > 50) {
+      client.embeddings.create({ model: 'text-embedding-3-small', input: `${description}\n\n${result}`.slice(0, 8000) })
+        .then(r => saveEmbedding(taskId, r.data[0].embedding))
+        .catch(() => {})
+    }
 
     // Fire outbound webhooks
     fireOutboundWebhooks('task.completed', { task_id: taskId, agent_id: agentId, title: description.slice(0,100), result: result.slice(0,2000), tokens_used: tokensUsed }).catch(() => {})

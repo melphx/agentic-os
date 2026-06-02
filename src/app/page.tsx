@@ -209,7 +209,9 @@ const NAV = [
   { id: 'tasks',      icon: <ListTodo size={18} />,        label: 'Tasks'      },
   { id: 'pipelines',  icon: <GitBranch size={18} />,       label: 'Pipelines'  },
   { id: 'analytics',  icon: <BarChart2 size={18} />,       label: 'Analytics'  },
+  { id: 'projects',   icon: <Layers size={18} />,           label: 'Projects'   },
   { id: 'triggers',   icon: <Zap size={18} />,              label: 'Triggers'   },
+  { id: 'skills',     icon: <Cpu size={18} />,              label: 'Skills'     },
   { id: 'terminal',   icon: <TerminalIcon size={18} />,    label: 'Terminal'   },
   { id: 'schedules',  icon: <Clock size={18} />,           label: 'Schedules'  },
   { id: 'settings',   icon: <Settings size={18} />,        label: 'Settings'   },
@@ -2305,6 +2307,275 @@ function AgentDrivePanel({ agent }: { agent: Agent }) {
 }
 
 
+// ── Projects View ──────────────────────────────────────────────────────────
+
+function ProjectsView({ agents, onSelectAgent }: { agents: Agent[]; onSelectAgent: (a: Agent) => void }) {
+  const [projects, setProjects] = useState<any[]>([])
+  const [showCreate, setShowCreate] = useState(false)
+  const [selected, setSelected] = useState<any | null>(null)
+  const [projectTasks, setProjectTasks] = useState<Task[]>([])
+
+  useEffect(() => { load() }, [])
+  async function load() { const r = await fetch('/api/projects'); if(r.ok) setProjects(await r.json()) }
+  async function selectProject(p: any) {
+    setSelected(p)
+    const r = await fetch(`/api/projects?id=${p.id}`)
+    if (r.ok) setProjectTasks(await r.json())
+  }
+  async function remove(id: number) { await fetch(`/api/projects?id=${id}`, { method: 'DELETE' }); load(); if(selected?.id===id) setSelected(null) }
+  async function updateStatus(id: number, status: string) { await fetch('/api/projects', { method: 'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id,status}) }); load() }
+
+  const statusColor: Record<string,string> = { active:'#10b981', paused:'#f59e0b', completed:'#6366f1', archived:'rgba(148,163,184,0.4)' }
+
+  return (
+    <div style={{ display:'flex', height:'100%', overflow:'hidden' }}>
+      {/* Project list */}
+      <div style={{ width:280, borderRight:'1px solid rgba(99,102,241,0.1)', display:'flex', flexDirection:'column', background:'rgba(8,12,20,0.6)' }}>
+        <div style={{ padding:'16px 16px 10px', borderBottom:'1px solid rgba(99,102,241,0.1)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <span style={{ color:'white', fontWeight:700, fontSize:15 }}>Projects</span>
+          <motion.button whileHover={{scale:1.05}} whileTap={{scale:0.95}} onClick={() => setShowCreate(true)}
+            style={{ padding:'4px 10px', background:'linear-gradient(135deg,#4338ca,#6366f1)', border:'none', borderRadius:7, color:'white', fontSize:11, fontWeight:600, cursor:'pointer' }}>
+            + New
+          </motion.button>
+        </div>
+        <div style={{ flex:1, overflowY:'auto', padding:8 }}>
+          {projects.length === 0 && <p style={{ color:'rgba(148,163,184,0.3)', fontSize:12, textAlign:'center', padding:'24px 0' }}>No projects yet</p>}
+          {projects.map((p:any) => (
+            <div key={p.id} onClick={() => selectProject(p)}
+              style={{ padding:'10px 12px', borderRadius:10, cursor:'pointer', marginBottom:4, background: selected?.id===p.id ? 'rgba(99,102,241,0.12)' : 'transparent', border:`1px solid ${selected?.id===p.id ? 'rgba(99,102,241,0.25)' : 'transparent'}` }}>
+              <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:3 }}>
+                <div style={{ width:7, height:7, borderRadius:'50%', background: statusColor[p.status] || '#94a3b8', flexShrink:0 }} />
+                <span style={{ color:'white', fontSize:13, fontWeight:500 }}>{p.name}</span>
+              </div>
+              {p.description && <p style={{ color:'rgba(148,163,184,0.4)', fontSize:11, margin:0 }}>{p.description.slice(0,60)}</p>}
+              <div style={{ display:'flex', gap:6, marginTop:6 }}>
+                {['active','paused','completed'].map(s => (
+                  <button key={s} onClick={e => { e.stopPropagation(); updateStatus(p.id, s) }}
+                    style={{ padding:'2px 7px', borderRadius:10, fontSize:9, fontWeight:600, cursor:'pointer', background: p.status===s?`${statusColor[s]}20`:'transparent', border:`1px solid ${p.status===s?statusColor[s]:'rgba(148,163,184,0.15)'}`, color: p.status===s?statusColor[s]:'rgba(148,163,184,0.3)' }}>
+                    {s}
+                  </button>
+                ))}
+                <button onClick={e => { e.stopPropagation(); remove(p.id) }} style={{ marginLeft:'auto', background:'none', border:'none', color:'rgba(244,63,94,0.3)', cursor:'pointer' }}><Trash2 size={10}/></button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Project detail */}
+      <div style={{ flex:1, overflowY:'auto', padding:24 }}>
+        {!selected ? (
+          <div style={{ textAlign:'center', paddingTop:60, color:'rgba(148,163,184,0.3)' }}>
+            <GitBranch size={40} style={{ margin:'0 auto 12px', display:'block', opacity:0.2 }} />
+            <p>Select a project to view its tasks</p>
+          </div>
+        ) : (
+          <>
+            <h2 style={{ color:'white', fontWeight:700, fontSize:20, margin:'0 0 4px' }}>{selected.name}</h2>
+            {selected.description && <p style={{ color:'rgba(148,163,184,0.5)', fontSize:13, margin:'0 0 20px' }}>{selected.description}</p>}
+            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+              {projectTasks.length === 0 && <p style={{ color:'rgba(148,163,184,0.3)', fontSize:13 }}>No tasks in this project yet. Assign tasks to this project from the agent view.</p>}
+              {projectTasks.map((t:any) => {
+                const ag = agents.find(a => a.id === t.agent_id)
+                const dot = t.status==='completed'?'#10b981':t.status==='failed'?'#f43f5e':t.status==='running'?'#6366f1':'#94a3b8'
+                return (
+                  <div key={t.id} style={{ background:'rgba(15,20,35,0.8)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:12, padding:'12px 16px', cursor:'pointer' }}
+                    onClick={() => { if(ag) onSelectAgent(ag) }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                      <div style={{ width:8, height:8, borderRadius:'50%', background:dot, flexShrink:0 }} />
+                      <span style={{ color:'white', fontSize:13, fontWeight:500, flex:1 }}>{t.title}</span>
+                      {ag && <span style={{ fontSize:10, color:ag.accent }}>{ag.name}</span>}
+                      <span style={{ fontSize:10, color:'rgba(148,163,184,0.4)' }}>{new Date(t.created_at).toLocaleDateString()}</span>
+                    </div>
+                    {t.result && <p style={{ color:'rgba(148,163,184,0.4)', fontSize:12, margin:'6px 0 0', paddingLeft:16 }}>{t.result.slice(0,100)}…</p>}
+                  </div>
+                )
+              })}
+            </div>
+          </>
+        )}
+      </div>
+
+      {showCreate && <CreateProjectModal onClose={() => { setShowCreate(false); load() }} />}
+    </div>
+  )
+}
+
+function CreateProjectModal({ onClose }: { onClose: () => void }) {
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [saving, setSaving] = useState(false)
+  async function save() {
+    if (!name.trim()) return
+    setSaving(true)
+    await fetch('/api/projects', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name, description}) })
+    setSaving(false); onClose()
+  }
+  const inp = { background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:8, padding:'8px 10px', color:'white', fontSize:13, outline:'none', width:'100%', boxSizing:'border-box' as const }
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:300 }}>
+      <motion.div initial={{opacity:0,scale:0.95}} animate={{opacity:1,scale:1}} style={{ width:420, background:'#0f1623', border:'1px solid rgba(99,102,241,0.2)', borderRadius:16, padding:24 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', marginBottom:16 }}>
+          <span style={{ color:'white', fontWeight:700, fontSize:15 }}>New Project</span>
+          <button onClick={onClose} style={{ background:'none', border:'none', color:'rgba(148,163,184,0.5)', cursor:'pointer', fontSize:18 }}>✕</button>
+        </div>
+        <div style={{ display:'flex', flexDirection:'column', gap:10, marginBottom:16 }}>
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="Project name" style={inp} />
+          <textarea value={description} onChange={e => setDescription(e.target.value)} rows={3} placeholder="Description (optional)" style={{ ...inp, resize:'vertical' as const, lineHeight:1.5, fontFamily:'inherit' }} />
+        </div>
+        <div style={{ display:'flex', gap:8 }}>
+          <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.98}} onClick={save} disabled={saving||!name.trim()}
+            style={{ flex:1, padding:10, background:'linear-gradient(135deg,#4338ca,#6366f1)', border:'none', borderRadius:9, color:'white', fontWeight:600, fontSize:13, cursor:'pointer', opacity:!name.trim()?0.5:1 }}>
+            {saving?'Creating…':'Create Project'}
+          </motion.button>
+          <button onClick={onClose} style={{ padding:'10px 16px', background:'transparent', border:'1px solid rgba(148,163,184,0.15)', borderRadius:9, color:'rgba(148,163,184,0.5)', fontSize:13, cursor:'pointer' }}>Cancel</button>
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
+// ── Skills View ─────────────────────────────────────────────────────────────
+
+function SkillsView() {
+  const [skills, setSkills] = useState<any[]>([])
+  const [showAdd, setShowAdd] = useState(false)
+  const [testing, setTesting] = useState<number|null>(null)
+  const [testResult, setTestResult] = useState<{id:number;ok:boolean;msg:string}|null>(null)
+
+  useEffect(() => { load() }, [])
+  async function load() { const r = await fetch('/api/skills'); if(r.ok) setSkills(await r.json()) }
+  async function remove(id: number) { await fetch(`/api/skills?id=${id}`, {method:'DELETE'}); load() }
+  async function test(s: any) {
+    setTesting(s.id); setTestResult(null)
+    const r = await fetch('/api/skills', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'test', base_url:s.base_url, api_key:s.api_key, model:s.model}) })
+    const d = await r.json()
+    setTestResult({id:s.id, ok:d.ok, msg: d.ok ? `✓ ${d.response}` : `✗ ${d.error}`})
+    setTesting(null)
+  }
+
+  const PRESETS = [
+    { name:'Hermes 3 (Ollama)', base_url:'http://localhost:11434/v1', model:'nous-hermes3', api_key:'ollama' },
+    { name:'OpenClaw', base_url:'https://api.openclaw.ai/v1', model:'openclaw-1', api_key:'' },
+    { name:'Groq (Llama 3)', base_url:'https://api.groq.com/openai/v1', model:'llama-3.3-70b-versatile', api_key:'' },
+    { name:'Together AI', base_url:'https://api.together.xyz/v1', model:'meta-llama/Llama-3-70b-chat-hf', api_key:'' },
+  ]
+
+  return (
+    <div style={{ padding:24, height:'100%', overflowY:'auto' }}>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:24 }}>
+        <div>
+          <h1 style={{ color:'white', fontWeight:700, fontSize:22, margin:0 }}>Skills</h1>
+          <p style={{ color:'rgba(148,163,184,0.5)', fontSize:13, margin:'4px 0 0' }}>External AI models agents can call — Hermes, OpenClaw, Groq, and more</p>
+        </div>
+        <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.98}} onClick={() => setShowAdd(true)}
+          style={{ display:'flex', alignItems:'center', gap:6, padding:'8px 16px', background:'linear-gradient(135deg,#4338ca,#6366f1)', border:'none', borderRadius:9, color:'white', fontWeight:600, fontSize:13, cursor:'pointer' }}>
+          <Plus size={14} /> Add Skill
+        </motion.button>
+      </div>
+
+      {/* Preset quick-adds */}
+      <div style={{ marginBottom:20 }}>
+        <p style={{ color:'rgba(148,163,184,0.4)', fontSize:11, marginBottom:8 }}>QUICK ADD</p>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+          {PRESETS.map(p => (
+            <button key={p.name} onClick={async () => {
+              await fetch('/api/skills', { method:'POST', headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({name:p.name, description:`${p.model} via ${p.base_url}`, base_url:p.base_url, api_key:p.api_key, model:p.model, system_prompt:'', enabled:1}) })
+              load()
+            }} style={{ padding:'5px 12px', background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:7, color:'#a5b4fc', fontSize:11, cursor:'pointer' }}>
+              + {p.name}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {skills.length === 0 && (
+        <div style={{ textAlign:'center', padding:'60px 0', color:'rgba(148,163,184,0.3)' }}>
+          <Cpu size={40} style={{ margin:'0 auto 12px', display:'block', opacity:0.3 }} />
+          <p>No skills yet. Add Hermes, OpenClaw, or any OpenAI-compatible endpoint.</p>
+          <p style={{ fontSize:12, marginTop:8 }}>Agents call skills with: {"{{SKILL:skill_name:your prompt}}"}</p>
+        </div>
+      )}
+
+      <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+        {skills.map((s:any) => (
+          <div key={s.id} style={{ background:'rgba(15,20,35,0.8)', border:'1px solid rgba(99,102,241,0.15)', borderRadius:14, padding:18 }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
+              <div>
+                <span style={{ color:'white', fontWeight:600, fontSize:14 }}>{s.name}</span>
+                <span style={{ color:'rgba(148,163,184,0.4)', fontSize:11, marginLeft:10 }}>{s.model}</span>
+              </div>
+              <div style={{ display:'flex', gap:6 }}>
+                <button onClick={() => test(s)} disabled={testing===s.id} style={{ padding:'4px 10px', background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:6, color:'#a5b4fc', fontSize:11, cursor:'pointer' }}>
+                  {testing===s.id?'…':'▶ Test'}
+                </button>
+                <button onClick={() => remove(s.id)} style={{ background:'none', border:'none', color:'rgba(244,63,94,0.4)', cursor:'pointer' }}><Trash2 size={12}/></button>
+              </div>
+            </div>
+            <p style={{ color:'rgba(148,163,184,0.4)', fontSize:12, margin:'0 0 6px' }}>{s.base_url}</p>
+            <code style={{ fontSize:11, color:'rgba(148,163,184,0.3)', background:'rgba(99,102,241,0.05)', padding:'3px 8px', borderRadius:5, display:'inline-block' }}>
+              {"{{SKILL:"}{s.name}{":your prompt}}"}
+            </code>
+            {testResult?.id===s.id && (
+              <div style={{ marginTop:8, padding:'6px 10px', borderRadius:6, background:testResult.ok?'rgba(16,185,129,0.08)':'rgba(244,63,94,0.08)', border:`1px solid ${testResult.ok?'rgba(16,185,129,0.2)':'rgba(244,63,94,0.2)'}`, color:testResult.ok?'#10b981':'#f43f5e', fontSize:11 }}>
+                {testResult.msg}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {showAdd && <AddSkillModal onClose={() => { setShowAdd(false); load() }} />}
+    </div>
+  )
+}
+
+function AddSkillModal({ onClose }: { onClose: () => void }) {
+  const [name, setName] = useState('')
+  const [baseUrl, setBaseUrl] = useState('')
+  const [apiKey, setApiKey] = useState('')
+  const [model, setModel] = useState('')
+  const [description, setDescription] = useState('')
+  const [systemPrompt, setSystemPrompt] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  async function save() {
+    if (!name.trim() || !baseUrl.trim() || !model.trim()) return
+    setSaving(true)
+    await fetch('/api/skills', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name, description, base_url:baseUrl, api_key:apiKey, model, system_prompt:systemPrompt, enabled:1}) })
+    setSaving(false); onClose()
+  }
+  const inp = { background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:8, padding:'8px 10px', color:'white', fontSize:12, outline:'none', width:'100%', boxSizing:'border-box' as const }
+  const lbl = { color:'rgba(148,163,184,0.6)', fontSize:10, marginBottom:4, display:'block' as const }
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:300 }}>
+      <motion.div initial={{opacity:0,scale:0.95}} animate={{opacity:1,scale:1}} style={{ width:480, maxHeight:'88vh', overflowY:'auto', background:'#0f1623', border:'1px solid rgba(99,102,241,0.2)', borderRadius:16, padding:24 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', marginBottom:18 }}>
+          <span style={{ color:'white', fontWeight:700, fontSize:15 }}>Add Skill</span>
+          <button onClick={onClose} style={{ background:'none', border:'none', color:'rgba(148,163,184,0.5)', cursor:'pointer', fontSize:18 }}>✕</button>
+        </div>
+        <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+          <div><label style={lbl}>NAME</label><input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Hermes 3" style={inp}/></div>
+          <div><label style={lbl}>DESCRIPTION</label><input value={description} onChange={e=>setDescription(e.target.value)} placeholder="What this skill does" style={inp}/></div>
+          <div><label style={lbl}>BASE URL (OpenAI-compatible)</label><input value={baseUrl} onChange={e=>setBaseUrl(e.target.value)} placeholder="http://localhost:11434/v1" style={inp}/></div>
+          <div><label style={lbl}>MODEL</label><input value={model} onChange={e=>setModel(e.target.value)} placeholder="nous-hermes3" style={inp}/></div>
+          <div><label style={lbl}>API KEY (if required)</label><input type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)} placeholder="sk-... or leave blank for Ollama" style={inp}/></div>
+          <div><label style={lbl}>SYSTEM PROMPT (optional)</label><textarea value={systemPrompt} onChange={e=>setSystemPrompt(e.target.value)} rows={3} placeholder="You are..." style={{ ...inp, resize:'vertical' as const, lineHeight:1.5, fontFamily:'inherit' }}/></div>
+        </div>
+        <div style={{ display:'flex', gap:8, marginTop:16 }}>
+          <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.98}} onClick={save} disabled={saving||!name.trim()||!baseUrl.trim()||!model.trim()}
+            style={{ flex:1, padding:10, background:'linear-gradient(135deg,#4338ca,#6366f1)', border:'none', borderRadius:9, color:'white', fontWeight:600, fontSize:13, cursor:'pointer', opacity:(!name.trim()||!baseUrl.trim()||!model.trim())?0.5:1 }}>
+            {saving?'Saving…':'Add Skill'}
+          </motion.button>
+          <button onClick={onClose} style={{ padding:'10px 16px', background:'transparent', border:'1px solid rgba(148,163,184,0.15)', borderRadius:9, color:'rgba(148,163,184,0.5)', fontSize:13, cursor:'pointer' }}>Cancel</button>
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
+
 // ── Dashboard View ─────────────────────────────────────────────────────────
 
 function DashboardView({ agents, metrics, activity, onSelectAgent }: { agents: Agent[]; metrics: Metrics | null; activity: LogEntry[]; onSelectAgent: (a: Agent) => void }) {
@@ -2542,6 +2813,124 @@ function ApiKeysPanel() {
   )
 }
 
+
+// ── Users Panel ────────────────────────────────────────────────────────────
+
+function UsersPanel() {
+  const [users, setUsers] = useState<any[]>([])
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [role, setRole] = useState('operator')
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState<string|null>(null)
+
+  useEffect(() => { load() }, [])
+  async function load() { const r = await fetch('/api/users'); if(r.ok) setUsers(await r.json()) }
+  async function create() {
+    if (!email.trim() || !password.trim()) return
+    setSaving(true)
+    const r = await fetch('/api/users', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email, password, role}) })
+    const d = await r.json()
+    if (d.error) setMsg(`✗ ${d.error}`)
+    else { setMsg('✓ User created'); setEmail(''); setPassword('') }
+    setSaving(false); load()
+    setTimeout(() => setMsg(null), 3000)
+  }
+  async function changeRole(id: number, newRole: string) { await fetch('/api/users', { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id, role:newRole}) }); load() }
+  async function remove(id: number) { await fetch(`/api/users?id=${id}`, {method:'DELETE'}); load() }
+
+  const inp = { background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:8, padding:'8px 10px', color:'white', fontSize:12, outline:'none', flex:1 as any }
+  const ROLE_COLORS: Record<string,string> = { admin:'#f59e0b', operator:'#6366f1', viewer:'rgba(148,163,184,0.5)' }
+
+  return (
+    <div style={{ background:'rgba(15,20,35,0.8)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:20, marginBottom:16 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:14 }}>
+        <span style={{ color:'white', fontWeight:600, fontSize:14 }}>👥 Team Members</span>
+      </div>
+      <div style={{ display:'flex', gap:6, marginBottom:12, flexWrap:'wrap' }}>
+        <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="email@example.com" style={inp}/>
+        <input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="Password" style={{ ...inp, flex: 'none', width:120 }}/>
+        <select value={role} onChange={e=>setRole(e.target.value)} style={{ ...inp, flex:'none', fontFamily:'inherit', background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:8, padding:'8px 10px', color:'white', outline:'none' }}>
+          <option value="operator" style={{background:'#0f1623'}}>Operator</option>
+          <option value="viewer" style={{background:'#0f1623'}}>Viewer</option>
+          <option value="admin" style={{background:'#0f1623'}}>Admin</option>
+        </select>
+        <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.98}} onClick={create} disabled={saving}
+          style={{ padding:'8px 14px', background:'linear-gradient(135deg,#4338ca,#6366f1)', border:'none', borderRadius:8, color:'white', fontSize:12, fontWeight:600, cursor:'pointer' }}>
+          {saving?'…':'Add'}
+        </motion.button>
+      </div>
+      {msg && <div style={{ padding:'5px 10px', borderRadius:6, background:msg.startsWith('✓')?'rgba(16,185,129,0.08)':'rgba(244,63,94,0.08)', color:msg.startsWith('✓')?'#10b981':'#f43f5e', fontSize:12, marginBottom:10 }}>{msg}</div>}
+      {users.map((u:any) => (
+        <div key={u.id} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'7px 0', borderBottom:'1px solid rgba(99,102,241,0.07)' }}>
+          <span style={{ color:'white', fontSize:13 }}>{u.email}</span>
+          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+            <select value={u.role||'admin'} onChange={e=>changeRole(u.id, e.target.value)}
+              style={{ background:'transparent', border:'none', color:ROLE_COLORS[u.role||'admin'], fontSize:11, cursor:'pointer', outline:'none', fontFamily:'inherit' }}>
+              <option value="admin" style={{background:'#0f1623'}}>admin</option>
+              <option value="operator" style={{background:'#0f1623'}}>operator</option>
+              <option value="viewer" style={{background:'#0f1623'}}>viewer</option>
+            </select>
+            <button onClick={() => remove(u.id)} style={{ background:'none', border:'none', color:'rgba(244,63,94,0.3)', cursor:'pointer' }}><Trash2 size={11}/></button>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Semantic Search Modal ──────────────────────────────────────────────────
+
+function SemanticSearchModal({ onClose, onNavigate }: { onClose: () => void; onNavigate: (agentId: string) => void }) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { inputRef.current?.focus() }, [])
+
+  async function search() {
+    if (!query.trim()) return
+    setLoading(true)
+    const r = await fetch('/api/search/semantic', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({query}) })
+    if (r.ok) setResults(await r.json())
+    setLoading(false)
+  }
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.8)', display:'flex', alignItems:'flex-start', justifyContent:'center', paddingTop:'12vh', zIndex:500 }}>
+      <motion.div initial={{opacity:0,y:-20}} animate={{opacity:1,y:0}} style={{ width:600, background:'#0f1623', border:'1px solid rgba(99,102,241,0.25)', borderRadius:16, overflow:'hidden' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:10, padding:'14px 16px', borderBottom:'1px solid rgba(99,102,241,0.1)' }}>
+          <Search size={16} color="#a5b4fc"/>
+          <input ref={inputRef} value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')search();if(e.key==='Escape')onClose()}}
+            placeholder="Search task results by meaning… (AI-powered)"
+            style={{ flex:1, background:'none', border:'none', color:'white', fontSize:14, outline:'none' }}/>
+          <button onClick={search} disabled={loading} style={{ padding:'5px 12px', background:'rgba(99,102,241,0.15)', border:'1px solid rgba(99,102,241,0.25)', borderRadius:6, color:'#a5b4fc', fontSize:12, cursor:'pointer' }}>
+            {loading?'…':'Search'}
+          </button>
+          <button onClick={onClose} style={{ background:'none', border:'none', color:'rgba(148,163,184,0.4)', cursor:'pointer', fontSize:18 }}>✕</button>
+        </div>
+        <div style={{ maxHeight:400, overflowY:'auto' }}>
+          {results.length === 0 && !loading && query && <p style={{ color:'rgba(148,163,184,0.3)', fontSize:13, textAlign:'center', padding:'24px 0' }}>No results found</p>}
+          {results.map((r:any) => (
+            <div key={r.id} onClick={() => { onNavigate(r.agent_id); onClose() }}
+              style={{ padding:'12px 16px', borderBottom:'1px solid rgba(99,102,241,0.07)', cursor:'pointer' }}
+              onMouseEnter={e=>(e.currentTarget.style.background='rgba(99,102,241,0.06)')}
+              onMouseLeave={e=>(e.currentTarget.style.background='transparent')}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+                <span style={{ color:'white', fontSize:13, fontWeight:500, flex:1 }}>{r.title}</span>
+                <span style={{ fontSize:10, color:'#10b981', background:'rgba(16,185,129,0.1)', padding:'1px 6px', borderRadius:10 }}>{r.score}% match</span>
+                <span style={{ fontSize:10, color:'rgba(148,163,184,0.3)' }}>{r.type}</span>
+              </div>
+              {r.result && <p style={{ color:'rgba(148,163,184,0.4)', fontSize:12, margin:0 }}>{r.result.slice(0,120)}…</p>}
+            </div>
+          ))}
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
 function SettingsView({ agents = [] }: { agents?: Agent[] }) {
   const [openaiUrl, setOpenaiUrl] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('openaiUrl') || 'https://api.openai.com/v1' : '')
   const [model, setModel] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('openaiModel') || 'gpt-4o-mini' : '')
@@ -2557,6 +2946,7 @@ function SettingsView({ agents = [] }: { agents?: Agent[] }) {
   return (
     <div style={{ padding: 24, maxWidth: 520 }}>
       <h1 style={{ color: 'white', fontWeight: 700, fontSize: 22, margin: '0 0 24px' }}>Settings</h1>
+      <UsersPanel />
       <CompanyKbPanel />
       <WebhooksPanel />
       <DriveSyncPanel agents={agents} />
@@ -2819,6 +3209,13 @@ export default function Page() {
     }
   }
 
+  // Ctrl+Shift+F for semantic search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.ctrlKey && e.shiftKey && e.key === 'F') { e.preventDefault(); setShowSemanticSearch(s => !s) } }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
   async function handleLogout() {
     await fetch('/api/auth/logout', { method: 'POST' })
     window.location.href = '/login'
@@ -2845,7 +3242,9 @@ export default function Page() {
       case 'terminal': return <TerminalView agents={agents} metrics={metrics} />
       case 'schedules': return <SchedulesView agents={agents} />
       case 'analytics':  return <AnalyticsView />
+      case 'projects':   return <ProjectsView agents={agents} onSelectAgent={a => { setSelectedAgent(a); setView('agents') }} />
       case 'triggers':   return <TriggersPanel agents={agents} />
+      case 'skills':     return <SkillsView />
       case 'pipelines':  return <PipelinesView agents={agents} />
       case 'settings':   return <SettingsView agents={agents} />
       default: return null
@@ -2853,6 +3252,7 @@ export default function Page() {
   }
 
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+  const [showSemanticSearch, setShowSemanticSearch] = useState(false)
 
   return (
     <div style={{ display: 'flex', height: '100vh', background: '#080c14', color: 'white', fontFamily: 'Inter, sans-serif', overflow: 'hidden', position: 'relative' }}>
@@ -2878,6 +3278,9 @@ export default function Page() {
         {showSearch && <GlobalSearch onClose={() => setShowSearch(false)} onNavigate={(v, id) => { setView(v); setSelectedAgent(null) }} />}
       </AnimatePresence>
       <ToastContainer toasts={toasts} remove={id => setToasts(t => t.filter(x => x.id !== id))} />
+      <AnimatePresence>
+        {showSemanticSearch && <SemanticSearchModal onClose={() => setShowSemanticSearch(false)} onNavigate={(agentId) => { const ag = agents.find(a => a.id === agentId); if(ag) setSelectedAgent(ag) }} />}
+      </AnimatePresence>
     </div>
   )
 }
