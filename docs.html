@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude OS — Documentation</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#080c14;--surface:#0f1623;--border:rgba(99,102,241,0.15);--accent:#6366f1;--al:#a5b4fc;--text:#e2e8f0;--muted:rgba(148,163,184,0.6);--sw:272px}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:Inter,-apple-system,BlinkMacSystemFont,sans-serif;font-size:15px;line-height:1.7;display:flex;min-height:100vh}
+nav{width:var(--sw);min-width:var(--sw);background:var(--surface);border-right:1px solid var(--border);position:fixed;top:0;left:0;bottom:0;overflow-y:auto;padding:28px 0 48px;z-index:10}
+.nav-brand{padding:0 22px 22px;border-bottom:1px solid var(--border);margin-bottom:12px}
+.nav-brand .mark{width:34px;height:34px;background:linear-gradient(135deg,#4338ca,#6366f1);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px;margin-bottom:9px}
+.nav-brand h2{color:#fff;font-size:14px;font-weight:700}
+.nav-brand p{color:var(--muted);font-size:11px;margin-top:2px}
+.nav-cat{font-size:10px;font-weight:700;letter-spacing:.08em;color:rgba(148,163,184,.3);padding:14px 22px 3px;text-transform:uppercase}
+nav a{display:block;padding:6px 22px;color:var(--muted);text-decoration:none;font-size:13px;font-weight:500;transition:all .15s;border-left:2px solid transparent}
+nav a:hover,nav a.active{color:var(--al);border-left-color:var(--accent);background:rgba(99,102,241,.06)}
+main{margin-left:var(--sw);flex:1;max-width:860px;padding:52px 56px}
+.hero{background:linear-gradient(135deg,rgba(99,102,241,.1),rgba(6,182,212,.05));border:1px solid var(--border);border-radius:16px;padding:38px 42px;margin-bottom:44px}
+.hero h1{font-size:30px;font-weight:800;background:linear-gradient(135deg,#fff,#a5b4fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:10px}
+.hero .sub{color:var(--muted);font-size:15px;max-width:580px;line-height:1.65}
+.badges{display:flex;gap:7px;flex-wrap:wrap;margin-top:18px}
+.badge{padding:3px 11px;border-radius:20px;font-size:11px;font-weight:600;background:rgba(99,102,241,.13);border:1px solid rgba(99,102,241,.25);color:var(--al)}
+.badge.g{background:rgba(16,185,129,.1);border-color:rgba(16,185,129,.25);color:#10b981}
+section{margin-bottom:56px;scroll-margin-top:28px}
+h1{font-size:24px;font-weight:700;color:#fff;margin-bottom:14px}
+h2{font-size:21px;font-weight:700;color:#fff;padding-bottom:9px;border-bottom:1px solid var(--border);margin-bottom:18px;margin-top:6px}
+h3{font-size:15px;font-weight:600;color:var(--al);margin:22px 0 9px}
+p{color:var(--muted);margin-bottom:11px}
+p:last-child{margin-bottom:0}
+hr{border:none;border-top:1px solid var(--border);margin:28px 0}
+strong{color:var(--text);font-weight:600}
+table{width:100%;border-collapse:collapse;margin:14px 0 22px;font-size:13px;border:1px solid var(--border);border-radius:10px;overflow:hidden}
+th{background:rgba(99,102,241,.09);color:var(--al);font-weight:600;padding:9px 13px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border)}
+td{padding:9px 13px;border-bottom:1px solid rgba(99,102,241,.06);color:var(--muted);vertical-align:top}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(99,102,241,.03)}
+td strong,td code{color:var(--text)}
+code{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12.5px;background:rgba(99,102,241,.1);color:#c4b5fd;padding:2px 6px;border-radius:4px;border:1px solid rgba(99,102,241,.2)}
+pre{background:rgba(0,0,0,.4);border:1px solid var(--border);border-radius:10px;padding:16px 18px;overflow-x:auto;margin:11px 0 18px}
+pre code{background:none;border:none;padding:0;color:#94a3b8;font-size:13px;line-height:1.65}
+ul,ol{padding-left:18px;margin:9px 0 14px}
+li{color:var(--muted);margin-bottom:5px;padding-left:3px}
+li strong{color:var(--text)}
+.note{border-radius:9px;padding:12px 16px;margin:14px 0;font-size:13.5px;line-height:1.6}
+.note-i{background:rgba(99,102,241,.07);border:1px solid rgba(99,102,241,.18);color:#c4b5fd}
+.note-w{background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.18);color:#fcd34d}
+.note-t{background:rgba(16,185,129,.07);border:1px solid rgba(16,185,129,.18);color:#6ee7b7}
+.agent-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;margin:14px 0}
+.ac{background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:14px}
+.ac .dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:7px}
+.ac h4{color:#fff;font-size:13px;font-weight:600;margin-bottom:3px}
+.ac p{font-size:12px;margin:0}
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(99,102,241,.3);border-radius:2px}
+@media(max-width:768px){nav{display:none}main{margin-left:0;padding:22px 18px}.hero{padding:22px}}
+</style>
+</head>
+<body>
+<nav id="sidebar">
+  <div class="nav-brand"><div class="mark">⚡</div><h2>Claude OS</h2><p>Phoenix Home Remodeling</p></div>
+  <div class="nav-cat">Getting Started</div>
+  <a href="#getting-started">Getting Started</a>
+  <a href="#the-dashboard">The Dashboard</a>
+  <div class="nav-cat">Core Features</div>
+  <a href="#agents">Agents</a>
+  <a href="#running-tasks">Running Tasks</a>
+  <a href="#training-an-agent">Training an Agent</a>
+  <a href="#integrations">Integrations</a>
+  <a href="#pipelines">Pipelines</a>
+  <div class="nav-cat">Platform</div>
+  <a href="#analytics">Analytics</a>
+  <a href="#schedules">Schedules</a>
+  <a href="#api-access">API Access</a>
+  <a href="#settings">Settings</a>
+  <div class="nav-cat">Operations</div>
+  <a href="#deployment--server">Deployment & Server</a>
+  <a href="#troubleshooting">Troubleshooting</a>
+  <a href="#feature-roadmap">Feature Roadmap</a>
+</nav>
+
+<main>
+<div class="hero">
+  <h1>Claude OS Documentation</h1>
+  <p class="sub">Complete guide to running, managing, and automating your AI agent control center — built for Phoenix Home Remodeling.</p>
+  <div class="badges">
+    <span class="badge">Next.js 14</span>
+    <span class="badge">GPT-5.4</span>
+    <span class="badge">SQLite</span>
+    <span class="badge g">Live on VPS</span>
+    <span class="badge">6 Default Agents</span>
+  </div>
+</div>
+
+<h1>Claude OS — Complete Documentation</h1>
+
+<strong>Claude OS</strong> is an AI agent control center built for Phoenix Home Remodeling. It lets you create, train, and manage AI agents that can research, write, automate, and connect to your existing tools — all from one dashboard.
+
+<hr>
+
+<section id="table-of-contents">
+<h2 id="table-of-contents">Table of Contents</h2>
+
+<ol><li>[Getting Started](#getting-started)</li>
+<li>[The Dashboard](#the-dashboard)</li>
+<li>[Agents](#agents)</li>
+<li>[Running Tasks](#running-tasks)</li>
+<li>[Training an Agent](#training-an-agent)</li>
+<li>[Integrations](#integrations)</li>
+<li>[Pipelines](#pipelines)</li>
+<li>[Analytics](#analytics)</li>
+<li>[Schedules](#schedules)</li>
+<li>[API Access](#api-access)</li>
+<li>[Settings](#settings)</li>
+<li>[Deployment & Server](#deployment--server)</li>
+<li>[Troubleshooting](#troubleshooting)</li>
+<li>[Feature Roadmap](#feature-roadmap)</li>
+</ol>
+<hr>
+
+
+</section>
+
+<section id="getting-started">
+<h2 id="getting-started">Getting Started</h2>
+
+<h3>Accessing the App</h3>
+
+<p>Open your browser and go to:</p>
+<pre><code>https://sandbox.phoenixhomeremodeling.net</code></pre>
+
+<p>You'll be prompted to log in. Use the credentials set in your <code>.env.local</code> file on the server (<code>ADMIN_EMAIL</code> and <code>ADMIN_PASSWORD</code>).</p>
+
+<h3>First Time Setup</h3>
+
+<ol><li>Log in to the dashboard</li>
+<li>You'll see 6 default agents ready to use</li>
+<li>Go to <strong>Settings</strong> and generate your first API key if you plan to connect GHL or N8N</li>
+<li>Open any agent and go to the <strong>Train</strong> tab to add a system prompt and upload files</li>
+</ol>
+<hr>
+
+
+</section>
+
+<section id="the-dashboard">
+<h2 id="the-dashboard">The Dashboard</h2>
+
+<p>The main screen shows you everything at a glance:</p>
+
+<ul><li><strong>Active agents</strong> — how many agents are currently running tasks</li>
+<li><strong>Tasks completed</strong> — total tasks done across all agents</li>
+<li><strong>Tokens used</strong> — how much AI processing has been consumed</li>
+<li><strong>Recent activity</strong> — a live feed of what your agents are doing</li>
+</ul>
+<p>The <strong>left sidebar</strong> is your main navigation:</p>
+
+<table><tr><th>Icon</th><th>Section</th><th>What it's for</th></tr><tr><td>Grid</td><td>Dashboard</td><td>Overview and activity feed</td></tr><tr><td>Robot</td><td>Agents</td><td>View and manage all agents</td></tr><tr><td>List</td><td>Tasks</td><td>See all tasks across all agents</td></tr><tr><td>Branch</td><td>Pipelines</td><td>Chain agents together</td></tr><tr><td>Chart</td><td>Analytics</td><td>Stats, costs, performance</td></tr><tr><td>Terminal</td><td>Terminal</td><td>Command-line interface</td></tr><tr><td>Clock</td><td>Schedules</td><td>Recurring automated tasks</td></tr><tr><td>Settings</td><td>Settings</td><td>API keys, configuration</td></tr></table>
+<p>The <strong>right side</strong> has a chat panel called <strong>Hermes</strong> — your AI assistant that controls the whole system. You can type natural language commands like "Run the research agent on Phoenix home remodeling competitors" and it will create and dispatch the task for you.</p>
+
+<hr>
+
+
+</section>
+
+<section id="agents">
+<h2 id="agents">Agents</h2>
+
+<h3>Default Agents</h3>
+<div class="agent-grid">
+  <div class="ac"><span class="dot" style="background:#06b6d4"></span><h4>Research Agent</h4><p>Web research, data gathering, summarisation</p></div>
+  <div class="ac"><span class="dot" style="background:#6366f1"></span><h4>Code Engineer</h4><p>Write, debug, and review code</p></div>
+  <div class="ac"><span class="dot" style="background:#10b981"></span><h4>Data Analyst</h4><p>Analyse data, write SQL, create reports</p></div>
+  <div class="ac"><span class="dot" style="background:#f59e0b"></span><h4>Content Writer</h4><p>Blog posts, emails, marketing copy</p></div>
+  <div class="ac"><span class="dot" style="background:#f43f5e"></span><h4>Email Manager</h4><p>Draft and manage email communications</p></div>
+  <div class="ac"><span class="dot" style="background:#a855f7"></span><h4>Security Analyst</h4><p>Vulnerability scanning, threat analysis</p></div>
+</div>
+
+<p>Claude OS comes with 6 pre-built agents:</p>
+
+<table><tr><th>Agent</th><th>What it does</th></tr><tr><td><strong>Research Agent</strong></td><td>Web research, data gathering, summarisation</td></tr><tr><td><strong>Code Engineer</strong></td><td>Write, debug, and review code</td></tr><tr><td><strong>Data Analyst</strong></td><td>Analyse data, write SQL, create reports</td></tr><tr><td><strong>Content Writer</strong></td><td>Blog posts, emails, marketing copy</td></tr><tr><td><strong>Email Manager</strong></td><td>Draft and manage email communications</td></tr><tr><td><strong>Security Analyst</strong></td><td>Vulnerability scanning, threat analysis</td></tr></table>
+<h3>Viewing an Agent</h3>
+
+<p>Click any agent card to open its detail view. You'll see three tabs on the left:</p>
+
+<ul><li><strong>Tasks</strong> — all tasks this agent has run, click any to open the full conversation</li>
+<li><strong>Train</strong> — upload knowledge files and edit the agent's system prompt</li>
+<li><strong>Tools</strong> — configure external integrations like GHL, N8N, webhooks</li>
+</ul>
+<p>The right panel shows the selected task thread or the train/tools panel.</p>
+
+<h3>Creating a New Agent</h3>
+
+<p>Use the Hermes chat panel and type:</p>
+<p>> "Create a new agent called Lead Qualifier that specialises in qualifying home remodeling leads"</p>
+
+<p>Hermes will create the agent immediately. You can then go to its Train tab to customise it.</p>
+
+<h3>Agent Status</h3>
+
+<p>Each agent shows a status indicator:</p>
+
+<ul><li>🟢 <strong>Active</strong> — currently running a task</li>
+<li>⚪ <strong>Idle</strong> — ready to accept tasks</li>
+<li>🔴 <strong>Error</strong> — last task failed</li>
+<li>⚫ <strong>Offline</strong> — not available</li>
+</ul>
+<hr>
+
+
+</section>
+
+<section id="running-tasks">
+<h2 id="running-tasks">Running Tasks</h2>
+
+<h3>From the Agent View</h3>
+
+<ol><li>Click on an agent</li>
+<li>Click the <strong>+ New Task</strong> button in the top of the left sidebar</li>
+<li>Fill in the task title and description</li>
+<li>Choose a task type (see below)</li>
+<li>Set priority (High / Normal / Low)</li>
+<li>Click <strong>Run Task</strong></li>
+</ol>
+<h3>Task Types</h3>
+
+<table><tr><th>Type</th><th>Best for</th></tr><tr><td><strong>General</strong></td><td>Writing, analysis, Q&A, anything conversational</td></tr><tr><td><strong>Search</strong></td><td>Research tasks that need live web information</td></tr><tr><td><strong>Browser</strong></td><td>Tasks that require visiting and reading a website</td></tr><tr><td><strong>Code</strong></td><td>Writing or executing scripts and programs</td></tr><tr><td><strong>Scrape</strong></td><td>Extracting data from a specific URL</td></tr><tr><td><strong>File</strong></td><td>Reading or writing files on the server</td></tr><tr><td><strong>API</strong></td><td>Making HTTP requests to external services</td></tr><tr><td><strong>Security</strong></td><td>Running security scans on a target</td></tr></table>
+<h3>Watching a Task Run</h3>
+
+<p>When a task starts, the right panel shows the conversation thread. You'll see the result <strong>stream in as it's being written</strong> — you don't have to wait until it's done.</p>
+
+<p>A task can have these statuses:</p>
+
+<ul><li><strong>Pending</strong> — queued, waiting to start</li>
+<li><strong>Running</strong> — actively being processed (you'll see the response streaming)</li>
+<li><strong>Completed</strong> — finished successfully, result is shown</li>
+<li><strong>Failed</strong> — something went wrong, error message is shown</li>
+<li><strong>Cancelled</strong> — you or the system stopped it</li>
+</ul>
+<h3>Cancelling a Task</h3>
+
+<p>If a task is running or pending, a red <strong>✕ Cancel</strong> button appears in the task header. Click it to stop the task immediately.</p>
+
+<h3>Refining Results</h3>
+
+<p>Once a task is completed, a chat input appears at the bottom of the task thread. You can type follow-up messages like:</p>
+
+<p>> "Make it shorter"</p>
+<p>> "Focus more on the pricing section"</p>
+<p>> "Rewrite this in a more casual tone"</p>
+
+<p>The agent will respond in the same thread, and your conversation history is saved — even if you click away and come back.</p>
+
+<h3>Copying and Exporting Results</h3>
+
+<p>In the task header you'll find:</p>
+<ul><li><strong>Copy</strong> button — copies the result to your clipboard</li>
+<li><strong>Export</strong> button — downloads the result as a <code>.md</code> (Markdown) file</li>
+</ul>
+<hr>
+
+
+</section>
+
+<section id="training-an-agent">
+<h2 id="training-an-agent">Training an Agent</h2>
+
+<p>Training tells the agent who it is, what it knows, and how it should behave. There are two parts:</p>
+
+<h3>System Prompt</h3>
+
+<p>The system prompt is the agent's core instructions. It shapes every single response it gives.</p>
+
+<strong>To edit it:</strong>
+<ol><li>Click on an agent</li>
+<li>Go to the <strong>Train</strong> tab</li>
+<li>Scroll down to <strong>System Prompt</strong></li>
+<li>Edit the text and click <strong>Save Prompt</strong></li>
+</ol>
+<p>The prompt is saved to the server immediately and affects the agent's very next task.</p>
+
+<strong>Example system prompt for a home remodeling sales agent:</strong>
+<pre><code>You are a sales specialist for Phoenix Home Remodeling. You understand our 
+<p>service areas across Phoenix, Scottsdale, and surrounding cities. Our services</p>
+<p>include kitchen remodeling, bathroom renovation, room additions, and flooring.</p>
+<p>Always be professional, empathetic, and focus on understanding the customer's</p>
+<p>vision before discussing costs. When analysing leads, prioritise homeowners</p>
+<p>with budgets above $15,000.</code></pre></p>
+
+<h3>Knowledge Base (File Upload)</h3>
+
+<p>You can upload files that the agent will reference in every task. Think of it as giving the agent a reference library.</p>
+
+<strong>Supported file types:</strong> PDF, TXT, CSV, JSON, HTML, Markdown (.md)
+
+<strong>To upload:</strong>
+<ol><li>Go to the <strong>Train</strong> tab</li>
+<li>Drag and drop files into the upload area, or click to browse</li>
+<li>Files are processed and stored — you'll see them listed with filename, size, and upload date</li>
+</ol>
+<strong>Good things to upload:</strong>
+<ul><li>Your service catalogue or price list</li>
+<li>GHL pipeline export as CSV</li>
+<li>FAQs document</li>
+<li>Service area descriptions</li>
+<li>Past project case studies</li>
+<li>Company policies or procedures</li>
+</ul>
+<strong>File size limit:</strong> 2MB per file. For larger files, split them into sections.
+
+<h3>How Training Affects Tasks</h3>
+
+<p>When an agent runs a task:</p>
+<ol><li>Its system prompt is loaded first</li>
+<li>Uploaded knowledge files are injected into context</li>
+<li>Recent task memory (last 5 summaries) is added</li>
+<li>Active integrations are listed as available tools</li>
+<li>Then the task description is processed</li>
+</ol>
+<hr>
+
+
+</section>
+
+<section id="integrations">
+<h2 id="integrations">Integrations</h2>
+
+<p>Integrations let your agents connect to external services — reading data from GHL, triggering N8N workflows, writing to Google Sheets, and more.</p>
+
+<h3>Setting Up an Integration</h3>
+
+<ol><li>Click on an agent</li>
+<li>Go to the <strong>Tools</strong> tab (the ⚡ icon in the sidebar)</li>
+<li>Click <strong>Add</strong> in the top right</li>
+<li>Choose a type, fill in the details, click <strong>Save Integration</strong></li>
+</ol>
+<h3>Available Integration Types</h3>
+
+<p>#### Webhook / N8N</p>
+<p>For calling any HTTP endpoint or triggering an N8N workflow.</p>
+
+<table><tr><th>Field</th><th>Description</th></tr><tr><td>URL</td><td>The webhook URL</td></tr><tr><td>Method</td><td>GET or POST (usually POST)</td></tr><tr><td>API Key</td><td>Optional Bearer token for auth</td></tr><tr><td>Body Template</td><td>Optional JSON template to send</td></tr></table>
+<strong>N8N example:</strong> Set URL to your N8N webhook URL. When the agent calls it, N8N fires and can do anything — send an email, update a CRM, send a Slack message.
+
+<p>#### GHL Read</p>
+<p>Reads data from your GoHighLevel account.</p>
+
+<table><tr><th>Field</th><th>Description</th></tr><tr><td>GHL API Key</td><td>From GHL Settings → API</td></tr><tr><td>Location ID</td><td>Your GHL location/sub-account ID</td></tr><tr><td>Resource</td><td><code>contacts</code>, <code>opportunities</code>, <code>pipelines</code>, <code>conversations</code>, <code>calendars</code></td></tr><tr><td>Limit</td><td>How many records to fetch (default 20)</td></tr></table>
+<p>#### GHL Write</p>
+<p>Creates or updates records in GoHighLevel.</p>
+
+<table><tr><th>Field</th><th>Description</th></tr><tr><td>GHL API Key</td><td>From GHL Settings → API</td></tr><tr><td>Location ID</td><td>Your GHL location ID</td></tr><tr><td>Action</td><td><code>create_contact</code>, <code>add_note</code>, or <code>create_opportunity</code></td></tr></table>
+<p>#### Google Sheets</p>
+<p>Read from or write to a Google Spreadsheet.</p>
+
+<table><tr><th>Field</th><th>Description</th></tr><tr><td>Spreadsheet ID</td><td>The ID from the Google Sheets URL</td></tr><tr><td>Range</td><td>Cell range e.g. <code>Sheet1!A1:Z100</code></td></tr><tr><td>Action</td><td><code>read</code> or <code>write</code></td></tr><tr><td>Service Account JSON</td><td>JSON credentials from Google Cloud Console</td></tr></table>
+<p>#### Google Docs</p>
+<p>Read from or append text to a Google Doc.</p>
+
+<table><tr><th>Field</th><th>Description</th></tr><tr><td>Document ID</td><td>The ID from the Google Docs URL</td></tr><tr><td>Action</td><td><code>read</code> or <code>append</code></td></tr><tr><td>Service Account JSON</td><td>JSON credentials from Google Cloud Console</td></tr></table>
+<p>#### Obsidian Vault</p>
+<p>Connect to your Obsidian notes.</p>
+
+<table><tr><th>Field</th><th>Description</th></tr><tr><td>REST API URL</td><td>URL of the Obsidian Local REST API plugin (via ngrok)</td></tr><tr><td>API Key</td><td>Key from the REST API plugin settings</td></tr><tr><td>Vault Path</td><td>Path on the server if synced via git (e.g. <code>/root/my-vault</code>)</td></tr><tr><td>Default Action</td><td><code>search</code>, <code>read</code>, <code>write</code>, <code>append</code>, or <code>list</code></td></tr></table>
+<h3>How Agents Use Integrations</h3>
+
+<p>When an agent has integrations configured, it automatically knows they exist. If a task description mentions something relevant — like "get the latest GHL contacts" or "trigger the lead follow-up workflow" — the agent will call the integration using the syntax:</p>
+
+<pre><code>{{CALL:Integration Name:{"key":"value"}}}</code></pre>
+
+<p>The result comes back to the agent, which then uses it to complete the task. An agent can make up to 3 integration calls per task.</p>
+
+<h3>Testing an Integration</h3>
+
+<p>Click the <strong>▶ Test</strong> button on any integration card to fire it with an empty payload and see the response. Green means it worked. Red shows the error.</p>
+
+<hr>
+
+
+</section>
+
+<section id="pipelines">
+<h2 id="pipelines">Pipelines</h2>
+
+<p>Pipelines let you chain multiple agents together so the output of one becomes the input of the next.</p>
+
+<strong>Example pipeline:</strong>
+<pre><code>Step 1: Research Agent → "Research the top 5 home remodeling trends in Phoenix"
+<p>Step 2: Content Writer → "Write a blog post based on the research above"</p>
+<p>Step 3: Email Manager → "Draft a newsletter email from this blog post"</code></pre></p>
+
+<h3>Creating a Pipeline</h3>
+
+<ol><li>Go to <strong>Pipelines</strong> in the sidebar</li>
+<li>Click <strong>New Pipeline</strong></li>
+<li>Give it a name and optional description</li>
+<li>Add steps:</li>
+</ol>   - Choose which agent runs each step
+<p>- Set the task title and description</p>
+<p>- Use <code>{{variable_name}}</code> for dynamic inputs (filled in at run time)</p>
+<p>- Toggle "Pass previous step output" to feed results forward</p>
+<ol><li>Click <strong>Create Pipeline</strong></li>
+</ol>
+<h3>Running a Pipeline</h3>
+
+<p>Click the <strong>▶ Run</strong> button on a pipeline card. Steps execute one at a time, in order. Each completed step feeds its output into the next step's context.</p>
+
+<p>You can watch individual task threads in the Agents view to see each step's progress.</p>
+
+<h3>Variables</h3>
+
+<p>Use <code>{{variable}}</code> placeholders in step descriptions. When you run a pipeline programmatically via the API, pass variable values in the request body:</p>
+
+<pre><code>{
+<p>"variables": {</p>
+<p>"lead_name": "John Smith",</p>
+<p>"property_address": "123 Main St, Phoenix"</p>
+<p>}</p>
+<p>}</code></pre></p>
+
+<hr>
+
+
+</section>
+
+<section id="analytics">
+<h2 id="analytics">Analytics</h2>
+
+<p>The Analytics view shows you how your agents are performing.</p>
+
+<strong>Available metrics:</strong>
+
+<ul><li><strong>Total Tasks</strong> — all tasks ever run</li>
+<li><strong>Success Rate</strong> — percentage that completed without error</li>
+<li><strong>Tokens Used</strong> — total AI tokens consumed</li>
+<li><strong>Estimated Cost</strong> — approximate dollar cost based on token usage</li>
+<li><strong>Average Duration</strong> — how long tasks typically take</li>
+<li><strong>Failed</strong> — tasks that errored</li>
+</ul>
+<strong>Charts and breakdowns:</strong>
+
+<ul><li><strong>14-day task chart</strong> — bar chart showing task volume per day</li>
+<li><strong>By Agent</strong> — which agents are doing the most work</li>
+<li><strong>By Type</strong> — breakdown of task types (general, search, browser, etc.)</li>
+</ul>
+<hr>
+
+
+</section>
+
+<section id="schedules">
+<h2 id="schedules">Schedules</h2>
+
+<p>Schedules let you run tasks automatically on a recurring basis without any manual input.</p>
+
+<h3>Creating a Schedule</h3>
+
+<ol><li>Go to <strong>Schedules</strong> in the sidebar</li>
+<li>Click <strong>New Schedule</strong></li>
+<li>Fill in:</li>
+</ol>   - <strong>Agent</strong> — which agent runs the task
+<p>- <strong>Title</strong> — name of the scheduled task</p>
+<p>- <strong>Description</strong> — what the agent should do</p>
+<p>- <strong>Type</strong> — task type</p>
+<p>- <strong>Cron expression</strong> — when to run it</p>
+
+<h3>Cron Expression Guide</h3>
+
+<p>Cron expressions follow the format: <code>minute hour day month weekday</code></p>
+
+<table><tr><th>Expression</th><th>Meaning</th></tr><tr><td><code>0 9 * * *</code></td><td>Every day at 9:00 AM</td></tr><tr><td><code>0 9 * * 1</code></td><td>Every Monday at 9:00 AM</td></tr><tr><td><code>0 9,17 * * *</code></td><td>Every day at 9 AM and 5 PM</td></tr><tr><td><code>0 8 1 * *</code></td><td>First day of every month at 8 AM</td></tr><tr><td><code>*/30 * * * *</code></td><td>Every 30 minutes</td></tr></table>
+<h3>Managing Schedules</h3>
+
+<p>Each schedule card shows:</p>
+<ul><li>Next scheduled run time</li>
+<li>Last run time</li>
+<li>Enable/disable toggle</li>
+</ul>
+<hr>
+
+
+</section>
+
+<section id="api-access">
+<h2 id="api-access">API Access</h2>
+
+<p>You can trigger your agents from external systems — GoHighLevel workflows, N8N automations, Zapier, Make, or any tool that can send an HTTP request.</p>
+
+<h3>Getting an API Key</h3>
+
+<ol><li>Go to <strong>Settings</strong></li>
+<li>Under <strong>API Keys</strong>, type a name for the key (e.g. "GHL Webhook")</li>
+<li>Click <strong>Generate Key</strong></li>
+<li><strong>Copy the key immediately</strong> — it's only shown once</li>
+</ol>
+<h3>Triggering a Task</h3>
+
+<p>Send a POST request to your trigger endpoint:</p>
+
+<pre><code>POST https://sandbox.phoenixhomeremodeling.net/api/trigger</code></pre>
+
+<strong>Headers:</strong>
+<pre><code>x-api-key: cos_live_your_key_here
+<p>Content-Type: application/json</code></pre></p>
+
+<strong>Body:</strong>
+<pre><code>{
+<p>"agent_id": "writer",</p>
+<p>"title": "Write follow-up email",</p>
+<p>"description": "Write a follow-up email for a new lead named John Smith who is interested in kitchen remodeling. Budget: $25,000.",</p>
+<p>"type": "general",</p>
+<p>"priority": 1</p>
+<p>}</code></pre></p>
+
+<strong>Response:</strong>
+<pre><code>{
+<p>"ok": true,</p>
+<p>"task_id": 42,</p>
+<p>"status": "queued"</p>
+<p>}</code></pre></p>
+
+<h3>Agent IDs</h3>
+
+<table><tr><th>Agent</th><th>ID to use</th></tr><tr><td>Research Agent</td><td><code>research</code></td></tr><tr><td>Code Engineer</td><td><code>code</code></td></tr><tr><td>Data Analyst</td><td><code>data</code></td></tr><tr><td>Content Writer</td><td><code>writer</code></td></tr><tr><td>Email Manager</td><td><code>email</code></td></tr><tr><td>Security Analyst</td><td><code>security</code></td></tr></table>
+<p>Custom agents use the name lowercased with spaces replaced by dashes (e.g. "Lead Qualifier" → <code>lead-qualifier</code>).</p>
+
+<h3>Priority Values</h3>
+
+<table><tr><th>Value</th><th>Meaning</th></tr><tr><td><code>1</code></td><td>High — runs first</td></tr><tr><td><code>2</code></td><td>Normal — default</td></tr><tr><td><code>3</code></td><td>Low — runs last</td></tr></table>
+<hr>
+
+
+</section>
+
+<section id="settings">
+<h2 id="settings">Settings</h2>
+
+<h3>API Keys</h3>
+<p>Generate and manage API keys for external integrations. Keys are hashed on the server — the full key is only shown once at creation time.</p>
+
+<h3>Model Configuration</h3>
+<p>The AI model used by all agents is set in the server's <code>.env.local</code> file:</p>
+<pre><code>OPENAI_MODEL=gpt-5.4</code></pre>
+
+<p>Restart the server after changing this value.</p>
+
+<hr>
+
+
+</section>
+
+<section id="deployment--server">
+<h2 id="deployment--server">Deployment & Server</h2>
+
+<h3>Server Details</h3>
+
+<table><tr><th>Item</th><th>Value</th></tr><tr><td>Provider</td><td>VPS</td></tr><tr><td>Domain</td><td>sandbox.phoenixhomeremodeling.net</td></tr><tr><td>App Directory</td><td><code>/root/agentic-os</code></td></tr><tr><td>Database</td><td><code>/root/agentic-os/data/claude-os.db</code></td></tr><tr><td>Process Manager</td><td>PM2</td></tr><tr><td>Port</td><td>3000 (proxied via Nginx on 443)</td></tr></table>
+<h3>Environment Variables</h3>
+
+<p>Located at <code>/root/agentic-os/.env.local</code>:</p>
+
+<table><tr><th>Variable</th><th>Purpose</th></tr><tr><td><code>OPENAI_API_KEY</code></td><td>Your OpenAI API key</td></tr><tr><td><code>OPENAI_MODEL</code></td><td>Model to use (e.g. <code>gpt-5.4</code>)</td></tr><tr><td><code>OPENAI_BASE_URL</code></td><td>API endpoint (default: OpenAI)</td></tr><tr><td><code>JWT_SECRET</code></td><td>Secret for login tokens</td></tr><tr><td><code>ADMIN_EMAIL</code></td><td>Login email</td></tr><tr><td><code>ADMIN_PASSWORD</code></td><td>Login password</td></tr><tr><td><code>INTERNAL_URL</code></td><td>Internal server URL (default: <code>http://localhost:3000</code>)</td></tr><tr><td><code>TAVILY_API_KEY</code></td><td>For web search tasks</td></tr><tr><td><code>DB_PATH</code></td><td>Custom database directory</td></tr></table>
+<h3>Deploying Updates</h3>
+
+<pre><code># On the VPS
+<p>cd /root/agentic-os</p>
+<p>git pull</p>
+<p>npm run build</p>
+<p>pm2 restart claude-os</code></pre></p>
+
+<h3>Useful Server Commands</h3>
+
+<pre><code># View live logs
+<p>pm2 logs claude-os</p>
+
+<h1>Check status</h1>
+<p>pm2 status</p>
+
+<h1>Restart the app</h1>
+<p>pm2 restart claude-os</p>
+
+<h1>Stop the app</h1>
+<p>pm2 stop claude-os</p>
+
+<h1>Clear stuck tasks</h1>
+<p>node -e "</p>
+<p>const db = require('better-sqlite3')('data/claude-os.db');</p>
+<p>db.prepare(\"UPDATE tasks SET status='failed', error='Manually cleared', completed_at=datetime('now') WHERE status='running' OR status='pending'\").run();</p>
+<p>db.prepare(\"UPDATE agents SET status='idle', current_task=NULL, progress=0\").run();</p>
+<p>console.log('Done');</p>
+<p>"</code></pre></p>
+
+<h3>Database Backup</h3>
+
+<pre><code># On the VPS — create a backup
+<p>cp /root/agentic-os/data/claude-os.db /root/agentic-os/data/claude-os-backup-$(date +%Y%m%d).db</code></pre></p>
+
+<hr>
+
+
+</section>
+
+<section id="troubleshooting">
+<h2 id="troubleshooting">Troubleshooting</h2>
+
+<h3>Task is stuck on "Running"</h3>
+
+<p>The task runner crashed mid-execution. Run the clear command above under Useful Server Commands, then retry the task.</p>
+
+<h3>Build fails with TypeScript errors</h3>
+
+<p>Usually a truncated file. Check which file is mentioned in the error, then:</p>
+<pre><code>cd /root/agentic-os
+<p>git checkout -- src/path/to/file.ts</p>
+<p>git pull</p>
+<p>npm run build</code></pre></p>
+
+<h3>Agent says it doesn't know about uploaded files</h3>
+
+<ol><li>Check the file was actually saved:</li>
+</ol><pre><code>cd /root/agentic-os
+<p>node -e "const db = require('better-sqlite3')('data/claude-os.db'); console.log(db.prepare('SELECT id, agent_id, filename, length(content) as chars FROM agent_knowledge').all())"</code></pre></p>
+<ol><li>If the <code>chars</code> value is small (under 100), the file wasn't extracted properly. Delete it and re-upload.</li>
+<li>Make sure you're uploading to the correct agent.</li>
+</ol>
+<h3>OpenAI API errors</h3>
+
+<p>Test the connection directly:</p>
+<pre><code>cd /root/agentic-os
+<p>export $(grep -E "^OPENAI_API_KEY|^OPENAI_MODEL" .env.local | xargs)</p>
+<p>node -e "</p>
+<p>const OpenAI = require('openai').default;</p>
+<p>new OpenAI({ apiKey: '${OPENAI_API_KEY}', timeout: 10000 })</p>
+<p>.chat.completions.create({ model: '${OPENAI_MODEL}', max_completion_tokens: 5, messages:[{role:'user',content:'hi'}] })</p>
+<p>.then(r => console.log('✅', r.choices[0].message.content))</p>
+<p>.catch(e => console.error('❌', e.message));</p>
+<p>"</code></pre></p>
+
+<h3>Login not working</h3>
+
+<p>Check your credentials in <code>.env.local</code>:</p>
+<pre><code>grep -E "ADMIN_EMAIL|ADMIN_PASSWORD" /root/agentic-os/.env.local</code></pre>
+
+<hr>
+
+
+</section>
+
+<section id="feature-roadmap">
+<h2 id="feature-roadmap">Feature Roadmap</h2>
+
+<p>Features planned for future development:</p>
+
+<strong>Agent Intelligence</strong>
+<ul><li>Long-term vector memory — agents remember context across weeks</li>
+<li>Agent-to-agent communication — agents collaborate on complex tasks</li>
+<li>Confidence scoring — agent flags uncertainty and requests human review</li>
+<li>Auto-retry with different approach on failure</li>
+</ul>
+<strong>Automation</strong>
+<ul><li>Event triggers — fire pipelines automatically when GHL gets a new lead</li>
+<li>Conditional pipeline branching — if/else logic between steps</li>
+<li>Webhook notifications — POST results to external systems on completion</li>
+</ul>
+<strong>Knowledge & Training</strong>
+<ul><li>Semantic search across knowledge base</li>
+<li>Live data sources — connect GHL or Google Drive as always-fresh knowledge</li>
+<li>Auto-learning from completed tasks</li>
+</ul>
+<strong>UI & Experience</strong>
+<ul><li>Bulk task dispatch from CSV</li>
+<li>Voice input for task creation</li>
+<li>Mobile app with push notifications</li>
+<li>Side-by-side result comparison</li>
+</ul>
+<strong>Platform</strong>
+<ul><li>Multi-user with role-based access</li>
+<li>Per-agent token budgets and cost limits</li>
+<li>Audit log</li>
+<li>White-label support</li>
+</ul>
+<strong>Integrations</strong>
+<ul><li>OpenClaw bridge — access 100+ built-in skills</li>
+<li>Slack/WhatsApp bot</li>
+<li>Zapier / Make native connector</li>
+<li>Auto-write task results to GHL contact notes</li>
+</ul>
+<hr>
+
+<p>*Last updated: June 2026*</p>
+<p>*Built for Phoenix Home Remodeling*</p>
+
+</section>
+
+
+<hr>
+<p style="color:rgba(148,163,184,.25);font-size:12px;text-align:center;padding:20px 0 0">
+  Claude OS &mdash; Built for Phoenix Home Remodeling &middot; Last updated June 2026
+</p>
+</main>
+<script>
+const obs = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      document.querySelectorAll('nav a').forEach(l => l.classList.remove('active'));
+      const a = document.querySelector('nav a[href="#' + e.target.id + '"]');
+      if (a) a.classList.add('active');
+    }
+  });
+}, {rootMargin: '-15% 0px -75% 0px'});
+document.querySelectorAll('section[id]').forEach(s => obs.observe(s));
+</script>
+</body>
+</html>
