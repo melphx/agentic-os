@@ -510,9 +510,7 @@ function TaskThreadView({ task, agent, onCancelled }: { task: Task; agent: Agent
     if (compacting || refineMessages.length < 2) return
     setCompacting(true)
     try {
-      const history = refineMessages.map(m => `${m.role === 'user' ? 'User' : 'Agent'}: ${m.content}`).join('
-
-')
+      const history = refineMessages.map(m => `${m.role === 'user' ? 'User' : 'Agent'}: ${m.content}`).join('\n\n')
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
