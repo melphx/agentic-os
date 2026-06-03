@@ -9,33 +9,56 @@ const client = new OpenAI({
 })
 const MODEL = process.env.OPENAI_MODEL || 'gpt-5.4'
 
-const GHL_HEADERS = (apiKey: string) => ({
+const GHL_HEADERS_V2 = (apiKey: string) => ({
   'Authorization': `Bearer ${apiKey}`,
   'Version': '2021-07-28',
   'Content-Type': 'application/json',
 })
+const GHL_HEADERS_V1 = (apiKey: string) => ({
+  'Authorization': `Bearer ${apiKey}`,
+  'Content-Type': 'application/json',
+})
 
-// ── GHL data fetchers ──────────────────────────────────────────────────────
+// ── GHL data fetchers — tries v2 first, falls back to v1 ──────────────────
 
 async function fetchContacts(apiKey: string, locationId: string, limit = 100) {
-  const res = await fetch(
+  // Try v2 first
+  const v2 = await fetch(
     `https://services.leadconnectorhq.com/contacts/?locationId=${locationId}&limit=${limit}`,
-    { headers: GHL_HEADERS(apiKey), signal: AbortSignal.timeout(20000) }
+    { headers: GHL_HEADERS_V2(apiKey), signal: AbortSignal.timeout(20000) }
   )
-  if (!res.ok) throw new Error(`GHL contacts error: ${res.status}`)
-  const data = await res.json() as Record<string, any>
+  if (v2.ok) {
+    const data = await v2.json() as Record<string, any>
+    return data.contacts || []
+  }
+  // Fall back to v1 API (older permanent API keys)
+  const v1 = await fetch(
+    `https://rest.gohighlevel.com/v1/contacts/?locationId=${locationId}&limit=${limit}`,
+    { headers: GHL_HEADERS_V1(apiKey), signal: AbortSignal.timeout(20000) }
+  )
+  if (!v1.ok) {
+    const errText = await v1.text().catch(() => '')
+    throw new Error(`GHL contacts error: ${v1.status} — ${errText.slice(0, 200)}. Check your API key has Contacts read permission.`)
+  }
+  const data = await v1.json() as Record<string, any>
   return data.contacts || []
 }
 
 async function fetchEmailCampaigns(apiKey: string, locationId: string) {
   try {
-    const res = await fetch(
+    // Try v2
+    const v2 = await fetch(
       `https://services.leadconnectorhq.com/emails/builder/campaigns?location_id=${locationId}&limit=50`,
-      { headers: GHL_HEADERS(apiKey), signal: AbortSignal.timeout(20000) }
+      { headers: GHL_HEADERS_V2(apiKey), signal: AbortSignal.timeout(20000) }
     )
-    if (!res.ok) return []
-    const data = await res.json() as Record<string, any>
-    return data.campaigns || data.data || []
+    if (v2.ok) { const d = await v2.json() as Record<string,any>; return d.campaigns || d.data || [] }
+    // Try v1
+    const v1 = await fetch(
+      `https://rest.gohighlevel.com/v1/campaigns/?locationId=${locationId}`,
+      { headers: GHL_HEADERS_V1(apiKey), signal: AbortSignal.timeout(20000) }
+    )
+    if (v1.ok) { const d = await v1.json() as Record<string,any>; return d.campaigns || [] }
+    return []
   } catch { return [] }
 }
 
