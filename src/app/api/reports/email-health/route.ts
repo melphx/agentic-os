@@ -21,17 +21,23 @@ async function fetchCampaignStats(apiKey: string, locationId: string) {
 
   // Try v2 email campaigns endpoint
   const endpoints = [
-    `https://services.leadconnectorhq.com/emails/builder/campaigns?location_id=${locationId}&limit=50&status=sent`,
     `https://services.leadconnectorhq.com/emails/builder/campaigns?location_id=${locationId}&limit=50`,
+    `https://services.leadconnectorhq.com/emails/bulk-actions/lists?locationId=${locationId}&limit=50`,
+    `https://services.leadconnectorhq.com/emails/builder/campaigns?locationId=${locationId}&limit=50`,
   ]
 
   for (const url of endpoints) {
-    const res = await fetch(url, { headers: GHL(apiKey), signal: AbortSignal.timeout(20000), cache: 'no-store' })
-    if (res.ok) {
-      const d = await res.json() as Record<string, any>
-      const items = d.campaigns || d.data || d.list || []
-      if (items.length > 0) { campaigns.push(...items); break }
-    }
+    try {
+      const res = await fetch(url, { headers: GHL(apiKey), signal: AbortSignal.timeout(15000), cache: 'no-store' })
+      if (res.ok) {
+        const d = await res.json() as Record<string, any>
+        console.log('[GHL campaigns endpoint]', url, '→', JSON.stringify(d).slice(0, 200))
+        const items = d.campaigns || d.data || d.list || d.emailCampaigns || []
+        if (items.length > 0) { campaigns.push(...items); break }
+      } else {
+        console.log('[GHL campaigns]', url, '→', res.status)
+      }
+    } catch (e: any) { console.log('[GHL campaigns error]', e.message) }
   }
 
   // Aggregate stats across all campaigns
@@ -78,13 +84,22 @@ async function fetchContactSummary(apiKey: string, locationId: string) {
       const contacts = d.contacts || []
       const now = Date.now()
       const day = 86400000
+      // Log first contact to see actual field names
+      if (contacts.length > 0) {
+        console.log('[GHL contact fields]', Object.keys(contacts[0]).join(', '))
+        console.log('[GHL contact sample]', JSON.stringify(contacts[0]).slice(0, 300))
+      }
       for (const c of contacts) {
-        const lastActivity = c.lastActivity ? (now - new Date(c.lastActivity).getTime()) / day : 999
-        const addedDaysAgo  = c.dateAdded   ? (now - new Date(c.dateAdded).getTime())    / day : 999
-        if (addedDaysAgo <= 30)    summary.new30d++
-        if (lastActivity <= 30)    summary.active30d++
-        if (lastActivity > 90 && lastActivity <= 365) summary.cold90d++
-        if (lastActivity > 365)    summary.dead1yr++
+        // GHL v2 uses different field names — try all variants
+        const lastActivityRaw = c.lastActivity || c.lastActivityDate || c.dateLastActivity || c.dateUpdated || null
+        const addedRaw        = c.dateAdded    || c.createdAt        || c.date_added       || null
+        const lastActivity    = lastActivityRaw ? (now - new Date(lastActivityRaw).getTime()) / day : 999
+        const addedDaysAgo    = addedRaw        ? (now - new Date(addedRaw).getTime())        / day : 999
+        if (addedDaysAgo <= 30)                        summary.new30d++
+        if (lastActivity <= 30)                        summary.active30d++
+        if (lastActivity > 30  && lastActivity <= 90)  {} // warming up — counted separately
+        if (lastActivity > 90  && lastActivity <= 365) summary.cold90d++
+        if (lastActivity > 365 || (!lastActivityRaw && addedDaysAgo > 30)) summary.dead1yr++
       }
       // Scale estimates if we only have a sample
       if (summary.total > 100) {
