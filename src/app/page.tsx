@@ -2977,6 +2977,15 @@ function EmailHealthReportView() {
   const [apiKey, setApiKey] = useState('')
   const [locationId, setLocationId] = useState('')
   const [domain, setDomain] = useState('phxhomeremodeling.com')
+  const [envLoaded, setEnvLoaded] = useState(false)
+
+  // Try to load from env via a quick probe — if it succeeds with empty fields, env vars are set
+  useEffect(() => {
+    fetch('/api/reports/email-health', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ _probe: true }) })
+      .then(r => r.json())
+      .then(d => { if (!d.error?.includes('ghl_api_key')) setEnvLoaded(true) })
+      .catch(() => {})
+  }, [])
   const [loading, setLoading] = useState(false)
   const [report, setReport] = useState<any | null>(null)
   const [error, setError] = useState('')
@@ -3028,7 +3037,9 @@ function EmailHealthReportView() {
       {/* Config */}
       {!report && (
         <div style={{ background:'rgba(15,20,35,0.8)', border:'1px solid rgba(99,102,241,0.15)', borderRadius:14, padding:24, maxWidth:480, marginBottom:24 }}>
-          <h3 style={{ color:'white', fontWeight:600, fontSize:15, margin:'0 0 16px' }}>Connect your GHL account</h3>
+          <h3 style={{ color:'white', fontWeight:600, fontSize:15, margin:'0 0 4px' }}>Connect your GHL account</h3>
+          {envLoaded && <p style={{ color:'#10b981', fontSize:12, margin:'0 0 14px' }}>✓ GHL credentials loaded from server config — fields optional</p>}
+          {!envLoaded && <p style={{ color:'rgba(148,163,184,0.4)', fontSize:12, margin:'0 0 14px' }}>Or set GHL_API_KEY + GHL_LOCATION_ID in .env.local to skip this form</p>}
           <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
             <div>
               <label style={{ color:'rgba(148,163,184,0.6)', fontSize:11, marginBottom:4, display:'block' }}>GHL API KEY</label>
@@ -3043,8 +3054,8 @@ function EmailHealthReportView() {
               <input value={domain} onChange={e=>setDomain(e.target.value)} style={inp}/>
             </div>
             {error && <div style={{ padding:'8px 12px', background:'rgba(244,63,94,0.08)', border:'1px solid rgba(244,63,94,0.2)', borderRadius:8, color:'#f43f5e', fontSize:12 }}>{error}</div>}
-            <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.98}} onClick={generate} disabled={loading||!apiKey.trim()||!locationId.trim()}
-              style={{ padding:12, background:'linear-gradient(135deg,#4338ca,#6366f1)', border:'none', borderRadius:9, color:'white', fontWeight:700, fontSize:14, cursor:'pointer', opacity:(!apiKey.trim()||!locationId.trim())?0.5:1 }}>
+            <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.98}} onClick={generate} disabled={loading||(!envLoaded && (!apiKey.trim()||!locationId.trim()))}
+              style={{ padding:12, background:'linear-gradient(135deg,#4338ca,#6366f1)', border:'none', borderRadius:9, color:'white', fontWeight:700, fontSize:14, cursor:'pointer', opacity:(!envLoaded && (!apiKey.trim()||!locationId.trim()))?0.5:1 }}>
               {loading ? '⏳ Generating report…' : '⚡ Generate Report'}
             </motion.button>
           </div>
@@ -3073,21 +3084,26 @@ function EmailHealthReportView() {
           {/* Stats grid */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))', gap:10 }}>
             {[
-              { label:'Open Rate',    value:`${report.stats.open_rate}%`,   good: report.stats.open_rate >= 20 },
-              { label:'Click Rate',   value:`${report.stats.click_rate}%`,  good: report.stats.click_rate >= 2 },
-              { label:'Bounce Rate',  value:`${report.stats.bounce_rate}%`, good: report.stats.bounce_rate < 2 },
-              { label:'Spam Rate',    value:`${report.stats.spam_rate}%`,   good: report.stats.spam_rate < 0.1 },
-              { label:'Total Contacts', value: report.segments.total,       good: true },
-              { label:'Active',       value: report.segments.active,        good: true },
-              { label:'Cold',         value: report.segments.cold,          good: false },
-              { label:'Dead Weight',  value: report.segments.dead,          good: false },
+              { label:'Total Contacts', value: report.segments.total.toLocaleString(), color:'#a5b4fc' },
+              { label:'Active (30d)',   value: report.segments.active.toLocaleString(), color:'#10b981' },
+              { label:'New (30d)',      value: report.segments.new.toLocaleString(), color:'#6366f1' },
+              { label:'Warming Up',    value: (report.segments.warmingUp||0).toLocaleString(), color:'#06b6d4' },
+              { label:'Cold',          value: report.segments.cold.toLocaleString(), color:'#f59e0b' },
+              { label:'Dead Weight',   value: report.segments.dead.toLocaleString(), color:'#f43f5e' },
+              { label:'Spam Risk',     value: (report.segments.spamRisk||0).toLocaleString(), color:'#f43f5e' },
+              { label:'Never Engaged', value: (report.segments.neverEngaged||0).toLocaleString(), color:'rgba(148,163,184,0.5)' },
             ].map(s => (
               <div key={s.label} style={{ background:'rgba(15,20,35,0.8)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:12, padding:'12px 14px' }}>
                 <div style={{ fontSize:11, color:'rgba(148,163,184,0.5)', marginBottom:4 }}>{s.label}</div>
-                <div style={{ fontSize:20, fontWeight:700, color: s.good ? '#10b981' : '#f43f5e' }}>{s.value}</div>
+                <div style={{ fontSize:20, fontWeight:700, color: s.color }}>{s.value}</div>
               </div>
             ))}
           </div>
+          {report.stats.note && (
+            <div style={{ padding:'8px 14px', background:'rgba(99,102,241,0.06)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:8, fontSize:11, color:'rgba(148,163,184,0.4)' }}>
+              ℹ️ {report.stats.note}
+            </div>
+          )}
 
           {/* Analyst notes */}
           {report.analysis?.analyst_notes && (
@@ -3101,11 +3117,12 @@ function EmailHealthReportView() {
           <div style={{ background:'rgba(15,20,35,0.8)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:20 }}>
             <h3 style={{ color:'#a5b4fc', fontWeight:600, fontSize:14, margin:'0 0 14px' }}>Subscriber Segments</h3>
             {[
-              { label:'New (last 30 days)', count:report.segments.new, color:'#6366f1' },
-              { label:'Active (engaged last 30 days)', count:report.segments.active, color:'#10b981' },
-              { label:'Warming up (30-90 days ago)', count:report.segments.warmingUp, color:'#06b6d4' },
-              { label:'Cold (90 days - 1 year)', count:report.segments.cold, color:'#f59e0b' },
-              { label:'Dead weight (1+ year / never opened)', count:report.segments.dead, color:'#f43f5e' },
+              { label:'New (added last 30 days)',       count:report.segments.new,                        color:'#6366f1' },
+              { label:'Active (recently engaged)',      count:report.segments.active,                     color:'#10b981' },
+              { label:'Warming up (30-90 days)',        count:report.segments.warmingUp||0,               color:'#06b6d4' },
+              { label:'Cold (90 days - 1 year)',        count:report.segments.cold,                       color:'#f59e0b' },
+              { label:'Dead / never engaged',           count:report.segments.dead,                       color:'#f43f5e' },
+              { label:'Spam risk contacts',             count:report.segments.spamRisk||0,                color:'#dc2626' },
             ].map(s => (
               <div key={s.label} style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}>
                 <div style={{ width:10, height:10, borderRadius:'50%', background:s.color, flexShrink:0 }}/>
