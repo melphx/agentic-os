@@ -24,20 +24,27 @@ async function fetchContacts(apiKey: string, locationId: string, limit = 100) {
   // Try v2 first
   const v2 = await fetch(
     `https://services.leadconnectorhq.com/contacts/?locationId=${locationId}&limit=${limit}`,
-    { headers: GHL_HEADERS_V2(apiKey), signal: AbortSignal.timeout(20000) }
+    { headers: GHL_HEADERS_V2(apiKey), signal: AbortSignal.timeout(20000), cache: 'no-store' }
   )
   if (v2.ok) {
     const data = await v2.json() as Record<string, any>
     return data.contacts || []
   }
-  // Fall back to v1 API (older permanent API keys)
+  // Log v2 failure for debugging
+  const v2Err = await v2.text().catch(() => '')
+  console.error('[GHL v2 contacts]', v2.status, v2Err.slice(0, 200))
+  // Do NOT fall back to v1 for PIT tokens (pit-...) — they only work on v2
+  if (apiKey.startsWith('pit-')) {
+    throw new Error(`GHL contacts error: ${v2.status} — ${v2Err.slice(0, 200)}. Your PIT token may need 'contacts.readonly' scope. Go to GHL Settings → Integrations → Private Integrations → edit your integration → enable Contacts scope.`)
+  }
+  // Fall back to v1 for legacy API keys
   const v1 = await fetch(
     `https://rest.gohighlevel.com/v1/contacts/?locationId=${locationId}&limit=${limit}`,
-    { headers: GHL_HEADERS_V1(apiKey), signal: AbortSignal.timeout(20000) }
+    { headers: GHL_HEADERS_V1(apiKey), signal: AbortSignal.timeout(20000), cache: 'no-store' }
   )
   if (!v1.ok) {
     const errText = await v1.text().catch(() => '')
-    throw new Error(`GHL contacts error: ${v1.status} — ${errText.slice(0, 200)}. Check your API key has Contacts read permission.`)
+    throw new Error(`GHL contacts error: ${v1.status} — ${errText.slice(0, 200)}`)
   }
   const data = await v1.json() as Record<string, any>
   return data.contacts || []
