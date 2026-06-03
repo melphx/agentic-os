@@ -215,6 +215,7 @@ const NAV = [
   { id: 'terminal',   icon: <TerminalIcon size={18} />,    label: 'Terminal'   },
   { id: 'schedules',  icon: <Clock size={18} />,           label: 'Schedules'  },
   { id: 'hermes',    icon: <span style={{fontSize:16}}>⚡</span>, label: 'Hermes'    },
+  { id: 'email-health', icon: <span style={{fontSize:14}}>📧</span>, label: 'Email Health' },
   { id: 'settings',   icon: <Settings size={18} />,        label: 'Settings'   },
 ]
 
@@ -2970,6 +2971,210 @@ function ApprovalsModal({ onClose }: { onClose: () => void }) {
 }
 
 
+// ── Email Health Report View ───────────────────────────────────────────────
+
+function EmailHealthReportView() {
+  const [apiKey, setApiKey] = useState('')
+  const [locationId, setLocationId] = useState('')
+  const [domain, setDomain] = useState('phxhomeremodeling.com')
+  const [loading, setLoading] = useState(false)
+  const [report, setReport] = useState<any | null>(null)
+  const [error, setError] = useState('')
+
+  async function generate() {
+    if (!apiKey.trim() || !locationId.trim()) return
+    setLoading(true); setError(''); setReport(null)
+    try {
+      const r = await fetch('/api/reports/email-health', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ghl_api_key: apiKey, location_id: locationId, domain }),
+      })
+      const d = await r.json()
+      if (!r.ok) { setError(d.error || 'Failed'); return }
+      setReport(d)
+    } catch (e: any) { setError(e.message) }
+    finally { setLoading(false) }
+  }
+
+  function exportHTML() {
+    if (!report) return
+    const html = buildReportHTML(report)
+    const blob = new Blob([html], { type: 'text/html' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `email-health-${new Date().toISOString().slice(0,10)}.html`; a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const scoreColor = !report ? '#6366f1' : report.health_score >= 800 ? '#10b981' : report.health_score >= 650 ? '#06b6d4' : report.health_score >= 500 ? '#f59e0b' : '#f43f5e'
+  const inp = { background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:8, padding:'9px 12px', color:'white', fontSize:13, outline:'none', width:'100%', boxSizing:'border-box' as const }
+
+  return (
+    <div style={{ padding:24, height:'100%', overflowY:'auto' }}>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:24 }}>
+        <div>
+          <h1 style={{ color:'white', fontWeight:700, fontSize:22, margin:0 }}>Email Health Report</h1>
+          <p style={{ color:'rgba(148,163,184,0.5)', fontSize:13, margin:'4px 0 0' }}>Monthly email deliverability and engagement analysis from GHL</p>
+        </div>
+        {report && (
+          <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.98}} onClick={exportHTML}
+            style={{ display:'flex', alignItems:'center', gap:6, padding:'8px 16px', background:'linear-gradient(135deg,#4338ca,#6366f1)', border:'none', borderRadius:9, color:'white', fontWeight:600, fontSize:13, cursor:'pointer' }}>
+            <Download size={14} /> Export HTML
+          </motion.button>
+        )}
+      </div>
+
+      {/* Config */}
+      {!report && (
+        <div style={{ background:'rgba(15,20,35,0.8)', border:'1px solid rgba(99,102,241,0.15)', borderRadius:14, padding:24, maxWidth:480, marginBottom:24 }}>
+          <h3 style={{ color:'white', fontWeight:600, fontSize:15, margin:'0 0 16px' }}>Connect your GHL account</h3>
+          <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            <div>
+              <label style={{ color:'rgba(148,163,184,0.6)', fontSize:11, marginBottom:4, display:'block' }}>GHL API KEY</label>
+              <input type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)} placeholder="eyJhbGci..." style={inp}/>
+            </div>
+            <div>
+              <label style={{ color:'rgba(148,163,184,0.6)', fontSize:11, marginBottom:4, display:'block' }}>LOCATION ID</label>
+              <input value={locationId} onChange={e=>setLocationId(e.target.value)} placeholder="abc123..." style={inp}/>
+            </div>
+            <div>
+              <label style={{ color:'rgba(148,163,184,0.6)', fontSize:11, marginBottom:4, display:'block' }}>DOMAIN</label>
+              <input value={domain} onChange={e=>setDomain(e.target.value)} style={inp}/>
+            </div>
+            {error && <div style={{ padding:'8px 12px', background:'rgba(244,63,94,0.08)', border:'1px solid rgba(244,63,94,0.2)', borderRadius:8, color:'#f43f5e', fontSize:12 }}>{error}</div>}
+            <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.98}} onClick={generate} disabled={loading||!apiKey.trim()||!locationId.trim()}
+              style={{ padding:12, background:'linear-gradient(135deg,#4338ca,#6366f1)', border:'none', borderRadius:9, color:'white', fontWeight:700, fontSize:14, cursor:'pointer', opacity:(!apiKey.trim()||!locationId.trim())?0.5:1 }}>
+              {loading ? '⏳ Generating report…' : '⚡ Generate Report'}
+            </motion.button>
+          </div>
+          <div style={{ marginTop:14, padding:10, background:'rgba(99,102,241,0.05)', borderRadius:8, fontSize:11, color:'rgba(148,163,184,0.4)', lineHeight:1.6 }}>
+            💡 Find your API key in GHL Settings → Integrations → API Keys. Location ID is in Settings → Business Info.
+          </div>
+        </div>
+      )}
+
+      {/* Report */}
+      {report && (
+        <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+          {/* Score hero */}
+          <div style={{ background:`linear-gradient(135deg, ${scoreColor}15, ${scoreColor}08)`, border:`1px solid ${scoreColor}30`, borderRadius:16, padding:'24px 28px', display:'flex', alignItems:'center', gap:24 }}>
+            <div style={{ textAlign:'center' }}>
+              <div style={{ fontSize:52, fontWeight:800, color:scoreColor, lineHeight:1 }}>{report.health_score}</div>
+              <div style={{ color:'rgba(148,163,184,0.5)', fontSize:11, marginTop:4 }}>out of 999</div>
+            </div>
+            <div style={{ flex:1 }}>
+              <div style={{ color:scoreColor, fontWeight:700, fontSize:20, marginBottom:4 }}>{report.score_label}</div>
+              <p style={{ color:'rgba(148,163,184,0.7)', fontSize:13, margin:0, lineHeight:1.6 }}>{report.analysis?.score_explanation || report.analysis?.executive_summary || ''}</p>
+            </div>
+            <button onClick={() => setReport(null)} style={{ background:'rgba(148,163,184,0.1)', border:'none', borderRadius:8, padding:'6px 12px', color:'rgba(148,163,184,0.5)', fontSize:11, cursor:'pointer' }}>New Report</button>
+          </div>
+
+          {/* Stats grid */}
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))', gap:10 }}>
+            {[
+              { label:'Open Rate',    value:`${report.stats.open_rate}%`,   good: report.stats.open_rate >= 20 },
+              { label:'Click Rate',   value:`${report.stats.click_rate}%`,  good: report.stats.click_rate >= 2 },
+              { label:'Bounce Rate',  value:`${report.stats.bounce_rate}%`, good: report.stats.bounce_rate < 2 },
+              { label:'Spam Rate',    value:`${report.stats.spam_rate}%`,   good: report.stats.spam_rate < 0.1 },
+              { label:'Total Contacts', value: report.segments.total,       good: true },
+              { label:'Active',       value: report.segments.active,        good: true },
+              { label:'Cold',         value: report.segments.cold,          good: false },
+              { label:'Dead Weight',  value: report.segments.dead,          good: false },
+            ].map(s => (
+              <div key={s.label} style={{ background:'rgba(15,20,35,0.8)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:12, padding:'12px 14px' }}>
+                <div style={{ fontSize:11, color:'rgba(148,163,184,0.5)', marginBottom:4 }}>{s.label}</div>
+                <div style={{ fontSize:20, fontWeight:700, color: s.good ? '#10b981' : '#f43f5e' }}>{s.value}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Analyst notes */}
+          {report.analysis?.analyst_notes && (
+            <div style={{ background:'rgba(15,20,35,0.8)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:20 }}>
+              <h3 style={{ color:'#a5b4fc', fontWeight:600, fontSize:14, margin:'0 0 10px' }}>Analyst Notes</h3>
+              <p style={{ color:'rgba(148,163,184,0.7)', fontSize:13, margin:0, lineHeight:1.7 }}>{report.analysis.analyst_notes}</p>
+            </div>
+          )}
+
+          {/* Subscriber breakdown */}
+          <div style={{ background:'rgba(15,20,35,0.8)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:20 }}>
+            <h3 style={{ color:'#a5b4fc', fontWeight:600, fontSize:14, margin:'0 0 14px' }}>Subscriber Segments</h3>
+            {[
+              { label:'New (last 30 days)', count:report.segments.new, color:'#6366f1' },
+              { label:'Active (engaged last 30 days)', count:report.segments.active, color:'#10b981' },
+              { label:'Warming up (30-90 days ago)', count:report.segments.warmingUp, color:'#06b6d4' },
+              { label:'Cold (90 days - 1 year)', count:report.segments.cold, color:'#f59e0b' },
+              { label:'Dead weight (1+ year / never opened)', count:report.segments.dead, color:'#f43f5e' },
+            ].map(s => (
+              <div key={s.label} style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}>
+                <div style={{ width:10, height:10, borderRadius:'50%', background:s.color, flexShrink:0 }}/>
+                <span style={{ color:'rgba(148,163,184,0.7)', fontSize:13, flex:1 }}>{s.label}</span>
+                <span style={{ color:'white', fontWeight:600, fontSize:13 }}>{s.count}</span>
+                <span style={{ color:'rgba(148,163,184,0.3)', fontSize:11, width:40, textAlign:'right' }}>
+                  {report.segments.total > 0 ? `${(s.count/report.segments.total*100).toFixed(0)}%` : ''}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Actions */}
+          {(report.analysis?.actions_urgent || report.analysis?.top_priority) && (
+            <div style={{ background:'rgba(244,63,94,0.05)', border:'1px solid rgba(244,63,94,0.15)', borderRadius:14, padding:20 }}>
+              <h3 style={{ color:'#f43f5e', fontWeight:600, fontSize:14, margin:'0 0 10px' }}>🚨 Urgent Actions</h3>
+              {report.analysis?.top_priority && <p style={{ color:'rgba(148,163,184,0.8)', fontSize:13, marginBottom:8 }}><strong style={{color:'white'}}>Top priority:</strong> {report.analysis.top_priority}</p>}
+              {Array.isArray(report.analysis?.actions_urgent) && report.analysis.actions_urgent.map((a:string,i:number) => (
+                <div key={i} style={{ display:'flex', gap:8, marginBottom:6 }}>
+                  <span style={{ color:'#f43f5e', flexShrink:0 }}>•</span>
+                  <span style={{ color:'rgba(148,163,184,0.7)', fontSize:13 }}>{a}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {report.analysis?.actions_medium && Array.isArray(report.analysis.actions_medium) && (
+            <div style={{ background:'rgba(245,158,11,0.05)', border:'1px solid rgba(245,158,11,0.15)', borderRadius:14, padding:20 }}>
+              <h3 style={{ color:'#f59e0b', fontWeight:600, fontSize:14, margin:'0 0 10px' }}>📋 Recommended Actions</h3>
+              {report.analysis.actions_medium.map((a:string,i:number) => (
+                <div key={i} style={{ display:'flex', gap:8, marginBottom:6 }}>
+                  <span style={{ color:'#f59e0b', flexShrink:0 }}>•</span>
+                  <span style={{ color:'rgba(148,163,184,0.7)', fontSize:13 }}>{a}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <p style={{ color:'rgba(148,163,184,0.3)', fontSize:11, textAlign:'center' }}>Generated {new Date(report.generated_at).toLocaleString()} · {report.stats.campaigns_analyzed} campaigns analyzed</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function buildReportHTML(report: any): string {
+  const scoreColor = report.health_score >= 800 ? '#10b981' : report.health_score >= 650 ? '#06b6d4' : report.health_score >= 500 ? '#f59e0b' : '#f43f5e'
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Email Health Report</title>
+<style>body{font-family:Inter,sans-serif;background:#080c14;color:#e2e8f0;padding:40px;max-width:900px;margin:0 auto}
+h1{font-size:28px;font-weight:800;color:white}.score{font-size:64px;font-weight:800;color:${scoreColor}}
+.card{background:rgba(15,20,35,0.9);border:1px solid rgba(99,102,241,0.2);border-radius:14px;padding:20px;margin:14px 0}
+.stat{display:inline-block;background:rgba(99,102,241,0.1);border-radius:10px;padding:10px 16px;margin:6px;text-align:center}
+.stat-val{font-size:22px;font-weight:700;color:${scoreColor}}.stat-lbl{font-size:11px;color:rgba(148,163,184,0.5)}
+p{color:rgba(148,163,184,0.7);line-height:1.7}</style></head><body>
+<h1>📧 Email Health Report</h1>
+<p>${report.domain} · ${new Date(report.generated_at).toLocaleDateString()}</p>
+<div class="card"><div class="score">${report.health_score}</div><div style="font-size:20px;font-weight:700;color:${scoreColor}">${report.score_label}</div>
+<p>${report.analysis?.score_explanation || ''}</p></div>
+<div class="card"><h3 style="color:#a5b4fc">Analyst Notes</h3><p>${report.analysis?.analyst_notes || ''}</p></div>
+<div class="card"><h3 style="color:#a5b4fc">Stats</h3>
+${[['Open Rate', report.stats.open_rate+'%'],['Click Rate', report.stats.click_rate+'%'],['Bounce Rate', report.stats.bounce_rate+'%'],['Spam Rate', report.stats.spam_rate+'%'],['Total Contacts', report.segments.total],['Active', report.segments.active],['Cold', report.segments.cold],['Dead', report.segments.dead]].map(([l,v]) => `<div class="stat"><div class="stat-val">${v}</div><div class="stat-lbl">${l}</div></div>`).join('')}
+</div>
+<div class="card" style="border-color:rgba(244,63,94,0.2)"><h3 style="color:#f43f5e">🚨 Urgent Actions</h3>
+<p><strong>Top priority:</strong> ${report.analysis?.top_priority || ''}</p>
+${Array.isArray(report.analysis?.actions_urgent) ? report.analysis.actions_urgent.map((a:string) => `<p>• ${a}</p>`).join('') : ''}
+</div></body></html>`
+}
+
+
 // ── Dashboard View ─────────────────────────────────────────────────────────
 
 function DashboardView({ agents, metrics, activity, onSelectAgent }: { agents: Agent[]; metrics: Metrics | null; activity: LogEntry[]; onSelectAgent: (a: Agent) => void }) {
@@ -3637,6 +3842,7 @@ export default function Page() {
       case 'terminal': return <TerminalView agents={agents} metrics={metrics} />
       case 'schedules': return <SchedulesView agents={agents} />
       case 'analytics':  return <AnalyticsView />
+      case 'email-health': return <EmailHealthReportView />
       case 'hermes':     return <HermesView messages={messages} onSend={handleSend} loading={chatLoading} />
       case 'projects':   return <ProjectsView agents={agents} onSelectAgent={a => { setSelectedAgent(a); setView('agents') }} />
       case 'triggers':   return <TriggersPanel agents={agents} />
