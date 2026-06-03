@@ -79,6 +79,8 @@ li strong{color:var(--text)}
   <a href="#search">Semantic Search</a>
   <a href="#users">Multi-User</a>
   <a href="#settings">Settings</a>
+  <div class="nav-cat">Reports</div>
+  <a href="#email-health">Email Health Report</a>
   <div class="nav-cat">Operations</div>
   <a href="#server">Server &amp; Deployment</a>
   <a href="#troubleshooting">Troubleshooting</a>
@@ -90,7 +92,7 @@ li strong{color:var(--text)}
   <p class="sub">Complete guide to running, managing, and automating your AI agent control center &mdash; built for Phoenix Home Remodeling.</p>
   <div class="badges">
     <span class="badge">Next.js 14</span><span class="badge">GPT-5.4</span><span class="badge">SQLite</span>
-    <span class="badge g">Live on VPS</span><span class="badge">Real-time Streaming</span><span class="badge">6 Default Agents</span>
+    <span class="badge g">Live on VPS</span><span class="badge">Real-time Streaming</span><span class="badge">6 Default Agents</span><span class="badge">Email Health Reports</span>
   </div>
 </div>
 
@@ -375,6 +377,44 @@ Content-Type: application/json
 <li><strong>Google Drive Sync</strong> — connect Drive folders and sync files</li>
 <li><strong>API Keys</strong> — generate keys for external systems to trigger agents</li>
 </ul>
+</section>
+
+<section id="email-health">
+<h2>Email Health Report</h2>
+<p>A monthly email deliverability and engagement analysis powered by your GHL contact data. Go to <strong>📧 Email Health</strong> in the sidebar.</p>
+
+<h3>Setup</h3>
+<p>Add your GHL credentials to <code>.env.local</code> on the server so the report runs without entering credentials each time:</p>
+<pre><code>GHL_API_KEY=pit-your-token-here
+GHL_LOCATION_ID=your-location-id
+GHL_DOMAIN=phxhomeremodeling.com</code></pre>
+
+<h3>What it analyses</h3>
+<p>The report reads <strong>HitTheInbox tags</strong> already applied to your GHL contacts — 16 parallel queries, no full contact pull needed, completes in 2-3 seconds.</p>
+<table>
+<tr><th>Section</th><th>What it shows</th><th>Source</th></tr>
+<tr><td><strong>Health Score</strong></td><td>0-999 score based on list quality</td><td>Calculated from tag ratios</td></tr>
+<tr><td><strong>Send Status</strong></td><td>Green (safe) vs Red (do not send) counts</td><td><code>hti status</code> tags</td></tr>
+<tr><td><strong>Engagement</strong></td><td>Never engaged, never sent, new contacts</td><td><code>hti engagement check</code> tags</td></tr>
+<tr><td><strong>Email Quality</strong></td><td>Bounced, spam risk, invalid, catchall, suspicious</td><td>HitTheInbox quality tags</td></tr>
+<tr><td><strong>Provider Breakdown</strong></td><td>Google vs Yahoo vs Microsoft vs Other %</td><td><code>hti email provider check</code> tags</td></tr>
+<tr><td><strong>AI Analysis</strong></td><td>Analyst notes + prioritised action items</td><td>GPT-5.4 based on tag data</td></tr>
+</table>
+
+<div class="note note-w">Campaign open/click stats (open rate, click rate) require the <strong>email campaign API scope</strong> on your GHL Private Integration. Contact your GHL admin to enable it.</div>
+
+<h3>Export</h3>
+<p>Click <strong>Export HTML</strong> in the top right to download a standalone HTML report you can share or print.</p>
+
+<h3>Score guide</h3>
+<table>
+<tr><th>Score</th><th>Label</th><th>Meaning</th></tr>
+<tr><td>800–999</td><td>Excellent</td><td>Healthy list, strong deliverability</td></tr>
+<tr><td>650–799</td><td>Good</td><td>Minor issues, manageable</td></tr>
+<tr><td>500–649</td><td>Needs Improvement</td><td>Action required soon</td></tr>
+<tr><td>300–499</td><td>Poor</td><td>Serious deliverability risk</td></tr>
+<tr><td>0–299</td><td>Critical</td><td>Immediate action needed</td></tr>
+</table>
 </section>
 
 <section id="server">
