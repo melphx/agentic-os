@@ -1,12 +1,3 @@
-export async function GET(req: NextRequest) {
-  const { error } = await requireAuth(req)
-  if (error) return error
-  return NextResponse.json({
-    configured: !!(process.env.GHL_API_KEY && process.env.GHL_LOCATION_ID),
-    domain: process.env.GHL_DOMAIN || 'phxhomeremodeling.com',
-  })
-}
-
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
 import OpenAI from 'openai'
@@ -23,100 +14,79 @@ const GHL = (apiKey: string) => ({
   'Version': '2021-07-28',
 })
 
-// ── Fetch contacts with pagination (max 300 for performance) ──────────────
-
-async function fetchContactSample(apiKey: string, locationId: string) {
-  let allContacts: any[] = []
-  let totalCount = 0
-
-  // First get the total count
-  const countRes = await fetch(
-    `https://services.leadconnectorhq.com/contacts/?locationId=${locationId}&limit=1`,
-    { headers: GHL(apiKey), signal: AbortSignal.timeout(15000), cache: 'no-store' }
-  )
-  if (!countRes.ok) throw new Error(`GHL contacts error: ${countRes.status}`)
-  const countData = await countRes.json() as Record<string, any>
-  totalCount = countData.total || countData.meta?.total || 0
-
-  // Fetch a sample of 100 for segmentation analysis
-  const sampleRes = await fetch(
-    `https://services.leadconnectorhq.com/contacts/?locationId=${locationId}&limit=100`,
-    { headers: GHL(apiKey), signal: AbortSignal.timeout(20000), cache: 'no-store' }
-  )
-  if (sampleRes.ok) {
-    const d = await sampleRes.json() as Record<string, any>
-    allContacts = d.contacts || []
-  }
-
-  return { contacts: allContacts, total: totalCount }
+export async function GET(req: NextRequest) {
+  const { error } = await requireAuth(req)
+  if (error) return error
+  return NextResponse.json({
+    configured: !!(process.env.GHL_API_KEY && process.env.GHL_LOCATION_ID),
+    domain: process.env.GHL_DOMAIN || 'phxhomeremodeling.com',
+  })
 }
 
-// ── Segment contacts using dateAdded, dateUpdated, and tags ───────────────
+// ── Tag-based count query (accurate, no full contact pull needed) ──────────
 
-function segmentContacts(contacts: any[], total: number) {
-  const now = Date.now()
-  const day = 86400000
-  const counts = { new30d: 0, active30d: 0, warmingUp: 0, cold: 0, dead: 0, neverEngaged: 0, spamRisk: 0 }
+async function countByTag(apiKey: string, locationId: string, tag: string): Promise<number> {
+  try {
+    const res = await fetch('https://services.leadconnectorhq.com/contacts/search', {
+      method: 'POST',
+      headers: { ...GHL(apiKey), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ locationId, pageLimit: 1, filters: [{ field: 'tags', operator: 'contains', value: tag }] }),
+      signal: AbortSignal.timeout(10000),
+      cache: 'no-store',
+    })
+    if (!res.ok) return 0
+    const d = await res.json() as Record<string, any>
+    return d.total || 0
+  } catch { return 0 }
+}
 
-  for (const c of contacts) {
-    const tags: string[] = (c.tags || []).map((t: string) => t.toLowerCase())
-    const addedDays   = c.dateAdded   ? (now - new Date(c.dateAdded).getTime())   / day : 999
-    const updatedDays = c.dateUpdated ? (now - new Date(c.dateUpdated).getTime()) / day : 999
-
-    // Tag-based detection (highest accuracy)
-    const neverEngaged = tags.some(t => t.includes('never engaged') || t.includes('never sent'))
-    const recentlyEngaged = tags.some(t => t.includes('engaged') && !t.includes('never'))
-    const spamFlag = tags.some(t => t.includes('spam') || t.includes('unsubscribed'))
-
-    if (spamFlag) counts.spamRisk++
-    if (neverEngaged) { counts.neverEngaged++; counts.dead++ }
-    else if (addedDays <= 30) counts.new30d++
-    else if (recentlyEngaged || updatedDays <= 30) counts.active30d++
-    else if (updatedDays <= 90) counts.warmingUp++
-    else if (updatedDays <= 365) counts.cold++
-    else counts.dead++
-  }
-
-  // Scale from sample to full list
-  const scale = contacts.length > 0 ? total / contacts.length : 1
-  return {
-    total,
-    new: Math.round(counts.new30d   * scale),
-    active: Math.round(counts.active30d * scale),
-    warmingUp: Math.round(counts.warmingUp * scale),
-    cold: Math.round(counts.cold    * scale),
-    dead: Math.round(counts.dead    * scale),
-    neverEngaged: Math.round(counts.neverEngaged * scale),
-    spamRisk: Math.round(counts.spamRisk * scale),
-  }
+async function getTotalContacts(apiKey: string, locationId: string): Promise<number> {
+  const res = await fetch(
+    `https://services.leadconnectorhq.com/contacts/?locationId=${locationId}&limit=1`,
+    { headers: GHL(apiKey), signal: AbortSignal.timeout(10000), cache: 'no-store' }
+  )
+  if (!res.ok) return 0
+  const d = await res.json() as Record<string, any>
+  return d.total || d.meta?.total || 0
 }
 
 // ── Score calculation ──────────────────────────────────────────────────────
 
-function calcScore(segments: ReturnType<typeof segmentContacts>, hasCampaignData: boolean): number {
-  let score = 600
-  const coldPct = segments.total > 0 ? (segments.cold + segments.dead) / segments.total * 100 : 0
-  const activePct = segments.total > 0 ? segments.active / segments.total * 100 : 0
-  const spamPct = segments.total > 0 ? segments.spamRisk / segments.total * 100 : 0
+function calcScore(data: Record<string, number>): number {
+  const total = data.total || 1
+  const redPct       = data.red / total * 100
+  const greenPct     = data.green / total * 100
+  const neverEngPct  = data.neverEngaged / total * 100
+  const spamPct      = data.spam / total * 100
+  const bouncePct    = data.bounced / total * 100
 
-  // Active engagement
-  if (activePct >= 50) score += 150
-  else if (activePct >= 30) score += 80
-  else if (activePct >= 15) score += 20
-  else score -= 100
+  let score = 700
 
-  // Cold/dead weight
-  if (coldPct < 10) score += 100
-  else if (coldPct < 25) score += 30
-  else if (coldPct < 40) score -= 50
-  else score -= 150
+  // Red contacts (do not send) — huge penalty
+  if (redPct > 50)      score -= 300
+  else if (redPct > 30) score -= 200
+  else if (redPct > 15) score -= 100
+  else if (redPct > 5)  score -= 50
 
-  // Spam risk contacts
-  if (spamPct > 5) score -= 100
-  else if (spamPct > 2) score -= 50
+  // Green contacts — reward
+  if (greenPct > 50)    score += 150
+  else if (greenPct > 25) score += 80
+  else if (greenPct > 10) score += 20
+  else                  score -= 80
 
-  // Penalise if no campaign data (can't fully assess)
-  if (!hasCampaignData) score -= 70
+  // Never engaged
+  if (neverEngPct > 40) score -= 150
+  else if (neverEngPct > 25) score -= 80
+  else if (neverEngPct > 10) score -= 30
+
+  // Spam risk (industry threshold: <0.1%)
+  if (spamPct > 5)  score -= 150
+  else if (spamPct > 2) score -= 80
+  else if (spamPct > 0.5) score -= 30
+
+  // Bounces
+  if (bouncePct > 5)  score -= 100
+  else if (bouncePct > 2) score -= 50
 
   return Math.max(0, Math.min(999, score))
 }
@@ -132,49 +102,85 @@ export async function POST(req: NextRequest) {
   if (error) return error
 
   const body = await req.json()
-  // Use provided values, fall back to env vars
   const apiKey     = (body.ghl_api_key  || process.env.GHL_API_KEY     || '').trim()
   const locationId = (body.location_id  || process.env.GHL_LOCATION_ID || '').trim()
   const domain     = (body.domain       || process.env.GHL_DOMAIN       || 'phxhomeremodeling.com').trim()
 
-  if (!apiKey || !locationId) return NextResponse.json({ error: 'ghl_api_key and location_id required. Set GHL_API_KEY and GHL_LOCATION_ID in .env.local or enter them in the form.' }, { status: 400 })
+  if (!apiKey || !locationId) return NextResponse.json({ error: 'ghl_api_key and location_id required' }, { status: 400 })
 
   try {
-    const { contacts, total } = await fetchContactSample(apiKey, locationId)
-    const segments = segmentContacts(contacts, total)
-    const hasCampaignData = false // Campaign stats require additional GHL API scope
-    const healthScore = calcScore(segments, hasCampaignData)
+    // Run all tag queries in parallel — fast, no full contact pull needed
+    const [
+      total,
+      google, microsoft, yahoo, otherProvider,
+      newContacts, neverEngaged, neverSent,
+      green, red, catchall, suspicious, freeEmail, notFound, bounced, spam,
+    ] = await Promise.all([
+      getTotalContacts(apiKey, locationId),
+      countByTag(apiKey, locationId, 'hti email provider check = is google'),
+      countByTag(apiKey, locationId, 'hti email provider check = is microsoft'),
+      countByTag(apiKey, locationId, 'hti email provider check = is yahoo'),
+      countByTag(apiKey, locationId, 'hti email provider check = is other email provider'),
+      countByTag(apiKey, locationId, 'hti contact = is new contact'),
+      countByTag(apiKey, locationId, 'hti engagement check = never engaged'),
+      countByTag(apiKey, locationId, 'hti engagement check = never sent'),
+      countByTag(apiKey, locationId, 'hti status = green (send responsibly)'),
+      countByTag(apiKey, locationId, 'hti status = red (do not send)'),
+      countByTag(apiKey, locationId, 'hti quality check = is catchall domain'),
+      countByTag(apiKey, locationId, 'hti quality check = is suspicious'),
+      countByTag(apiKey, locationId, 'hti quality check = is free'),
+      countByTag(apiKey, locationId, 'hti valid check = not found'),
+      countByTag(apiKey, locationId, '01. status -> email engagement manager: email bounced'),
+      countByTag(apiKey, locationId, 'spam likely'),
+    ])
 
-    const coldPct   = segments.total > 0 ? ((segments.cold + segments.dead) / segments.total * 100).toFixed(0) : '0'
-    const activePct = segments.total > 0 ? (segments.active / segments.total * 100).toFixed(0) : '0'
-    const newPct    = segments.total > 0 ? (segments.new    / segments.total * 100).toFixed(0) : '0'
+    const scannedTotal = google + microsoft + yahoo + otherProvider || total
+    const pct = (n: number, d = total) => d > 0 ? (n / d * 100).toFixed(1) : '0'
+
+    const data = { total, red, green, neverEngaged, spam, bounced }
+    const healthScore = calcScore(data)
+
+    const active = Math.max(0, green - newContacts)
+    const cold   = Math.max(0, total - green - red - neverEngaged - neverSent)
 
     const dataCtx = `
 Email Health Report for ${domain} — ${new Date().toLocaleDateString('en-US', { month:'long', year:'numeric' })}
 
 SUBSCRIBER DATABASE: ${total.toLocaleString()} total contacts
-- New subscribers (added last 30 days): ~${segments.new} (${newPct}%)
-- Active (recently engaged): ~${segments.active} (${activePct}%)
-- Warming up (30-90 days): ~${segments.warmingUp}
-- Cold (90 days - 1 year no activity): ~${segments.cold}
-- Dead weight / never engaged: ~${segments.dead}
-- Spam risk contacts: ~${segments.spamRisk}
-- Cold + dead %: ${coldPct}% of total list
+HitTheInbox scan data:
 
-NOTES:
-- Segmentation based on contact activity dates and engagement tags from GHL
-- Email campaign statistics unavailable (requires campaign API scope)
-- Sample: 100 contacts analysed, scaled to full list of ${total.toLocaleString()}
+SEND STATUS:
+- Green (safe to send): ${green.toLocaleString()} (${pct(green)}%)
+- Red (do not send): ${red.toLocaleString()} (${pct(red)}%) ← CRITICAL
+- New contacts: ${newContacts.toLocaleString()}
+
+ENGAGEMENT:
+- Never engaged: ${neverEngaged.toLocaleString()} (${pct(neverEngaged)}%)
+- Never even sent to: ${neverSent.toLocaleString()} (${pct(neverSent)}%)
+
+EMAIL QUALITY:
+- Invalid/not found: ${notFound.toLocaleString()}
+- Bounced: ${bounced.toLocaleString()} (${pct(bounced)}%)
+- Spam risk: ${spam.toLocaleString()} (${pct(spam)}%)
+- Catchall domains: ${catchall.toLocaleString()}
+- Suspicious addresses: ${suspicious.toLocaleString()}
+
+EMAIL PROVIDERS (of ${scannedTotal.toLocaleString()} scanned):
+- Google: ${google.toLocaleString()} (${pct(google, scannedTotal)}%)
+- Yahoo: ${yahoo.toLocaleString()} (${pct(yahoo, scannedTotal)}%)
+- Microsoft: ${microsoft.toLocaleString()} (${pct(microsoft, scannedTotal)}%)
+- Other: ${otherProvider.toLocaleString()} (${pct(otherProvider, scannedTotal)}%)
 
 HEALTH SCORE: ${healthScore}/999 (${scoreLabel(healthScore)})
+KEY CONCERN: ${pct(red)}% of your list is tagged "do not send" by HitTheInbox.
 `
 
     const completion = await client.chat.completions.create({
       model: MODEL,
-      max_completion_tokens: 1800,
+      max_completion_tokens: 2000,
       messages: [
-        { role: 'system', content: 'You are an email deliverability expert writing a monthly health report for Phoenix Home Remodeling (home remodeling company in Phoenix, AZ). Be direct, specific with numbers, business-focused. Return valid JSON only, no markdown.' },
-        { role: 'user', content: `Analyse this subscriber health data and return a JSON object with exactly these keys: analyst_notes (2-3 sentences), top_priority (one clear action sentence), actions_urgent (array of exactly 3 action strings), actions_medium (array of exactly 3 action strings), score_explanation (one sentence explaining the score).
+        { role: 'system', content: 'You are an email deliverability expert writing a monthly health report for Phoenix Home Remodeling (home remodeling company in Phoenix, AZ). Be direct, specific with numbers, business-focused. This data comes from HitTheInbox tags applied to contacts in GoHighLevel CRM. Return valid JSON only.' },
+        { role: 'user', content: `Write analysis for this email health report. Return JSON with: analyst_notes (2-3 sentences with specific numbers), top_priority (one urgent action), actions_urgent (array of 3 strings), actions_medium (array of 3 strings), score_explanation (one sentence).
 
 ${dataCtx}` }
       ]
@@ -192,26 +198,10 @@ ${dataCtx}` }
       domain,
       health_score: healthScore,
       score_label: scoreLabel(healthScore),
-      segments: {
-        total: segments.total,
-        new: segments.new,
-        active: segments.active,
-        warmingUp: segments.warmingUp,
-        cold: segments.cold,
-        dead: segments.dead,
-        neverEngaged: segments.neverEngaged,
-        spamRisk: segments.spamRisk,
-      },
-      stats: {
-        campaigns_analyzed: 0,
-        note: 'Campaign open/click stats require email campaign API scope. Contact your GHL admin to enable it on your Private Integration.',
-        total_sent: 0,
-        open_rate: 0,
-        click_rate: 0,
-        bounce_rate: 0,
-        spam_rate: 0,
-        unsub_rate: 0,
-      },
+      segments: { total, new: newContacts, active, warmingUp: 0, cold, dead: neverEngaged, neverEngaged, spamRisk: spam },
+      quality: { green, red, catchall, suspicious, freeEmail, notFound, bounced, spam },
+      providers: { google, microsoft, yahoo, other: otherProvider, scanned: scannedTotal },
+      stats: { campaigns_analyzed: 0, total_sent: 0, open_rate: 0, click_rate: 0, bounce_rate: parseFloat(pct(bounced)), spam_rate: parseFloat(pct(spam)), unsub_rate: 0, note: 'Campaign stats require email campaign API scope.' },
       analysis,
     })
   } catch (err: any) {

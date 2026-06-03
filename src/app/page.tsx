@@ -3137,6 +3137,51 @@ function EmailHealthReportView() {
             ))}
           </div>
 
+          {/* Email Provider Breakdown */}
+          {report.providers && report.providers.scanned > 0 && (
+            <div style={{ background:'rgba(15,20,35,0.8)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:20 }}>
+              <h3 style={{ color:'#a5b4fc', fontWeight:600, fontSize:14, margin:'0 0 14px' }}>📬 Email Provider Breakdown</h3>
+              {[
+                { label:'Google (Gmail)', count:report.providers.google, color:'#10b981' },
+                { label:'Yahoo', count:report.providers.yahoo, color:'#f59e0b' },
+                { label:'Microsoft (Outlook/Hotmail)', count:report.providers.microsoft, color:'#06b6d4' },
+                { label:'Other providers', count:report.providers.other, color:'#6366f1' },
+              ].map(p => (
+                <div key={p.label} style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}>
+                  <div style={{ width:10, height:10, borderRadius:'50%', background:p.color, flexShrink:0 }} />
+                  <span style={{ color:'rgba(148,163,184,0.7)', fontSize:13, flex:1 }}>{p.label}</span>
+                  <span style={{ color:'white', fontWeight:600, fontSize:13 }}>{p.count.toLocaleString()}</span>
+                  <span style={{ color:'rgba(148,163,184,0.3)', fontSize:11, width:44, textAlign:'right' }}>
+                    {report.providers.scanned > 0 ? `${(p.count/report.providers.scanned*100).toFixed(0)}%` : ''}
+                  </span>
+                </div>
+              ))}
+              <p style={{ color:'rgba(148,163,184,0.3)', fontSize:11, margin:'8px 0 0' }}>{report.providers.scanned.toLocaleString()} of {report.segments.total.toLocaleString()} contacts scanned by HitTheInbox</p>
+            </div>
+          )}
+
+          {/* Email Quality */}
+          {report.quality && (
+            <div style={{ background:'rgba(15,20,35,0.8)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:20 }}>
+              <h3 style={{ color:'#a5b4fc', fontWeight:600, fontSize:14, margin:'0 0 14px' }}>🔍 Email Quality</h3>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+                {[
+                  { label:'✅ Green / Safe to send', count:report.quality.green, color:'#10b981' },
+                  { label:'🚫 Red / Do not send', count:report.quality.red, color:'#f43f5e' },
+                  { label:'⚠️ Bounced', count:report.quality.bounced, color:'#f59e0b' },
+                  { label:'🚨 Spam risk', count:report.quality.spam, color:'#dc2626' },
+                  { label:'❓ Invalid/Not found', count:report.quality.notFound, color:'rgba(148,163,184,0.5)' },
+                  { label:'🔀 Catchall domain', count:report.quality.catchall, color:'rgba(148,163,184,0.5)' },
+                ].map(q => (
+                  <div key={q.label} style={{ display:'flex', justifyContent:'space-between', padding:'6px 10px', background:'rgba(99,102,241,0.04)', borderRadius:7 }}>
+                    <span style={{ color:'rgba(148,163,184,0.6)', fontSize:12 }}>{q.label}</span>
+                    <span style={{ color:q.color, fontWeight:600, fontSize:12 }}>{q.count.toLocaleString()}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Actions */}
           {(report.analysis?.actions_urgent || report.analysis?.top_priority) && (
             <div style={{ background:'rgba(244,63,94,0.05)', border:'1px solid rgba(244,63,94,0.15)', borderRadius:14, padding:20 }}>
