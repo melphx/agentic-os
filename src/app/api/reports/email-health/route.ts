@@ -21,9 +21,11 @@ const GHL_HEADERS_V1 = (apiKey: string) => ({
 // ── GHL data fetchers — tries v2 first, falls back to v1 ──────────────────
 
 async function fetchContacts(apiKey: string, locationId: string, limit = 100) {
+  // GHL v2 max is 100 per page — enforce it
+  const pageSize = Math.min(limit, 100)
   // Try v2 first
   const v2 = await fetch(
-    `https://services.leadconnectorhq.com/contacts/?locationId=${locationId}&limit=${limit}`,
+    `https://services.leadconnectorhq.com/contacts/?locationId=${locationId}&limit=${pageSize}`,
     { headers: GHL_HEADERS_V2(apiKey), signal: AbortSignal.timeout(20000), cache: 'no-store' }
   )
   if (v2.ok) {
@@ -160,7 +162,11 @@ export async function POST(req: NextRequest) {
   const { error } = await requireAuth(req)
   if (error) return error
 
-  const { ghl_api_key, location_id, domain = 'phxhomeremodeling.com' } = await req.json()
+  const body = await req.json()
+  const ghl_api_key = (body.ghl_api_key || '').trim()
+  const location_id = (body.location_id || '').trim()
+  const domain = (body.domain || 'phxhomeremodeling.com').trim()
+  console.log('[email-health] token prefix:', ghl_api_key.slice(0, 15), 'location:', location_id)
   if (!ghl_api_key || !location_id) {
     return NextResponse.json({ error: 'ghl_api_key and location_id required' }, { status: 400 })
   }
@@ -168,7 +174,7 @@ export async function POST(req: NextRequest) {
   try {
     // 1. Fetch data
     const [contacts, campaigns, domainInfo] = await Promise.all([
-      fetchContacts(ghl_api_key, location_id, 500),
+      fetchContacts(ghl_api_key, location_id, 100),
       fetchEmailCampaigns(ghl_api_key, location_id),
       fetchDomainReputation(domain),
     ])
