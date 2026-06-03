@@ -1,3 +1,12 @@
+export async function GET(req: NextRequest) {
+  const { error } = await requireAuth(req)
+  if (error) return error
+  return NextResponse.json({
+    configured: !!(process.env.GHL_API_KEY && process.env.GHL_LOCATION_ID),
+    domain: process.env.GHL_DOMAIN || 'phxhomeremodeling.com',
+  })
+}
+
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
 import OpenAI from 'openai'

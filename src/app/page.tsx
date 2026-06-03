@@ -2979,11 +2979,13 @@ function EmailHealthReportView() {
   const [domain, setDomain] = useState('phxhomeremodeling.com')
   const [envLoaded, setEnvLoaded] = useState(false)
 
-  // Try to load from env via a quick probe — if it succeeds with empty fields, env vars are set
+  // Fast GET check — just reads env vars, no GHL call
   useEffect(() => {
-    fetch('/api/reports/email-health', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ _probe: true }) })
+    fetch('/api/reports/email-health')
       .then(r => r.json())
-      .then(d => { if (!d.error?.includes('ghl_api_key')) setEnvLoaded(true) })
+      .then(d => {
+        if (d.configured) { setEnvLoaded(true); if (d.domain) setDomain(d.domain) }
+      })
       .catch(() => {})
   }, [])
   const [loading, setLoading] = useState(false)
