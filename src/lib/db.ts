@@ -18,7 +18,26 @@ export function getDb(): Database.Database {
   _db.pragma('journal_mode = WAL')
   _db.pragma('foreign_keys = ON')
   initSchema(_db)
+  seedAdminUser(_db)
   return _db
+}
+
+// Auto-seed admin user from env vars on first startup
+function seedAdminUser(db: Database.Database) {
+  const email = process.env.ADMIN_EMAIL
+  const password = process.env.ADMIN_PASSWORD
+  if (!email || !password) return
+  try {
+    // Add role column if missing
+    try { db.exec("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'admin'") } catch {}
+    // Check if any user exists
+    const count = (db.prepare('SELECT COUNT(*) as n FROM users').get() as { n: number }).n
+    if (count === 0) {
+      const { hashSync } = require('bcryptjs')
+      const hash = hashSync(password, 10)
+      db.prepare("INSERT OR IGNORE INTO users (email, password_hash, role) VALUES (?, ?, 'admin')").run(email, hash)
+    }
+  } catch {}
 }
 
 function initSchema(db: Database.Database) {
@@ -119,6 +138,10 @@ function initSchema(db: Database.Database) {
       content TEXT NOT NULL,
       created_at TEXT DEFAULT (datetime('now'))
     );
+
+    -- Add role column to users if missing (migration)
+    CREATE TABLE IF NOT EXISTS users_new_check (id INTEGER PRIMARY KEY);
+    DROP TABLE IF EXISTS users_new_check;
 
     -- Seed default agents if table is empty
     INSERT OR IGNORE INTO agents (id, name, short, description, accent, accent_dark) VALUES
@@ -978,3 +1001,67 @@ export function createOutputTemplate(data: Omit<OutputTemplate,'id'|'created_at'
   return getDb().prepare('SELECT * FROM output_templates WHERE id=?').get(info.lastInsertRowid) as OutputTemplate
 }
 export function deleteOutputTemplate(id: number) { ensureOutputTemplatesTable(); getDb().prepare('DELETE FROM output_templates WHERE id=?').run(id) }
+
+// ── Pipeline Runs + Approval Gates ────────────────────────────────────────
+
+export function ensurePipelineRunsTable() {
+  getDb().exec(`
+    CREATE TABLE IF NOT EXISTS pipeline_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      pipeline_id INTEGER REFERENCES pipelines(id),
+      status TEXT DEFAULT 'running',
+      current_step INTEGER DEFAULT 0,
+      last_result TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now')),
+      completed_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS pipeline_approvals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id INTEGER REFERENCES pipeline_runs(id) ON DELETE CASCADE,
+      pipeline_id INTEGER,
+      pipeline_name TEXT,
+      step_index INTEGER,
+      step_title TEXT,
+      step_context TEXT DEFAULT '',
+      status TEXT DEFAULT 'pending',
+      note TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now')),
+      resolved_at TEXT
+    )
+  `)
+}
+
+export function createPipelineRun(pipelineId: number): number {
+  ensurePipelineRunsTable()
+  const info = getDb().prepare('INSERT INTO pipeline_runs (pipeline_id, status) VALUES (?,\'running\')').run(pipelineId)
+  return info.lastInsertRowid as number
+}
+
+export function updatePipelineRun(runId: number, fields: { status?: string; current_step?: number; last_result?: string; completed_at?: string }) {
+  ensurePipelineRunsTable()
+  const allowed = ['status','current_step','last_result','completed_at']
+  const updates = Object.entries(fields).filter(([k]) => allowed.includes(k)).map(([k]) => `${k}=@${k}`).join(',')
+  if (!updates) return
+  getDb().prepare(`UPDATE pipeline_runs SET ${updates} WHERE id=@id`).run({ ...fields, id: runId })
+}
+
+export function createApproval(data: { run_id: number; pipeline_id: number; pipeline_name: string; step_index: number; step_title: string; step_context: string }): number {
+  ensurePipelineRunsTable()
+  const info = getDb().prepare('INSERT INTO pipeline_approvals (run_id,pipeline_id,pipeline_name,step_index,step_title,step_context) VALUES (@run_id,@pipeline_id,@pipeline_name,@step_index,@step_title,@step_context)').run(data)
+  return info.lastInsertRowid as number
+}
+
+export function getPendingApprovals() {
+  ensurePipelineRunsTable()
+  return getDb().prepare("SELECT * FROM pipeline_approvals WHERE status='pending' ORDER BY created_at DESC").all()
+}
+
+export function resolveApproval(id: number, status: 'approved' | 'rejected', note = '') {
+  ensurePipelineRunsTable()
+  getDb().prepare("UPDATE pipeline_approvals SET status=?,note=?,resolved_at=datetime('now') WHERE id=?").run(status, note, id)
+}
+
+export function getApprovalForRun(runId: number) {
+  ensurePipelineRunsTable()
+  return getDb().prepare("SELECT * FROM pipeline_approvals WHERE run_id=? AND status='pending' ORDER BY id DESC LIMIT 1").get(runId)
+}

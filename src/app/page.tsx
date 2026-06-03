@@ -1245,6 +1245,7 @@ function AgentDetailView({ agent, onBack, onRunTask, newTaskId, onNewTaskConsume
             <TaskTemplatesPanel agent={agent} onUseTemplate={(title, desc, type) => onRunTask(agent, { title, description: desc, type })} />
           <AgentDrivePanel agent={agent} />
           <AgentPromptEditor agent={agent} />
+          <PromptVersionHistory agent={agent} />
           </div>
         ) : tab === 'integrations' ? (
           <div style={{ flex: 1, overflowY: 'auto' }}>
@@ -1634,7 +1635,7 @@ function CreatePipelineModal({ agents, onClose }: { agents: Agent[]; onClose: ()
                 <div>
                   <label style={labelStyle}>TYPE</label>
                   <select value={step.type} onChange={e => updateStep(i, 'type', e.target.value)} style={{ ...inputStyle, fontFamily: 'inherit' }}>
-                    {['general','code','search','scrape','browser','file','api'].map(t => <option key={t} value={t} style={{ background: '#0f1623' }}>{t}</option>)}
+                    {['general','code','search','scrape','browser','file','api','approval'].map(t => <option key={t} value={t} style={{ background: '#0f1623' }}>{t === 'approval' ? '⏳ approval (gate)' : t}</option>)}
                   </select>
                 </div>
               </div>
@@ -2772,6 +2773,208 @@ function HermesView({ messages, onSend, loading }: { messages: Message[]; onSend
 }
 
 
+// ── Prompt Version History ────────────────────────────────────────────────
+
+function PromptVersionHistory({ agent }: { agent: Agent }) {
+  const [versions, setVersions] = useState<any[]>([])
+  const [preview, setPreview] = useState<any | null>(null)
+  const [restoring, setRestoring] = useState(false)
+  const [open, setOpen] = useState(false)
+
+  async function load() {
+    const r = await fetch(`/api/agents/${agent.id}/versions`)
+    if (r.ok) setVersions(await r.json())
+  }
+
+  async function restore(v: any) {
+    setRestoring(true)
+    await fetch(`/api/agents/${agent.id}/prompt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: v.prompt }),
+    })
+    setRestoring(false)
+    setPreview(null)
+    setOpen(false)
+  }
+
+  return (
+    <div style={{ padding: '8px 24px 0' }}>
+      <button onClick={() => { setOpen(o => !o); if (!open) load() }}
+        style={{ background: 'none', border: 'none', color: 'rgba(148,163,184,0.4)', fontSize: 11, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+        <SlidersHorizontal size={11} /> {open ? 'Hide' : 'Version history'}
+      </button>
+      {open && (
+        <div style={{ marginTop: 8, background: 'rgba(99,102,241,0.04)', border: '1px solid rgba(99,102,241,0.1)', borderRadius: 10, overflow: 'hidden' }}>
+          {versions.length === 0 && <p style={{ color: 'rgba(148,163,184,0.3)', fontSize: 12, padding: '10px 14px', margin: 0 }}>No versions saved yet</p>}
+          {versions.map((v:any) => (
+            <div key={v.id} style={{ padding: '8px 14px', borderBottom: '1px solid rgba(99,102,241,0.07)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ color: 'rgba(148,163,184,0.5)', fontSize: 11 }}>{new Date(v.created_at).toLocaleString()}</span>
+                {v.note && <span style={{ color: '#a5b4fc', fontSize: 11, marginLeft: 8 }}>{v.note}</span>}
+                <p style={{ color: 'rgba(148,163,184,0.4)', fontSize: 11, margin: '2px 0 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.prompt.slice(0, 80)}</p>
+              </div>
+              <button onClick={() => setPreview(preview?.id === v.id ? null : v)}
+                style={{ padding: '3px 8px', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 5, color: '#a5b4fc', fontSize: 10, cursor: 'pointer' }}>
+                {preview?.id === v.id ? 'Hide' : 'Preview'}
+              </button>
+              <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }} onClick={() => restore(v)} disabled={restoring}
+                style={{ padding: '3px 8px', background: `${agent.accent}20`, border: `1px solid ${agent.accent}40`, borderRadius: 5, color: agent.accent, fontSize: 10, cursor: 'pointer' }}>
+                Restore
+              </motion.button>
+            </div>
+          ))}
+          {preview && (
+            <div style={{ padding: '10px 14px', background: 'rgba(0,0,0,0.2)' }}>
+              <p style={{ color: 'rgba(148,163,184,0.4)', fontSize: 10, margin: '0 0 4px' }}>PREVIEW</p>
+              <pre style={{ color: 'rgba(148,163,184,0.7)', fontSize: 11, whiteSpace: 'pre-wrap', margin: 0, lineHeight: 1.6 }}>{preview.prompt}</pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Output Templates Panel ────────────────────────────────────────────────
+
+function OutputTemplatesPanel() {
+  const [templates, setTemplates] = useState<any[]>([])
+  const [name, setName] = useState('')
+  const [format, setFormat] = useState('markdown')
+  const [tmpl, setTmpl] = useState('# {{title}}
+
+{{result}}
+
+---
+*Generated by {{agent}} on {{date}}*')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => { load() }, [])
+  async function load() { const r = await fetch('/api/output-templates'); if(r.ok) setTemplates(await r.json()) }
+  async function create() {
+    if (!name.trim()) return
+    setSaving(true)
+    await fetch('/api/output-templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, format, template: tmpl }) })
+    setName(''); setSaving(false); load()
+  }
+  async function remove(id: number) { await fetch(`/api/output-templates?id=${id}`, { method: 'DELETE' }); load() }
+
+  const inp = { background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:8, padding:'8px 10px', color:'white', fontSize:12, outline:'none', width:'100%', boxSizing:'border-box' as const }
+
+  return (
+    <div style={{ background:'rgba(15,20,35,0.8)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:20, marginBottom:16 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:14 }}>
+        <Layers size={14} color="#a5b4fc" />
+        <span style={{ color:'white', fontWeight:600, fontSize:14 }}>Output Templates</span>
+        <span style={{ fontSize:11, color:'rgba(148,163,184,0.4)' }}>— format task results automatically</span>
+      </div>
+      <div style={{ display:'flex', flexDirection:'column', gap:8, marginBottom:12 }}>
+        <div style={{ display:'flex', gap:8 }}>
+          <input value={name} onChange={e=>setName(e.target.value)} placeholder="Template name" style={{ ...inp, flex:1 }}/>
+          <select value={format} onChange={e=>setFormat(e.target.value)} style={{ ...inp, width:120, flex:'none', fontFamily:'inherit' }}>
+            <option value="markdown" style={{background:'#0f1623'}}>Markdown</option>
+            <option value="structured" style={{background:'#0f1623'}}>Structured</option>
+            <option value="json" style={{background:'#0f1623'}}>JSON</option>
+          </select>
+        </div>
+        <textarea value={tmpl} onChange={e=>setTmpl(e.target.value)} rows={4}
+          style={{ ...inp, resize:'vertical' as const, lineHeight:1.5, fontFamily:'monospace', fontSize:11 }} />
+        <p style={{ color:'rgba(148,163,184,0.3)', fontSize:10, margin:0 }}>Variables: {"{{result}}"} {"{{title}}"} {"{{agent}}"} {"{{date}}"}</p>
+        <motion.button whileHover={{scale:1.01}} whileTap={{scale:0.98}} onClick={create} disabled={saving||!name.trim()}
+          style={{ padding:'8px', background:'linear-gradient(135deg,#4338ca,#6366f1)', border:'none', borderRadius:8, color:'white', fontSize:12, fontWeight:600, cursor:'pointer', opacity:!name.trim()?0.5:1 }}>
+          {saving?'Saving…':'Save Template'}
+        </motion.button>
+      </div>
+      {templates.length === 0 && <p style={{ color:'rgba(148,163,184,0.3)', fontSize:12, textAlign:'center', margin:0 }}>No templates yet</p>}
+      {templates.map((t:any) => (
+        <div key={t.id} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'7px 0', borderBottom:'1px solid rgba(99,102,241,0.07)' }}>
+          <div>
+            <span style={{ color:'white', fontSize:13 }}>{t.name}</span>
+            <span style={{ color:'rgba(148,163,184,0.3)', fontSize:11, marginLeft:8 }}>{t.format}</span>
+          </div>
+          <button onClick={()=>remove(t.id)} style={{ background:'none', border:'none', color:'rgba(244,63,94,0.4)', cursor:'pointer' }}><Trash2 size={12}/></button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Pending Approvals Badge + Modal ────────────────────────────────────────
+
+function PendingApprovalsBadge({ onClick }: { onClick: () => void }) {
+  const [count, setCount] = useState(0)
+  useEffect(() => {
+    const check = async () => { const r = await fetch('/api/approvals'); if(r.ok) { const d = await r.json(); setCount(d.length) } }
+    check()
+    const interval = setInterval(check, 15000)
+    return () => clearInterval(interval)
+  }, [])
+  if (count === 0) return null
+  return (
+    <motion.button whileHover={{scale:1.05}} whileTap={{scale:0.95}} onClick={onClick}
+      style={{ display:'flex', alignItems:'center', gap:6, padding:'5px 10px', background:'rgba(245,158,11,0.12)', border:'1px solid rgba(245,158,11,0.3)', borderRadius:8, color:'#fcd34d', fontSize:12, fontWeight:600, cursor:'pointer', flexShrink:0 }}>
+      ⏳ {count} approval{count > 1 ? 's' : ''} waiting
+    </motion.button>
+  )
+}
+
+function ApprovalsModal({ onClose }: { onClose: () => void }) {
+  const [approvals, setApprovals] = useState<any[]>([])
+  const [notes, setNotes] = useState<Record<number,string>>({})
+  const [acting, setActing] = useState<number|null>(null)
+
+  useEffect(() => { load() }, [])
+  async function load() { const r = await fetch('/api/approvals'); if(r.ok) setApprovals(await r.json()) }
+
+  async function act(id: number, action: 'approve'|'reject') {
+    setActing(id)
+    await fetch('/api/approvals', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ approval_id: id, action, note: notes[id] || '' }) })
+    setActing(null)
+    load()
+  }
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:400 }}>
+      <motion.div initial={{opacity:0,scale:0.95}} animate={{opacity:1,scale:1}}
+        style={{ width:560, maxHeight:'80vh', overflowY:'auto', background:'#0f1623', border:'1px solid rgba(245,158,11,0.25)', borderRadius:16, padding:24 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', marginBottom:18 }}>
+          <span style={{ color:'white', fontWeight:700, fontSize:15 }}>⏳ Pending Approvals</span>
+          <button onClick={onClose} style={{ background:'none', border:'none', color:'rgba(148,163,184,0.5)', cursor:'pointer', fontSize:18 }}>✕</button>
+        </div>
+        {approvals.length === 0 && <p style={{ color:'rgba(148,163,184,0.4)', textAlign:'center', padding:'20px 0' }}>No pending approvals</p>}
+        {approvals.map((a:any) => (
+          <div key={a.id} style={{ background:'rgba(245,158,11,0.05)', border:'1px solid rgba(245,158,11,0.15)', borderRadius:12, padding:16, marginBottom:12 }}>
+            <div style={{ marginBottom:8 }}>
+              <span style={{ color:'white', fontWeight:600, fontSize:14 }}>{a.step_title}</span>
+              <span style={{ color:'rgba(148,163,184,0.4)', fontSize:11, marginLeft:8 }}>{a.pipeline_name}</span>
+            </div>
+            {a.step_context && (
+              <div style={{ background:'rgba(0,0,0,0.3)', borderRadius:8, padding:'8px 10px', marginBottom:10, fontSize:12, color:'rgba(148,163,184,0.6)', maxHeight:100, overflowY:'auto' }}>
+                {a.step_context}
+              </div>
+            )}
+            <input value={notes[a.id]||''} onChange={e=>setNotes(n=>({...n,[a.id]:e.target.value}))}
+              placeholder="Optional note (reason for approval/rejection)"
+              style={{ background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:7, padding:'6px 10px', color:'white', fontSize:12, outline:'none', width:'100%', boxSizing:'border-box', marginBottom:10 }}/>
+            <div style={{ display:'flex', gap:8 }}>
+              <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.98}} onClick={()=>act(a.id,'approve')} disabled={acting===a.id}
+                style={{ flex:1, padding:'8px', background:'rgba(16,185,129,0.15)', border:'1px solid rgba(16,185,129,0.3)', borderRadius:8, color:'#10b981', fontWeight:600, fontSize:13, cursor:'pointer' }}>
+                {acting===a.id?'…':'✓ Approve'}
+              </motion.button>
+              <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.98}} onClick={()=>act(a.id,'reject')} disabled={acting===a.id}
+                style={{ flex:1, padding:'8px', background:'rgba(244,63,94,0.1)', border:'1px solid rgba(244,63,94,0.25)', borderRadius:8, color:'#f43f5e', fontWeight:600, fontSize:13, cursor:'pointer' }}>
+                ✕ Reject
+              </motion.button>
+            </div>
+          </div>
+        ))}
+      </motion.div>
+    </div>
+  )
+}
+
+
 // ── Dashboard View ─────────────────────────────────────────────────────────
 
 function DashboardView({ agents, metrics, activity, onSelectAgent }: { agents: Agent[]; metrics: Metrics | null; activity: LogEntry[]; onSelectAgent: (a: Agent) => void }) {
@@ -3143,6 +3346,7 @@ function SettingsView({ agents = [] }: { agents?: Agent[] }) {
     <div style={{ padding: 24, maxWidth: 520 }}>
       <h1 style={{ color: 'white', fontWeight: 700, fontSize: 22, margin: '0 0 24px' }}>Settings</h1>
       <UsersPanel />
+      <OutputTemplatesPanel />
       <CompanyKbPanel />
       <WebhooksPanel />
       <DriveSyncPanel agents={agents} />
@@ -3450,6 +3654,7 @@ export default function Page() {
 
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [showSemanticSearch, setShowSemanticSearch] = useState(false)
+  const [showApprovals, setShowApprovals] = useState(false)
 
   return (
     <div style={{ display: 'flex', height: '100vh', background: '#080c14', color: 'white', fontFamily: 'Inter, sans-serif', overflow: 'hidden', position: 'relative' }}>
@@ -3459,6 +3664,9 @@ export default function Page() {
       <Sidebar view={view} setView={v => { setView(v); setSelectedAgent(null) }} agents={agents} onLogout={handleLogout} onSearch={() => setShowSearch(true)} />
 
       <div style={{ flex: 1, overflowY: 'auto', position: 'relative' }}>
+        <div style={{ position: 'absolute', top: 12, right: 16, zIndex: 20 }}>
+          <PendingApprovalsBadge onClick={() => setShowApprovals(true)} />
+        </div>
         <AnimatePresence mode="wait">
           <motion.div key={liveSelectedAgent?.id || view} initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 }} transition={{ duration: 0.18 }} style={{ minHeight: '100%' }}>
             {mainContent()}
@@ -3477,6 +3685,9 @@ export default function Page() {
       <ToastContainer toasts={toasts} remove={id => setToasts(t => t.filter(x => x.id !== id))} />
       <AnimatePresence>
         {showSemanticSearch && <SemanticSearchModal onClose={() => setShowSemanticSearch(false)} onNavigate={(agentId) => { const ag = agents.find(a => a.id === agentId); if(ag) setSelectedAgent(ag) }} />}
+      </AnimatePresence>
+      <AnimatePresence>
+        {showApprovals && <ApprovalsModal onClose={() => setShowApprovals(false)} />}
       </AnimatePresence>
     </div>
   )
