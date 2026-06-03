@@ -3056,8 +3056,8 @@ function EmailHealthReportView() {
               <input value={domain} onChange={e=>setDomain(e.target.value)} style={inp}/>
             </div>
             {error && <div style={{ padding:'8px 12px', background:'rgba(244,63,94,0.08)', border:'1px solid rgba(244,63,94,0.2)', borderRadius:8, color:'#f43f5e', fontSize:12 }}>{error}</div>}
-            <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.98}} onClick={generate} disabled={loading||(!envLoaded && (!apiKey.trim()||!locationId.trim()))}
-              style={{ padding:12, background:'linear-gradient(135deg,#4338ca,#6366f1)', border:'none', borderRadius:9, color:'white', fontWeight:700, fontSize:14, cursor:'pointer', opacity:(!envLoaded && (!apiKey.trim()||!locationId.trim()))?0.5:1 }}>
+            <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.98}} onClick={generate} disabled={loading}
+              style={{ padding:12, background:'linear-gradient(135deg,#4338ca,#6366f1)', border:'none', borderRadius:9, color:'white', fontWeight:700, fontSize:14, cursor:'pointer', opacity:loading?0.6:1 }}>
               {loading ? '⏳ Generating report…' : '⚡ Generate Report'}
             </motion.button>
           </div>
