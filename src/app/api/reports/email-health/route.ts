@@ -12,11 +12,10 @@ const MODEL = process.env.OPENAI_MODEL || 'gpt-5.4'
 const GHL_HEADERS_V2 = (apiKey: string) => ({
   'Authorization': `Bearer ${apiKey}`,
   'Version': '2021-07-28',
-  'Content-Type': 'application/json',
+  // No Content-Type on GET requests — GHL v2 rejects it
 })
 const GHL_HEADERS_V1 = (apiKey: string) => ({
   'Authorization': `Bearer ${apiKey}`,
-  'Content-Type': 'application/json',
 })
 
 // ── GHL data fetchers — tries v2 first, falls back to v1 ──────────────────
