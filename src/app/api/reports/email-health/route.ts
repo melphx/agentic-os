@@ -119,7 +119,7 @@ async function fetchWorkflowCampaignStats(apiKey: string, locationId: string, mo
     }
   } catch (e: any) {
     console.error('[workflow stats]', e.message)
-    return { ...totals, campaigns: 0, openRate: 0, clickRate: 0, bounceRate: 0, complaintRate: 0, unsubRate: 0 }
+    return { ...totals, campaigns: 0, openRate: 0, clickRate: 0, bounceRate: 0, complaintRate: 0, unsubRate: 0, workflows: [] }
   }
 }
 
