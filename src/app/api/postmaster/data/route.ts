@@ -39,22 +39,23 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: `Postmaster API error: ${domainsData.error?.message || domainsRes.status}`, domains: null }, { status: 200 })
     }
 
-    // Get last 7 days of traffic stats
+    // Get last 7 days of traffic stats (including today)
     const today = new Date()
     const dates = Array.from({ length: 7 }, (_, i) => {
       const d = new Date(today)
-      d.setDate(d.getDate() - i - 1)
+      d.setDate(d.getDate() - i)
       return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
     })
 
     const statsResults = await Promise.all(
-      dates.slice(0, 3).map(async date => {
-        const res = await fetch(
-          `https://gmailpostmastertools.googleapis.com/v1/domains/${encodeURIComponent(domain)}/trafficStats/${date.replace(/-/g,'')}`,
-          { headers, signal: AbortSignal.timeout(10000) }
-        )
+      dates.slice(0, 5).map(async date => {
+        const dateStr = date.replace(/-/g,'')
+        const url = `https://gmailpostmastertools.googleapis.com/v1/domains/${encodeURIComponent(domain)}/trafficStats/${dateStr}`
+        const res = await fetch(url, { headers, signal: AbortSignal.timeout(10000) })
+        const body = await res.json()
+        console.log(`[Postmaster stats ${date}]`, res.status, JSON.stringify(body).slice(0, 200))
         if (!res.ok) return null
-        return res.json()
+        return body
       })
     )
 
