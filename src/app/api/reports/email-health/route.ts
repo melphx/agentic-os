@@ -87,6 +87,26 @@ async function fetchWorkflowCampaignStats(apiKey: string, locationId: string, mo
       totals.complained  += s.complained   || 0
       totals.unsubscribed+= s.unsubscribed || 0
     }
+    // Build per-workflow breakdown
+    const workflowDetails = campaigns.slice(0, 20).map((c: any, i: number) => {
+      const s = statsResults[i]
+      if (!s || s.sent === 0) return null
+      return {
+        id: c.id,
+        name: c.name,
+        status: c.status,
+        sent: s.sent || 0,
+        opened: s.opened || 0,
+        clicked: s.clicked || 0,
+        bounced: s.permanentFail || s.bounced || 0,
+        complained: s.complained || 0,
+        unsubscribed: s.unsubscribed || 0,
+        openRate: s.openRate || (s.sent > 0 ? s.opened / s.sent * 100 : 0),
+        clickRate: s.clickRate || (s.sent > 0 ? s.clicked / s.sent * 100 : 0),
+        complaintRate: s.complaintRate || (s.sent > 0 ? s.complained / s.sent * 100 : 0),
+      }
+    }).filter(Boolean)
+
     return {
       ...totals,
       campaigns: campaignCount,
@@ -95,6 +115,7 @@ async function fetchWorkflowCampaignStats(apiKey: string, locationId: string, mo
       bounceRate:    totals.sent > 0 ? totals.bounced     / totals.sent * 100 : 0,
       complaintRate: totals.sent > 0 ? totals.complained  / totals.sent * 100 : 0,
       unsubRate:     totals.sent > 0 ? totals.unsubscribed/ totals.sent * 100 : 0,
+      workflows: workflowDetails,
     }
   } catch (e: any) {
     console.error('[workflow stats]', e.message)
@@ -255,6 +276,7 @@ ${dataCtx}` }
       segments: { total, new: newContacts, active, warmingUp: 0, cold, dead: neverEngaged, neverEngaged, spamRisk: spam },
       quality: { green, red, catchall, suspicious, freeEmail, notFound, bounced, spam },
       providers: { google, microsoft, yahoo, other: otherProvider, scanned: scannedTotal },
+      workflows: campaignStats.workflows || [],
       stats: { campaigns_analyzed: campaignStats.campaigns, total_sent: campaignStats.sent, open_rate: parseFloat(campaignStats.openRate.toFixed(1)), click_rate: parseFloat(campaignStats.clickRate.toFixed(1)), bounce_rate: parseFloat(campaignStats.bounceRate.toFixed(2)), spam_rate: parseFloat(campaignStats.complaintRate.toFixed(3)), unsub_rate: parseFloat(campaignStats.unsubRate.toFixed(2)), note: campaignStats.campaigns === 0 ? 'No workflow campaigns found for this period.' : null },
       analysis,
     })

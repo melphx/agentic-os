@@ -3187,20 +3187,70 @@ function EmailHealthReportView() {
             </div>
           </div>
 
-          {/* Campaign Performance */}
+          {/* Problem Areas */}
+          {report.segments && (report.segments.warmingUp > 0 || report.segments.cold > 0 || report.segments.dead > 0) && (
+            <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
+              <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:11, letterSpacing:'0.07em', textTransform:'uppercase', marginBottom:12 }}>⚠️ Problems Costing You Revenue</div>
+              {[
+                report.segments.warmingUp > 0 && { icon:'🟡', count: report.segments.warmingUp, label: 'subscribers are losing interest', sub: 'No engagement in 1-3 months. Re-engage now before they go cold.' },
+                report.segments.cold > 0 && { icon:'🔴', count: report.segments.cold, label: 'subscribers have gone cold', sub: 'Zero engagement in 3-12 months. These are costing you deliverability.' },
+                report.segments.dead > 0 && { icon:'⚫', count: report.segments.dead, label: 'subscribers are dead weight', sub: "Haven't engaged in over a year. Stop emailing them immediately." },
+                (report.segments.spamRisk || 0) > 0 && { icon:'🚨', count: report.segments.spamRisk, label: 'contacts tagged as spam risk', sub: 'Remove these to protect your sender reputation.' },
+                report.quality?.bounced > 0 && { icon:'📧', count: report.quality.bounced, label: 'bounced email addresses', sub: 'Invalid addresses hurting your deliverability score.' },
+              ].filter(Boolean).map((p: any) => (
+                <div key={p.label} style={{ display:'flex', gap:12, padding:'10px 0', borderBottom:'1px solid rgba(99,102,241,0.07)' }}>
+                  <span style={{ fontSize:16, flexShrink:0 }}>{p.icon}</span>
+                  <div>
+                    <span style={{ color:'white', fontWeight:600, fontSize:13 }}>{(p.count as number).toLocaleString()} </span>
+                    <span style={{ color:'rgba(148,163,184,0.7)', fontSize:13 }}>{p.label}</span>
+                    <p style={{ color:'rgba(148,163,184,0.4)', fontSize:12, margin:'2px 0 0' }}>{p.sub}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Campaign Performance + Workflow Table */}
           {report.stats && (
             <div style={{ background:'rgba(15,20,35,0.9)', border:`1px solid ${report.stats.campaigns_analyzed>0?'rgba(99,102,241,0.15)':'rgba(245,158,11,0.12)'}`, borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
               {report.stats.campaigns_analyzed > 0 ? (
                 <>
-                  <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:11, letterSpacing:'0.07em', textTransform:'uppercase', marginBottom:12 }}>📊 Campaign Performance ({report.stats.campaigns_analyzed} workflows)</div>
-                  <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10 }}>
-                    {[['Open Rate',`${report.stats.open_rate}%`,report.stats.open_rate>=25],['Click Rate',`${report.stats.click_rate}%`,report.stats.click_rate>=3],['Bounce Rate',`${report.stats.bounce_rate}%`,report.stats.bounce_rate<2],['Spam Rate',`${report.stats.spam_rate}%`,report.stats.spam_rate<0.1],['Unsub Rate',`${report.stats.unsub_rate}%`,report.stats.unsub_rate<0.5],['Sent',report.stats.total_sent.toLocaleString(),true]].map(([l,v,g]) => (
-                      <div key={l as string} style={{ background:'rgba(99,102,241,0.06)', borderRadius:9, padding:'10px 12px' }}>
-                        <div style={{ fontSize:10, color:'rgba(148,163,184,0.4)', marginBottom:3, textTransform:'uppercase' }}>{l as string}</div>
-                        <div style={{ fontSize:17, fontWeight:700, color:(g as boolean)?'#10b981':'#f43f5e' }}>{v as string}</div>
+                  <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:11, letterSpacing:'0.07em', textTransform:'uppercase', marginBottom:12 }}>📊 Campaign Performance — {report.stats.campaigns_analyzed} Workflow Campaigns</div>
+                  {/* Summary KPIs */}
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8, marginBottom:16 }}>
+                    {([['Open Rate',report.stats.open_rate+'%',report.stats.open_rate>=25],['Click Rate',report.stats.click_rate+'%',report.stats.click_rate>=3],['Bounce Rate',report.stats.bounce_rate+'%',report.stats.bounce_rate<2],['Spam Rate',report.stats.spam_rate+'%',report.stats.spam_rate<0.1],['Unsub Rate',report.stats.unsub_rate+'%',report.stats.unsub_rate<0.5],['Total Sent',report.stats.total_sent.toLocaleString(),true]] as [string,string,boolean][]).map(([l,v,g]) => (
+                      <div key={l} style={{ background:'rgba(99,102,241,0.06)', borderRadius:9, padding:'9px 12px' }}>
+                        <div style={{ fontSize:10, color:'rgba(148,163,184,0.4)', marginBottom:2, textTransform:'uppercase' }}>{l}</div>
+                        <div style={{ fontSize:16, fontWeight:700, color:g?'#10b981':'#f43f5e' }}>{v}</div>
                       </div>
                     ))}
                   </div>
+                  {/* Per-workflow table */}
+                  {report.workflows && report.workflows.length > 0 && (
+                    <div style={{ overflowX:'auto' }}>
+                      <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                        <thead>
+                          <tr style={{ borderBottom:'1px solid rgba(99,102,241,0.15)' }}>
+                            {['Workflow','Sent','Open %','Click %','Bounce %','Spam %'].map(h => (
+                              <th key={h} style={{ padding:'6px 10px', textAlign:'left', color:'rgba(148,163,184,0.4)', fontWeight:600, fontSize:10, textTransform:'uppercase', letterSpacing:'0.05em' }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(report.workflows as any[]).map((w: any) => (
+                            <tr key={w.id} style={{ borderBottom:'1px solid rgba(99,102,241,0.05)' }}>
+                              <td style={{ padding:'7px 10px', color:'rgba(148,163,184,0.8)', maxWidth:200, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={w.name}>{w.name.length > 35 ? w.name.slice(0,35)+'…' : w.name}</td>
+                              <td style={{ padding:'7px 10px', color:'white', fontWeight:600 }}>{w.sent.toLocaleString()}</td>
+                              <td style={{ padding:'7px 10px', color: w.openRate >= 25 ? '#10b981' : '#f59e0b', fontWeight:600 }}>{w.openRate.toFixed(1)}%</td>
+                              <td style={{ padding:'7px 10px', color: w.clickRate >= 3 ? '#10b981' : '#f59e0b', fontWeight:600 }}>{w.clickRate.toFixed(1)}%</td>
+                              <td style={{ padding:'7px 10px', color: w.bounced/w.sent*100 < 2 ? '#10b981' : '#f43f5e', fontWeight:600 }}>{w.sent>0?(w.bounced/w.sent*100).toFixed(2):0}%</td>
+                              <td style={{ padding:'7px 10px', color: w.complaintRate < 0.1 ? '#10b981' : '#f43f5e', fontWeight:600 }}>{w.complaintRate.toFixed(3)}%</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </>
               ) : (
                 <div style={{ display:'flex', gap:8, alignItems:'center' }}>
