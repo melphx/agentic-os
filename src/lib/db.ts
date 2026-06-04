@@ -1065,3 +1065,31 @@ export function getApprovalForRun(runId: number) {
   ensurePipelineRunsTable()
   return getDb().prepare("SELECT * FROM pipeline_approvals WHERE run_id=? AND status='pending' ORDER BY id DESC LIMIT 1").get(runId)
 }
+
+// ── Google Postmaster OAuth ────────────────────────────────────────────────
+
+export function ensurePostmasterOAuthTable() {
+  getDb().exec(`CREATE TABLE IF NOT EXISTS google_postmaster_oauth (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    refresh_token TEXT,
+    access_token TEXT,
+    expires_at INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`)
+}
+
+export function getPostmasterOAuth(): { refresh_token: string | null; access_token: string | null; expires_at: number } | null {
+  ensurePostmasterOAuthTable()
+  return (getDb().prepare('SELECT * FROM google_postmaster_oauth ORDER BY id DESC LIMIT 1').get() as any) ?? null
+}
+
+export function savePostmasterTokens(refreshToken: string, accessToken: string, expiresAt: number) {
+  ensurePostmasterOAuthTable()
+  getDb().prepare('DELETE FROM google_postmaster_oauth').run()
+  getDb().prepare('INSERT INTO google_postmaster_oauth (refresh_token,access_token,expires_at) VALUES (?,?,?)').run(refreshToken, accessToken, expiresAt)
+}
+
+export function clearPostmasterOAuth() {
+  ensurePostmasterOAuthTable()
+  getDb().prepare('DELETE FROM google_postmaster_oauth').run()
+}

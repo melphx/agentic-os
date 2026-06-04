@@ -2978,14 +2978,18 @@ function EmailHealthReportView() {
   const [locationId, setLocationId] = useState('')
   const [domain, setDomain] = useState('phxhomeremodeling.com')
   const [envLoaded, setEnvLoaded] = useState(false)
+  const [postmasterConnected, setPostmasterConnected] = useState(false)
+  const [postmasterData, setPostmasterData] = useState<any | null>(null)
 
   // Fast GET check — just reads env vars, no GHL call
   useEffect(() => {
     fetch('/api/reports/email-health')
       .then(r => r.json())
-      .then(d => {
-        if (d.configured) { setEnvLoaded(true); if (d.domain) setDomain(d.domain) }
-      })
+      .then(d => { if (d.configured) { setEnvLoaded(true); if (d.domain) setDomain(d.domain) } })
+      .catch(() => {})
+    fetch('/api/postmaster/oauth?action=status')
+      .then(r => r.json())
+      .then(d => setPostmasterConnected(d.connected))
       .catch(() => {})
   }, [])
   const [loading, setLoading] = useState(false)
@@ -3004,6 +3008,13 @@ function EmailHealthReportView() {
       const d = await r.json()
       if (!r.ok) { setError(d.error || 'Failed'); return }
       setReport(d)
+      // Also fetch Postmaster data if connected
+      if (postmasterConnected) {
+        fetch(`/api/postmaster/data?domain=${d.domain || domain}`)
+          .then(r => r.json())
+          .then(pd => { if (!pd.error) setPostmasterData(pd) })
+          .catch(() => {})
+      }
     } catch (e: any) { setError(e.message) }
     finally { setLoading(false) }
   }
@@ -3042,6 +3053,22 @@ function EmailHealthReportView() {
           <h3 style={{ color:'white', fontWeight:600, fontSize:15, margin:'0 0 4px' }}>Connect your GHL account</h3>
           {envLoaded && <p style={{ color:'#10b981', fontSize:12, margin:'0 0 14px' }}>✓ GHL credentials loaded from server config — fields optional</p>}
           {!envLoaded && <p style={{ color:'rgba(148,163,184,0.4)', fontSize:12, margin:'0 0 14px' }}>Or set GHL_API_KEY + GHL_LOCATION_ID in .env.local to skip this form</p>}
+          <div style={{ padding:'8px 12px', background:'rgba(99,102,241,0.05)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:8, marginBottom:14, display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+            <div>
+              <span style={{ color:'white', fontSize:12, fontWeight:600 }}>Google Postmaster Tools</span>
+              <span style={{ color: postmasterConnected ? '#10b981' : 'rgba(148,163,184,0.4)', fontSize:11, marginLeft:8 }}>{postmasterConnected ? '✓ Connected' : 'Not connected'}</span>
+            </div>
+            {!postmasterConnected
+              ? <button onClick={() => window.location.href='/api/postmaster/oauth?action=start'}
+                  style={{ padding:'4px 12px', background:'rgba(16,185,129,0.12)', border:'1px solid rgba(16,185,129,0.25)', borderRadius:6, color:'#10b981', fontSize:11, fontWeight:600, cursor:'pointer' }}>
+                  Connect
+                </button>
+              : <button onClick={async () => { await fetch('/api/postmaster/oauth?action=disconnect'); setPostmasterConnected(false); setPostmasterData(null) }}
+                  style={{ padding:'4px 10px', background:'transparent', border:'1px solid rgba(244,63,94,0.2)', borderRadius:6, color:'rgba(244,63,94,0.5)', fontSize:10, cursor:'pointer' }}>
+                  Disconnect
+                </button>
+            }
+          </div>
           <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
             <div>
               <label style={{ color:'rgba(148,163,184,0.6)', fontSize:11, marginBottom:4, display:'block' }}>GHL API KEY</label>
@@ -3179,6 +3206,35 @@ function EmailHealthReportView() {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Google Postmaster Data */}
+          {postmasterData && (
+            <div style={{ background:'rgba(15,20,35,0.8)', border:'1px solid rgba(99,102,241,0.15)', borderRadius:14, padding:20 }}>
+              <h3 style={{ color:'#a5b4fc', fontWeight:600, fontSize:14, margin:'0 0 14px' }}>🔍 Google Postmaster Tools</h3>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))', gap:10, marginBottom:12 }}>
+                {[{
+                  label: 'Domain Reputation',
+                  value: postmasterData.domain_reputation || 'N/A',
+                  color: postmasterData.domain_reputation === 'HIGH' ? '#10b981' : postmasterData.domain_reputation === 'MEDIUM' ? '#f59e0b' : postmasterData.domain_reputation === 'LOW' ? '#f97316' : '#f43f5e'
+                },
+                { label: 'DMARC Pass Rate', value: postmasterData.dmarc_success_ratio != null ? `${(postmasterData.dmarc_success_ratio*100).toFixed(1)}%` : 'N/A', color: '#10b981' },
+                { label: 'SPF Pass Rate',   value: postmasterData.spf_success_ratio   != null ? `${(postmasterData.spf_success_ratio*100).toFixed(1)}%`   : 'N/A', color: '#10b981' },
+                { label: 'DKIM Pass Rate',  value: postmasterData.dkim_success_ratio  != null ? `${(postmasterData.dkim_success_ratio*100).toFixed(1)}%`  : 'N/A', color: '#10b981' },
+                ].map(s => (
+                  <div key={s.label} style={{ background:'rgba(99,102,241,0.06)', borderRadius:10, padding:'10px 14px' }}>
+                    <div style={{ fontSize:11, color:'rgba(148,163,184,0.5)', marginBottom:4 }}>{s.label}</div>
+                    <div style={{ fontSize:18, fontWeight:700, color:s.color }}>{s.value}</div>
+                  </div>
+                ))}
+              </div>
+              {postmasterData.spam_rate != null && (
+                <p style={{ color:'rgba(148,163,184,0.6)', fontSize:12, margin:0 }}>Gmail spam rate: <strong style={{color: postmasterData.spam_rate > 0.001 ? '#f43f5e' : '#10b981'}}>{(postmasterData.spam_rate * 100).toFixed(3)}%</strong> · Data from {postmasterData.data_date}</p>
+              )}
+              {!postmasterData.spam_rate && postmasterData.domain_reputation === 'UNKNOWN' && (
+                <p style={{ color:'rgba(148,163,184,0.4)', fontSize:12, margin:0 }}>No data yet — Google requires 100+ daily sends to Gmail addresses before showing stats. Check back after your next campaign.</p>
+              )}
             </div>
           )}
 
