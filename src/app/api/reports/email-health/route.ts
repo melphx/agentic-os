@@ -59,7 +59,7 @@ async function fetchWorkflowCampaignStats(apiKey: string, locationId: string, mo
       `https://services.leadconnectorhq.com/emails/public/v2/locations/${locationId}/campaigns/workflows`,
       { headers: { ...GHL(apiKey), 'Version': '2023-02-21' }, signal: AbortSignal.timeout(15000), cache: 'no-store' }
     )
-    if (!listRes.ok) return { ...totals, campaigns: 0, openRate: 0, clickRate: 0, bounceRate: 0, complaintRate: 0, unsubRate: 0 }
+    if (!listRes.ok) return { ...totals, campaigns: 0, openRate: 0, clickRate: 0, bounceRate: 0, complaintRate: 0, unsubRate: 0, workflows: [] }
     const listData = await listRes.json() as Record<string, any>
     const campaigns: any[] = listData.campaigns || []
     const statsResults = await Promise.all(
