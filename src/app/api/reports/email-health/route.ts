@@ -55,15 +55,26 @@ async function getTotalContacts(apiKey: string, locationId: string): Promise<num
 async function fetchWorkflowCampaignStats(apiKey: string, locationId: string, month: number, year: number) {
   const totals = { sent: 0, opened: 0, clicked: 0, bounced: 0, complained: 0, unsubscribed: 0 }
   try {
-    const listRes = await fetch(
-      `https://services.leadconnectorhq.com/emails/public/v2/locations/${locationId}/campaigns/workflows`,
-      { headers: { ...GHL(apiKey), 'Version': '2023-02-21' }, signal: AbortSignal.timeout(15000), cache: 'no-store' }
-    )
-    if (!listRes.ok) return { ...totals, campaigns: 0, openRate: 0, clickRate: 0, bounceRate: 0, complaintRate: 0, unsubRate: 0, workflows: [] }
-    const listData = await listRes.json() as Record<string, any>
-    const campaigns: any[] = listData.campaigns || []
+    // Fetch all pages of workflow campaigns
+    let allCampaigns: any[] = []
+    let page = 1
+    let hasMore = true
+    while (hasMore && page <= 10) {
+      const listRes = await fetch(
+        `https://services.leadconnectorhq.com/emails/public/v2/locations/${locationId}/campaigns/workflows?page=${page}`,
+        { headers: { ...GHL(apiKey), 'Version': '2023-02-21' }, signal: AbortSignal.timeout(15000), cache: 'no-store' }
+      )
+      if (!listRes.ok) break
+      const listData = await listRes.json() as Record<string, any>
+      const batch: any[] = listData.campaigns || []
+      allCampaigns = allCampaigns.concat(batch)
+      hasMore = batch.length === 10
+      page++
+    }
+    if (allCampaigns.length === 0) return { ...totals, campaigns: 0, openRate: 0, clickRate: 0, bounceRate: 0, complaintRate: 0, unsubRate: 0, workflows: [] }
+    const campaigns = allCampaigns
     const statsResults = await Promise.all(
-      campaigns.slice(0, 20).map(async (c: any) => {
+      campaigns.map(async (c: any) => {
         const sourceId = c.sourceId || c.id
         try {
           const res = await fetch(
