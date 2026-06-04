@@ -50,6 +50,58 @@ async function getTotalContacts(apiKey: string, locationId: string): Promise<num
   return d.total || d.meta?.total || 0
 }
 
+// ── Fetch workflow campaign stats ─────────────────────────────────────────
+
+async function fetchWorkflowCampaignStats(apiKey: string, locationId: string, month: number, year: number) {
+  const totals = { sent: 0, opened: 0, clicked: 0, bounced: 0, complained: 0, unsubscribed: 0 }
+  try {
+    const listRes = await fetch(
+      `https://services.leadconnectorhq.com/emails/public/v2/locations/${locationId}/campaigns/workflows`,
+      { headers: { ...GHL(apiKey), 'Version': '2023-02-21' }, signal: AbortSignal.timeout(15000), cache: 'no-store' }
+    )
+    if (!listRes.ok) return { ...totals, campaigns: 0, openRate: 0, clickRate: 0, bounceRate: 0, complaintRate: 0, unsubRate: 0 }
+    const listData = await listRes.json() as Record<string, any>
+    const campaigns: any[] = listData.campaigns || []
+    const statsResults = await Promise.all(
+      campaigns.slice(0, 20).map(async (c: any) => {
+        const sourceId = c.sourceId || c.id
+        try {
+          const res = await fetch(
+            `https://services.leadconnectorhq.com/emails/public/v2/locations/${locationId}/campaigns/stats/workflow-campaigns/${sourceId}`,
+            { headers: { ...GHL(apiKey), 'Version': '2023-02-21' }, signal: AbortSignal.timeout(10000), cache: 'no-store' }
+          )
+          if (!res.ok) return null
+          const d = await res.json() as Record<string, any>
+          return d.stats || null
+        } catch { return null }
+      })
+    )
+    let campaignCount = 0
+    for (const s of statsResults) {
+      if (!s || s.sent === 0) continue
+      campaignCount++
+      totals.sent        += s.sent        || 0
+      totals.opened      += s.opened      || 0
+      totals.clicked     += s.clicked     || 0
+      totals.bounced     += s.permanentFail || s.bounced || 0
+      totals.complained  += s.complained   || 0
+      totals.unsubscribed+= s.unsubscribed || 0
+    }
+    return {
+      ...totals,
+      campaigns: campaignCount,
+      openRate:      totals.sent > 0 ? totals.opened      / totals.sent * 100 : 0,
+      clickRate:     totals.sent > 0 ? totals.clicked     / totals.sent * 100 : 0,
+      bounceRate:    totals.sent > 0 ? totals.bounced     / totals.sent * 100 : 0,
+      complaintRate: totals.sent > 0 ? totals.complained  / totals.sent * 100 : 0,
+      unsubRate:     totals.sent > 0 ? totals.unsubscribed/ totals.sent * 100 : 0,
+    }
+  } catch (e: any) {
+    console.error('[workflow stats]', e.message)
+    return { ...totals, campaigns: 0, openRate: 0, clickRate: 0, bounceRate: 0, complaintRate: 0, unsubRate: 0 }
+  }
+}
+
 // ── Score calculation ──────────────────────────────────────────────────────
 
 function calcScore(data: Record<string, number>): number {
