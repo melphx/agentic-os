@@ -3113,7 +3113,7 @@ function EmailHealthReportView() {
               </div>
               <div style={{ display:'flex', gap:10, padding:'9px 0' }}>
                 <span style={{ fontSize:14 }}>📊</span>
-                <span style={{ color:'rgba(148,163,184,0.5)', fontSize:13 }}>{report.stats?.campaigns_analyzed > 0 ?  : 'Campaign stats loading from workflow campaigns…'}</span>
+                <span style={{ color:'rgba(148,163,184,0.5)', fontSize:13 }}>{report.stats?.campaigns_analyzed > 0 ? report.stats.open_rate + '% open · ' + report.stats.click_rate + '% click · ' + report.stats.campaigns_analyzed + ' workflow campaigns' : 'Campaign stats loading from workflow campaigns…'}</span>
               </div>
             </div>
           </div>
