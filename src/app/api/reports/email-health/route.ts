@@ -115,6 +115,7 @@ export async function POST(req: NextRequest) {
       google, microsoft, yahoo, otherProvider,
       newContacts, neverEngaged, neverSent,
       green, red, catchall, suspicious, freeEmail, notFound, bounced, spam,
+      campaignStats,
     ] = await Promise.all([
       getTotalContacts(apiKey, locationId),
       countByTag(apiKey, locationId, 'hti email provider check = is google'),
@@ -132,12 +133,13 @@ export async function POST(req: NextRequest) {
       countByTag(apiKey, locationId, 'hti valid check = not found'),
       countByTag(apiKey, locationId, '01. status -> email engagement manager: email bounced'),
       countByTag(apiKey, locationId, 'spam likely'),
+      fetchWorkflowCampaignStats(apiKey, locationId, body.month ?? new Date().getMonth(), body.year ?? new Date().getFullYear()),
     ])
 
     const scannedTotal = google + microsoft + yahoo + otherProvider || total
     const pct = (n: number, d = total) => d > 0 ? (n / d * 100).toFixed(1) : '0'
 
-    const data = { total, red, green, neverEngaged, spam, bounced }
+    const data = { total, red, green, neverEngaged, spam, bounced, openRate: campaignStats.openRate, clickRate: campaignStats.clickRate, complaintRate: campaignStats.complaintRate }
     const healthScore = calcScore(data)
 
     const active = Math.max(0, green - newContacts)
