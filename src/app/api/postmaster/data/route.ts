@@ -30,6 +30,15 @@ export async function GET(req: NextRequest) {
     const token = await getAccessToken()
     const headers = { Authorization: `Bearer ${token}` }
 
+    // First list accessible domains to confirm access
+    const domainsRes = await fetch('https://gmailpostmastertools.googleapis.com/v1/domains', { headers, signal: AbortSignal.timeout(10000) })
+    const domainsData = await domainsRes.json() as Record<string, any>
+    console.log('[Postmaster domains]', JSON.stringify(domainsData).slice(0, 300))
+
+    if (!domainsRes.ok) {
+      return NextResponse.json({ error: `Postmaster API error: ${domainsData.error?.message || domainsRes.status}`, domains: null }, { status: 200 })
+    }
+
     // Get last 7 days of traffic stats
     const today = new Date()
     const dates = Array.from({ length: 7 }, (_, i) => {
