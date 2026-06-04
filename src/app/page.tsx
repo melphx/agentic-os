@@ -3010,7 +3010,8 @@ function EmailHealthReportView() {
       setReport(d)
       // Also fetch Postmaster data if connected
       if (postmasterConnected) {
-        fetch(`/api/postmaster/data?domain=${d.domain || domain}`)
+        const pmDomain = process.env.POSTMASTER_DOMAIN || (d.domain?.includes('phxhome') ? 'l.phxhomeremodeling.com' : d.domain)
+          fetch(`/api/postmaster/data?domain=${pmDomain || domain}`)
           .then(r => r.json())
           .then(pd => { if (!pd.error) setPostmasterData(pd) })
           .catch(() => {})

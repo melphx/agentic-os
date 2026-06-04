@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
   const { error } = await requireAuth(req)
   if (error) return error
 
-  const domain = req.nextUrl.searchParams.get('domain') || process.env.GHL_DOMAIN || 'phxhomeremodeling.com'
+  const domain = req.nextUrl.searchParams.get('domain') || process.env.POSTMASTER_DOMAIN || process.env.GHL_DOMAIN || 'l.phxhomeremodeling.com'
 
   try {
     const token = await getAccessToken()
