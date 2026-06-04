@@ -201,7 +201,7 @@ ${dataCtx}` }
       segments: { total, new: newContacts, active, warmingUp: 0, cold, dead: neverEngaged, neverEngaged, spamRisk: spam },
       quality: { green, red, catchall, suspicious, freeEmail, notFound, bounced, spam },
       providers: { google, microsoft, yahoo, other: otherProvider, scanned: scannedTotal },
-      stats: { campaigns_analyzed: 0, total_sent: 0, open_rate: 0, click_rate: 0, bounce_rate: parseFloat(pct(bounced)), spam_rate: parseFloat(pct(spam)), unsub_rate: 0, note: 'Campaign stats require email campaign API scope.' },
+      stats: { campaigns_analyzed: campaignStats.campaigns, total_sent: campaignStats.sent, open_rate: parseFloat(campaignStats.openRate.toFixed(1)), click_rate: parseFloat(campaignStats.clickRate.toFixed(1)), bounce_rate: parseFloat(campaignStats.bounceRate.toFixed(2)), spam_rate: parseFloat(campaignStats.complaintRate.toFixed(3)), unsub_rate: parseFloat(campaignStats.unsubRate.toFixed(2)), note: campaignStats.campaigns === 0 ? 'No workflow campaigns found for this period.' : null },
       analysis,
     })
   } catch (err: any) {
