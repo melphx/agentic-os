@@ -72,7 +72,14 @@ async function fetchWorkflowCampaignStats(apiKey: string, locationId: string, mo
       page++
     }
     if (allCampaigns.length === 0) return { ...totals, campaigns: 0, openRate: 0, clickRate: 0, bounceRate: 0, complaintRate: 0, unsubRate: 0, workflows: [] }
-    const campaigns = allCampaigns
+    // Deduplicate by sourceId — multiple campaigns can share a sourceId
+    const seenSourceIds = new Set<string>()
+    const campaigns = allCampaigns.filter((c: any) => {
+      const sid = c.sourceId || c.id
+      if (seenSourceIds.has(sid)) return false
+      seenSourceIds.add(sid)
+      return true
+    })
     const statsResults = await Promise.all(
       campaigns.map(async (c: any) => {
         const sourceId = c.sourceId || c.id

@@ -3215,7 +3215,7 @@ function EmailHealthReportView() {
             <div style={{ background:'rgba(15,20,35,0.9)', border:`1px solid ${report.stats.campaigns_analyzed>0?'rgba(99,102,241,0.15)':'rgba(245,158,11,0.12)'}`, borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
               {report.stats.campaigns_analyzed > 0 ? (
                 <>
-                  <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:11, letterSpacing:'0.07em', textTransform:'uppercase', marginBottom:12 }}>📊 Campaign Performance — {report.stats.campaigns_analyzed} Workflow Campaigns</div>
+                  <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:11, letterSpacing:'0.07em', textTransform:'uppercase', marginBottom:12 }}>📊 Campaign Performance — {report.stats.campaigns_analyzed} Workflow Campaigns (all-time totals)</div>
                   {/* Summary KPIs */}
                   <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8, marginBottom:16 }}>
                     {([['Open Rate',report.stats.open_rate+'%',report.stats.open_rate>=25],['Click Rate',report.stats.click_rate+'%',report.stats.click_rate>=3],['Bounce Rate',report.stats.bounce_rate+'%',report.stats.bounce_rate<2],['Spam Rate',report.stats.spam_rate+'%',report.stats.spam_rate<0.1],['Unsub Rate',report.stats.unsub_rate+'%',report.stats.unsub_rate<0.5],['Total Sent',report.stats.total_sent.toLocaleString(),true]] as [string,string,boolean][]).map(([l,v,g]) => (

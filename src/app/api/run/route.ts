@@ -614,10 +614,13 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
         tokensUsed = tokens
         let apiReq: any = {}
         try { apiReq = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || '{}') } catch {}
+        const apiMethod = (apiReq.method || 'GET').toUpperCase()
         const resp = await fetch(apiReq.url, {
-          method: apiReq.method || 'GET',
+          method: apiMethod,
           headers: apiReq.headers || {},
-          body: apiReq.body ? JSON.stringify(apiReq.body) : undefined,
+          // GET and HEAD requests cannot have a body
+          body: !['GET','HEAD'].includes(apiMethod) && apiReq.body && Object.keys(apiReq.body).length > 0
+            ? JSON.stringify(apiReq.body) : undefined,
           signal: AbortSignal.timeout(15000),
         })
         result = (await resp.text()).slice(0, 4000)
