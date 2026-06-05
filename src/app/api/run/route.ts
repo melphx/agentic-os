@@ -557,13 +557,24 @@ async function runTask(taskId: number, agentId: string, type: string, descriptio
 
       case 'code': {
         const { content: code, tokens: planTokens } = await ask(agentId,
-          'You are a code execution agent. Respond with ONLY the shell command or Python script to run, no explanation, no markdown fences.',
+          'You are a code execution agent. Respond with ONLY the shell command or Python script to run, no explanation, no markdown fences. For Python scripts, write pure Python code only.',
           description, 1024,
         )
         tokensUsed += planTokens
         addLog(taskId, agentId, 'info', `Generated code:\n${code}`)
-        const { stdout, stderr } = await execAsync(`timeout 30 bash -c ${JSON.stringify(code)}`)
-        result = stdout || stderr || '(no output)'
+
+        // Write to temp file to avoid shell escaping issues
+        const tmpFile = path.join('/tmp', `agent-code-${taskId}-${Date.now()}.py`)
+        const isPython = code.trim().startsWith('import ') || code.trim().startsWith('from ') || code.includes('print(') || code.includes('def ') || code.includes(':\n')
+        let cmdResult: { stdout: string; stderr: string }
+        if (isPython) {
+          writeFileSync(tmpFile, code)
+          cmdResult = await execAsync(`timeout 60 python3 ${tmpFile} 2>&1`, { timeout: 65000 })
+        } else {
+          cmdResult = await execAsync(`timeout 30 bash -c ${JSON.stringify(code)}`, { timeout: 35000 })
+        }
+        try { require('fs').unlinkSync(tmpFile) } catch {}
+        result = cmdResult.stdout || cmdResult.stderr || '(no output)'
         addLog(taskId, agentId, 'success', `Output:\n${result.slice(0, 2000)}`)
         break
       }
