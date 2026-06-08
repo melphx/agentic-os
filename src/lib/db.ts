@@ -1126,6 +1126,21 @@ export function clearPostmasterOAuth() {
 
 // ── Email Campaign Snapshots (for monthly delta calculations) ──────────────
 
+export interface EmailSnapshot {
+  id: number
+  snapshot_date: string
+  location_id: string
+  source_id: string
+  campaign_name: string
+  sent: number
+  opened: number
+  clicked: number
+  bounced: number
+  complained: number
+  unsubscribed: number
+  created_at: string
+}
+
 export function ensureEmailSnapshotsTable() {
   getDb().exec(`CREATE TABLE IF NOT EXISTS email_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1153,4 +1168,28 @@ export function saveEmailSnapshot(data: {
   getDb().prepare(`
     INSERT OR REPLACE INTO email_snapshots 
     (snapshot_date, location_id, source_id, campaign_name, sent, opened, clicked, bounced, complained, unsubscribed)
-   
+       VALUES (@snapshot_date, @location_id, @source_id, @campaign_name, @sent, @opened, @clicked, @bounced, @complained, @unsubscribed)
+  `).run(data)
+}
+
+export function getEmailSnapshot(snapshotDate: string, locationId: string, sourceId: string): EmailSnapshot | null {
+  ensureEmailSnapshotsTable()
+  return getDb().prepare(`
+    SELECT * FROM email_snapshots WHERE snapshot_date=? AND location_id=? AND source_id=?
+  `).get(snapshotDate, locationId, sourceId) as EmailSnapshot | null
+}
+
+export function getLatestSnapshot(locationId: string, sourceId: string): EmailSnapshot | null {
+  ensureEmailSnapshotsTable()
+  return getDb().prepare(`
+    SELECT * FROM email_snapshots WHERE location_id=? AND source_id=? ORDER BY snapshot_date DESC LIMIT 1
+  `).get(locationId, sourceId) as EmailSnapshot | null
+}
+
+export function getSnapshotDates(locationId: string): string[] {
+  ensureEmailSnapshotsTable()
+  const rows = getDb().prepare(`
+    SELECT DISTINCT snapshot_date FROM email_snapshots WHERE location_id=? ORDER BY snapshot_date DESC
+  `).all(locationId) as { snapshot_date: string }[]
+  return rows.map(r => r.snapshot_date)
+}
