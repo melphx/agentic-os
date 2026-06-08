@@ -1,21 +1,18 @@
 'use client'
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 
 export default function LoginPage() {
-  const router = useRouter()
-  const [email, setEmail] = useState('')
+  const [email, setEmail]       = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [error, setError]       = useState('')
+  const [loading, setLoading]   = useState(false)
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
-    setLoading(true)
-    setError('')
+    setLoading(true); setError('')
     try {
-      const res = await fetch('/api/auth/login', {
+      const res  = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
@@ -23,17 +20,26 @@ export default function LoginPage() {
       const data = await res.json()
       if (!res.ok) { setError(data.error || 'Login failed'); return }
       window.location.href = '/'
-    } catch {
-      setError('Network error')
-    } finally {
-      setLoading(false)
-    }
+    } catch { setError('Network error') }
+    finally { setLoading(false) }
+  }
+
+  const inputStyle = {
+    width: '100%', padding: '10px 14px', borderRadius: 10,
+    background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.25)',
+    color: 'white', fontSize: 14, outline: 'none', boxSizing: 'border-box' as const,
+    fontFamily: 'Inter, sans-serif',
   }
 
   return (
-    <div className="min-h-screen bg-[#080c14] flex items-center justify-center" style={{ fontFamily: 'Inter, sans-serif' }}>
-      {/* Animated grid background */}
-      <div className="fixed inset-0 pointer-events-none" style={{
+    <div style={{
+      minHeight: '100vh', background: '#080c14', display: 'flex',
+      alignItems: 'center', justifyContent: 'center',
+      fontFamily: 'Inter, system-ui, sans-serif',
+    }}>
+      {/* Grid background */}
+      <div style={{
+        position: 'fixed', inset: 0, pointerEvents: 'none',
         backgroundImage: 'linear-gradient(rgba(99,102,241,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(99,102,241,0.04) 1px, transparent 1px)',
         backgroundSize: '40px 40px',
       }} />
@@ -42,102 +48,84 @@ export default function LoginPage() {
         initial={{ opacity: 0, y: 24 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: 'easeOut' }}
-        className="relative w-full max-w-sm mx-4"
+        style={{ position: 'relative', width: '100%', maxWidth: 380, margin: '0 16px' }}
       >
-        {/* Glow */}
-        <div className="absolute -inset-px rounded-2xl" style={{
-          background: 'linear-gradient(135deg, rgba(99,102,241,0.3), rgba(168,85,247,0.15))',
+        {/* Glow border */}
+        <div style={{
+          position: 'absolute', inset: -1, borderRadius: 20,
+          background: 'linear-gradient(135deg, rgba(99,102,241,0.35), rgba(168,85,247,0.2))',
           filter: 'blur(1px)',
         }} />
 
-        <div className="relative rounded-2xl p-8" style={{
-          background: 'rgba(15,20,35,0.95)',
+        <div style={{
+          position: 'relative', borderRadius: 20, padding: '36px 32px',
+          background: 'rgba(15,20,35,0.97)',
           border: '1px solid rgba(99,102,241,0.2)',
           backdropFilter: 'blur(20px)',
         }}>
           {/* Logo */}
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-4" style={{
+          <div style={{ textAlign: 'center', marginBottom: 32 }}>
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              width: 64, height: 64, borderRadius: 18, marginBottom: 16,
               background: 'linear-gradient(135deg, #6366f1, #a855f7)',
-              boxShadow: '0 0 30px rgba(99,102,241,0.4)',
+              boxShadow: '0 0 32px rgba(99,102,241,0.45)',
             }}>
-              <span style={{ fontSize: 28 }}>⬡</span>
+              <span style={{ fontSize: 30 }}>⬡</span>
             </div>
-            <h1 className="text-2xl font-bold text-white tracking-tight">Claude OS</h1>
-            <p className="text-sm mt-1" style={{ color: 'rgba(148,163,184,0.7)' }}>Mission Control · Sign in</p>
+            <h1 style={{ color: 'white', fontWeight: 800, fontSize: 24, margin: 0, letterSpacing: '-0.02em' }}>Claude OS</h1>
+            <p style={{ color: 'rgba(148,163,184,0.6)', fontSize: 13, margin: '6px 0 0' }}>Mission Control · Sign in</p>
           </div>
 
-          <form onSubmit={handleLogin} className="space-y-4">
+          <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div>
-              <label className="block text-xs font-medium mb-1.5" style={{ color: 'rgba(148,163,184,0.8)' }}>
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'rgba(148,163,184,0.7)', marginBottom: 6, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
                 Email
               </label>
               <input
-                type="email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                required
-                placeholder="admin@example.com"
-                className="w-full px-4 py-2.5 rounded-lg text-sm text-white outline-none transition-all"
-                style={{
-                  background: 'rgba(99,102,241,0.08)',
-                  border: '1px solid rgba(99,102,241,0.2)',
-                  color: 'white',
-                }}
-                onFocus={e => (e.target.style.borderColor = 'rgba(99,102,241,0.6)')}
-                onBlur={e => (e.target.style.borderColor = 'rgba(99,102,241,0.2)')}
+                type="email" value={email} onChange={e => setEmail(e.target.value)}
+                required placeholder="admin@example.com" style={inputStyle}
+                onFocus={e => (e.target.style.borderColor = 'rgba(99,102,241,0.7)')}
+                onBlur={e  => (e.target.style.borderColor = 'rgba(99,102,241,0.25)')}
               />
             </div>
 
             <div>
-              <label className="block text-xs font-medium mb-1.5" style={{ color: 'rgba(148,163,184,0.8)' }}>
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'rgba(148,163,184,0.7)', marginBottom: 6, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
                 Password
               </label>
               <input
-                type="password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                required
-                placeholder="••••••••"
-                className="w-full px-4 py-2.5 rounded-lg text-sm text-white outline-none transition-all"
-                style={{
-                  background: 'rgba(99,102,241,0.08)',
-                  border: '1px solid rgba(99,102,241,0.2)',
-                  color: 'white',
-                }}
-                onFocus={e => (e.target.style.borderColor = 'rgba(99,102,241,0.6)')}
-                onBlur={e => (e.target.style.borderColor = 'rgba(99,102,241,0.2)')}
+                type="password" value={password} onChange={e => setPassword(e.target.value)}
+                required placeholder="••••••••" style={inputStyle}
+                onFocus={e => (e.target.style.borderColor = 'rgba(99,102,241,0.7)')}
+                onBlur={e  => (e.target.style.borderColor = 'rgba(99,102,241,0.25)')}
               />
             </div>
 
             {error && (
-              <motion.div
-                initial={{ opacity: 0, y: -4 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="text-sm px-3 py-2 rounded-lg"
-                style={{ background: 'rgba(244,63,94,0.15)', color: '#f43f5e', border: '1px solid rgba(244,63,94,0.3)' }}
-              >
+              <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
+                style={{ fontSize: 13, padding: '10px 14px', borderRadius: 9, background: 'rgba(244,63,94,0.12)', color: '#f43f5e', border: '1px solid rgba(244,63,94,0.25)' }}>
                 {error}
               </motion.div>
             )}
 
             <motion.button
-              type="submit"
-              disabled={loading}
-              whileHover={{ scale: 1.01 }}
-              whileTap={{ scale: 0.99 }}
-              className="w-full py-2.5 rounded-lg text-sm font-semibold text-white transition-all mt-2"
+              type="submit" disabled={loading}
+              whileHover={{ scale: loading ? 1 : 1.01 }}
+              whileTap={{ scale: loading ? 1 : 0.99 }}
               style={{
-                background: loading ? 'rgba(99,102,241,0.4)' : 'linear-gradient(135deg, #6366f1, #a855f7)',
-                boxShadow: loading ? 'none' : '0 0 20px rgba(99,102,241,0.3)',
-                cursor: loading ? 'not-allowed' : 'pointer',
+                width: '100%', padding: '11px 0', borderRadius: 10, border: 'none',
+                fontSize: 14, fontWeight: 700, color: 'white', cursor: loading ? 'not-allowed' : 'pointer',
+                background: loading ? 'rgba(99,102,241,0.35)' : 'linear-gradient(135deg, #6366f1, #a855f7)',
+                boxShadow: loading ? 'none' : '0 0 24px rgba(99,102,241,0.35)',
+                marginTop: 4, fontFamily: 'Inter, sans-serif',
               }}
             >
               {loading ? 'Signing in…' : 'Sign in'}
             </motion.button>
           </form>
 
-          <p className="text-center text-xs mt-6" style={{ color: 'rgba(148,163,184,0.4)' }}>
+          <p style={{ textAlign: 'center', fontSize: 11, color: 'rgba(148,163,184,0.35)', marginTop: 24, marginBottom: 0 }}>
             Claude OS · Powered by Hermes
           </p>
         </div>
