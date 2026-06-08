@@ -3057,10 +3057,10 @@ function EmailHealthReportView() {
         <div style={{ display:'flex', alignItems:'center', gap:6 }}>
           <div style={{ display:'flex', alignItems:'center', gap:4 }}>
             <span style={{ color:'rgba(148,163,184,0.4)', fontSize:11 }}>From</span>
-            <input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)}
+            <input type="date" value={startDate} max={todayStr} onChange={e=>setStartDate(e.target.value)}
               style={{ background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:7, padding:'5px 8px', color:'white', fontSize:12, outline:'none', fontFamily:'inherit', colorScheme:'dark' }} />
             <span style={{ color:'rgba(148,163,184,0.4)', fontSize:11 }}>To</span>
-            <input type="date" value={endDate} onChange={e=>setEndDate(e.target.value)}
+            <input type="date" value={endDate} max={todayStr} onChange={e=>{ const v=e.target.value; setEndDate(v>todayStr?todayStr:v) }}
               style={{ background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:7, padding:'5px 8px', color:'white', fontSize:12, outline:'none', fontFamily:'inherit', colorScheme:'dark' }} />
           </div>
           <div style={{ display:'flex', gap:4 }}>

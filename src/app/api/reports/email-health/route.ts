@@ -61,23 +61,30 @@ async function getTotalContacts(apiKey: string, locationId: string): Promise<num
 async function fetchWorkflowCampaignStats(apiKey: string, locationId: string, startDate: string, endDate: string) {
   const totals = { sent: 0, opened: 0, clicked: 0, bounced: 0, complained: 0, unsubscribed: 0 }
   try {
-    // Get all campaigns with pagination
+    // Fetch campaigns from BOTH endpoints: workflow campaigns + regular/nurture campaigns
+    async function fetchCampaignPage(endpoint: string, p: number): Promise<{campaigns: any[], total: number}> {
+      const res = await fetch(
+        `https://services.leadconnectorhq.com/emails/public/v2/locations/${locationId}/${endpoint}?page=${p}`,
+        { headers: GHL23(apiKey), signal: AbortSignal.timeout(15000), cache: 'no-store' }
+      )
+      if (!res.ok) return { campaigns: [], total: 0 }
+      const d = await res.json() as Record<string, any>
+      return { campaigns: d.campaigns || [], total: typeof d.total === 'number' ? d.total : 0 }
+    }
+
+    // Paginate workflow campaigns
     let allCampaigns: any[] = []
     let page = 1, totalFromApi = Infinity
     while (allCampaigns.length < totalFromApi && page <= 50) {
-      const res = await fetch(
-        `https://services.leadconnectorhq.com/emails/public/v2/locations/${locationId}/campaigns/workflows?page=${page}`,
-        { headers: GHL23(apiKey), signal: AbortSignal.timeout(15000), cache: 'no-store' }
-      )
-      if (!res.ok) break
-      const d = await res.json() as Record<string, any>
-      if (typeof d.total === 'number') totalFromApi = d.total
-      const batch: any[] = d.campaigns || []
-      console.log(`[campaigns page=${page}] fetched=${batch.length} api_total=${d.total} unique_so_far=${allCampaigns.length + batch.length}`)
+      const { campaigns: batch, total } = await fetchCampaignPage('campaigns/workflows', page)
+      if (total > 0) totalFromApi = total
       if (!batch.length) break
       allCampaigns = allCampaigns.concat(batch)
       page++
     }
+
+    console.log(`[campaigns] total=${totalFromApi} fetched=${allCampaigns.length}`)
+
     // Deduplicate by sourceId
     const seen = new Set<string>()
     const campaigns = allCampaigns.filter((c: any) => {
@@ -85,26 +92,34 @@ async function fetchWorkflowCampaignStats(apiKey: string, locationId: string, st
       if (seen.has(sid)) return false; seen.add(sid); return true
     })
 
-    // Fetch stats for each campaign
+    // Fetch stats — try workflow-campaigns path first, fall back to campaigns path
     const statsResults = await Promise.all(
       campaigns.map(async (c: any) => {
         const sourceId = c.sourceId || c.id
-        try {
-          const res = await fetch(
-            `https://services.leadconnectorhq.com/emails/public/v2/locations/${locationId}/campaigns/stats/workflow-campaigns/${sourceId}`,
-            { headers: GHL23(apiKey), signal: AbortSignal.timeout(10000), cache: 'no-store' }
-          )
-          if (!res.ok) return null
-          const d = await res.json() as Record<string, any>
-          return { ...d.stats, name: c.name, id: c.id, sourceId, createdAt: c.createdAt, status: c.status }
-        } catch { return null }
+        for (const statsPath of ['workflow-campaigns', 'campaigns']) {
+          try {
+            const res = await fetch(
+              `https://services.leadconnectorhq.com/emails/public/v2/locations/${locationId}/campaigns/stats/${statsPath}/${sourceId}`,
+              { headers: GHL23(apiKey), signal: AbortSignal.timeout(10000), cache: 'no-store' }
+            )
+            if (!res.ok) continue
+            const d = await res.json() as Record<string, any>
+            const s = d.stats || d
+            // If this path returned real data, use it
+            if (s && (s.sent > 0 || s.opened > 0)) {
+              return { ...s, name: c.name, id: c.id, sourceId, createdAt: c.createdAt, status: c.status, _path: statsPath }
+            }
+          } catch { continue }
+        }
+        return null
       })
     )
 
     // Aggregate stats
     const nonNullStats = statsResults.filter(s => s !== null)
     const nonZeroStats = statsResults.filter((s: any) => s && s.sent > 0)
-    console.log(`[campaign stats] total_campaigns=${campaigns.length} stats_fetched=${nonNullStats.length} with_sends=${nonZeroStats.length}`)
+    const pathBreakdown = nonZeroStats.reduce((acc: any, s: any) => { acc[s._path||'unknown'] = (acc[s._path||'unknown']||0)+1; return acc }, {})
+    console.log(`[campaign stats] total_campaigns=${campaigns.length} stats_fetched=${nonNullStats.length} with_sends=${nonZeroStats.length} paths=${JSON.stringify(pathBreakdown)}`)
     const workflowDetails: any[] = []
     let campaignCount = 0
     for (const s of statsResults) {
@@ -264,8 +279,9 @@ export async function POST(req: NextRequest) {
   const domain     = (body.domain       || process.env.GHL_DOMAIN       || 'phxhomeremodeling.com').trim()
   const todayStr = new Date().toISOString().slice(0, 10)
   const firstOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10)
-  const startDate: string = body.startDate ?? firstOfMonth
-  const endDate: string   = body.endDate   ?? todayStr
+  // Clamp dates to today — future dates have no data
+  const startDate: string = (body.startDate ?? firstOfMonth) > todayStr ? todayStr : (body.startDate ?? firstOfMonth)
+  const endDate: string   = (body.endDate   ?? todayStr)     > todayStr ? todayStr : (body.endDate   ?? todayStr)
 
   if (!apiKey || !locationId) return NextResponse.json({ error: 'ghl_api_key and location_id required' }, { status: 400 })
 
