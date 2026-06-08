@@ -66,14 +66,14 @@ async function fetchWorkflowCampaignStats(apiKey: string, locationId: string, st
     let page = 1, hasMore = true
     while (hasMore && page <= 20) {
       const res = await fetch(
-        `https://services.leadconnectorhq.com/emails/public/v2/locations/${locationId}/campaigns/workflows?page=${page}&limit=100`,
+        `https://services.leadconnectorhq.com/emails/public/v2/locations/${locationId}/campaigns/workflows?page=${page}&pageSize=20`,
         { headers: GHL23(apiKey), signal: AbortSignal.timeout(15000), cache: 'no-store' }
       )
       if (!res.ok) break
       const d = await res.json() as Record<string, any>
       const batch: any[] = d.campaigns || []
       allCampaigns = allCampaigns.concat(batch)
-      hasMore = batch.length >= 100; page++
+      hasMore = batch.length > 0; page++
     }
     // Deduplicate by sourceId
     const seen = new Set<string>()

@@ -2998,6 +2998,7 @@ function EmailHealthReportView() {
   const [backend, setBackend] = useState<{configured:boolean;domain:string}|null>(null)
   const [snapshotInfo, setSnapshotInfo] = useState<{snapshot_dates:string[];total_records:number}|null>(null)
   const [takingSnapshot, setTakingSnapshot] = useState(false)
+  const [showSnapshots, setShowSnapshots] = useState(false)
 
   useEffect(() => {
     fetch('/api/reports/email-health').then(r=>r.json()).then(d=>setBackend(d)).catch(()=>{})
@@ -3072,11 +3073,37 @@ function EmailHealthReportView() {
             style={{ padding:'7px 16px', background:'linear-gradient(135deg,#4338ca,#6366f1)', border:'none', borderRadius:8, color:'white', fontWeight:700, fontSize:12, cursor:'pointer', opacity:loading?0.6:1 }}>
             {loading?'⏳ Generating…':'⚡ Generate'}
           </motion.button>
-          <button onClick={takeSnapshot} disabled={takingSnapshot}
-            title={snapshotInfo?.snapshot_dates?.length ? `Last snapshot: ${snapshotInfo.snapshot_dates.slice(-1)[0]}` : 'Take a snapshot now — run the report later to see delta stats for any date range starting from today'}
-            style={{ padding:'5px 10px', background: snapshotInfo?.snapshot_dates?.length ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)', border:`1px solid ${snapshotInfo?.snapshot_dates?.length ? 'rgba(16,185,129,0.2)' : 'rgba(245,158,11,0.2)'}`, borderRadius:7, color: snapshotInfo?.snapshot_dates?.length ? '#10b981' : '#f59e0b', fontSize:11, cursor:'pointer', flexShrink:0 }}>
-            {takingSnapshot ? '⏳' : snapshotInfo?.snapshot_dates?.length ? `📸 ${snapshotInfo.snapshot_dates.length} snapshot${snapshotInfo.snapshot_dates.length>1?'s':''}` : '📸 Take Snapshot'}
-          </button>
+          <div style={{ position:'relative' }}>
+            <button onClick={()=>setShowSnapshots(s=>!s)}
+              style={{ padding:'5px 10px', background: snapshotInfo?.snapshot_dates?.length ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)', border:`1px solid ${snapshotInfo?.snapshot_dates?.length ? 'rgba(16,185,129,0.2)' : 'rgba(245,158,11,0.2)'}`, borderRadius:7, color: snapshotInfo?.snapshot_dates?.length ? '#10b981' : '#f59e0b', fontSize:11, cursor:'pointer', flexShrink:0 }}>
+              {snapshotInfo?.snapshot_dates?.length ? `📸 ${snapshotInfo.snapshot_dates.length} snapshot${snapshotInfo.snapshot_dates.length>1?'s':''}` : '📸 Snapshots'} ▾
+            </button>
+            {showSnapshots && (
+              <div style={{ position:'absolute', top:'calc(100% + 6px)', right:0, zIndex:50, background:'rgba(12,16,28,0.98)', border:'1px solid rgba(99,102,241,0.25)', borderRadius:12, padding:14, minWidth:240, boxShadow:'0 16px 40px rgba(0,0,0,0.5)' }}>
+                <div style={{ color:'white', fontWeight:600, fontSize:12, marginBottom:10 }}>Snapshots</div>
+                <button onClick={async()=>{ await takeSnapshot(); setShowSnapshots(false) }} disabled={takingSnapshot}
+                  style={{ width:'100%', padding:'7px 0', background:'linear-gradient(135deg,#4338ca,#6366f1)', border:'none', borderRadius:7, color:'white', fontSize:11, fontWeight:600, cursor:'pointer', marginBottom:10 }}>
+                  {takingSnapshot ? '⏳ Taking…' : '📸 Take Snapshot Today'}
+                </button>
+                {snapshotInfo?.snapshot_dates?.length ? (
+                  <div style={{ maxHeight:200, overflowY:'auto' }}>
+                    {[...snapshotInfo.snapshot_dates].sort((a,b)=>b.localeCompare(a)).map(date=>(
+                      <div key={date} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'5px 0', borderBottom:'1px solid rgba(99,102,241,0.07)' }}>
+                        <span style={{ color:'rgba(148,163,184,0.8)', fontSize:12 }}>{date}</span>
+                        <button onClick={async()=>{
+                          if(!confirm(`Delete snapshot for ${date}?`)) return
+                          await fetch(`/api/reports/email-snapshot?date=${date}`, { method:'DELETE' })
+                          setSnapshotInfo(prev => prev ? { ...prev, snapshot_dates: prev.snapshot_dates.filter(d=>d!==date) } : prev)
+                        }} style={{ background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:5, color:'#f87171', fontSize:10, padding:'2px 7px', cursor:'pointer' }}>
+                          Delete
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : <p style={{ color:'rgba(148,163,184,0.4)', fontSize:11, margin:0 }}>No snapshots yet</p>}
+              </div>
+            )}
+          </div>
           {report && <button onClick={()=>{
             const html = buildEmailReportHTML(report, postmasterData)
             const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([html],{type:'text/html'}))

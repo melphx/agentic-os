@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
-import { saveEmailSnapshot, getAllSnapshots, ensureEmailSnapshotsTable } from '@/lib/db'
+import { saveEmailSnapshot, getAllSnapshots, ensureEmailSnapshotsTable, getDb } from '@/lib/db'
 
 const GHL23 = (apiKey: string) => ({
   'Authorization': `Bearer ${apiKey}`,
@@ -12,16 +12,16 @@ async function takeSnapshot(apiKey: string, locationId: string, snapshotDate: st
   // Get all campaigns with pagination
   let allCampaigns: any[] = []
   let page = 1, hasMore = true
-  while (hasMore && page <= 10) {
+  while (hasMore && page <= 20) {
     const res = await fetch(
-      `https://services.leadconnectorhq.com/emails/public/v2/locations/${locationId}/campaigns/workflows?page=${page}`,
+      `https://services.leadconnectorhq.com/emails/public/v2/locations/${locationId}/campaigns/workflows?page=${page}&pageSize=20`,
       { headers: GHL23(apiKey), signal: AbortSignal.timeout(15000), cache: 'no-store' }
     )
     if (!res.ok) break
     const d = await res.json() as Record<string, any>
     const batch: any[] = d.campaigns || []
     allCampaigns = allCampaigns.concat(batch)
-    hasMore = batch.length === 10; page++
+    hasMore = batch.length > 0; page++
   }
 
   // Deduplicate by sourceId
@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
   const locationId = (body.location_id  || process.env.GHL_LOCATION_ID || '').trim()
   // Default snapshot date to end of current month
   const now = new Date()
-  const defaultDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(new Date(now.getFullYear(), now.getMonth()+1, 0).getDate()).padStart(2,'0')}`
+  const defaultDate = now.toISOString().slice(0, 10) // today by default
   const snapshotDate = body.snapshot_date || defaultDate
 
   if (!apiKey || !locationId) return NextResponse.json({ error: 'credentials required' }, { status: 400 })
@@ -98,4 +98,16 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
+}
+
+export async function DELETE(req: NextRequest) {
+  const { error } = await requireAuth(req)
+  if (error) return error
+  const date = req.nextUrl.searchParams.get('date')
+  const locationId = process.env.GHL_LOCATION_ID || req.nextUrl.searchParams.get('location_id') || ''
+  if (!date) return NextResponse.json({ error: 'date required' }, { status: 400 })
+  ensureEmailSnapshotsTable()
+  const db = getDb()
+  const result = db.prepare('DELETE FROM email_snapshots WHERE snapshot_date = ? AND location_id = ?').run(date, locationId)
+  return NextResponse.json({ ok: true, deleted: result.changes })
 }
