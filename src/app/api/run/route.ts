@@ -185,15 +185,15 @@ async function ask(agentId: string, systemPrompt: string, userPrompt: string, ma
       break
     }
 
-    // Execute the integration
+    // Execute the integration or webhook
     const [, integName, payloadRaw] = callMatch
     const integrations = getIntegrations(agentId)
-    const integ = integrations.find(i => i.name.toLowerCase() === integName.toLowerCase() || i.name === integName)
+    const integ = integrations.find(i => i.name.toLowerCase() === integName.toLowerCase())
+    const webhooks = getWebhooks()
+    const webhook = webhooks.find(w => w.name.toLowerCase() === integName.toLowerCase())
 
     let callResult: string
-    if (!integ) {
-      callResult = `Integration "${integName}" not found.`
-    } else {
+    if (integ) {
       try {
         let payload: Record<string, any> = {}
         try { payload = JSON.parse(payloadRaw) } catch {}
@@ -201,6 +201,26 @@ async function ask(agentId: string, systemPrompt: string, userPrompt: string, ma
       } catch (e: any) {
         callResult = `Integration error: ${e.message}`
       }
+    } else if (webhook) {
+      try {
+        let payload: Record<string, any> = {}
+        try { payload = JSON.parse(payloadRaw) } catch { payload = { content: payloadRaw } }
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+        try { Object.assign(headers, JSON.parse(webhook.headers)) } catch {}
+        const res = await fetch(webhook.url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ ...payload, timestamp: new Date().toISOString() }),
+          signal: AbortSignal.timeout(10000),
+        })
+        callResult = res.ok
+          ? `Successfully sent to webhook "${webhook.name}" (HTTP ${res.status})`
+          : `Webhook "${webhook.name}" returned HTTP ${res.status}`
+      } catch (e: any) {
+        callResult = `Webhook error: ${e.message}`
+      }
+    } else {
+      callResult = `No integration or webhook named "${integName}" found. Available: ${[...integrations.map(i => i.name), ...webhooks.map(w => w.name)].join(', ') || 'none configured'}`
     }
 
     // Feed result back to agent

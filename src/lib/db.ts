@@ -467,11 +467,14 @@ export function deleteIntegration(id: number, agentId: string) {
 // Returns a formatted string describing all integrations for injection into system prompt
 export function getIntegrationContext(agentId: string): string {
   const integrations = getIntegrations(agentId)
-  if (!integrations.length) return ''
-  const lines = integrations.map(i =>
-    `- [${i.name}] (type: ${i.type}): ${i.description}`
-  )
-  return `You have access to the following integrations. To call one, output exactly:\n{{CALL:integration_name:json_payload}}\nWhere json_payload is the data to send (use {} if none).\n\nAvailable integrations:\n${lines.join('\n')}`
+  const webhooks = getWebhooks()
+  if (!integrations.length && !webhooks.length) return ''
+
+  const lines: string[] = []
+  integrations.forEach(i => lines.push(`- [${i.name}] (type: ${i.type}): ${i.description}`))
+  webhooks.forEach(w => lines.push(`- [${w.name}] (type: webhook): Send data to the ${w.name} webhook endpoint`))
+
+  return `You have access to the following integrations and webhooks. To call one, output exactly:\n{{CALL:integration_name:json_payload}}\nWhere json_payload is the data/content to send (use {} if none).\n\nAvailable integrations and webhooks:\n${lines.join('\n')}`
 }
 
 // ── API Keys (for inbound webhook triggers) ────────────────────────────────
@@ -1150,27 +1153,4 @@ export function saveEmailSnapshot(data: {
   getDb().prepare(`
     INSERT OR REPLACE INTO email_snapshots 
     (snapshot_date, location_id, source_id, campaign_name, sent, opened, clicked, bounced, complained, unsubscribed)
-    VALUES (@snapshot_date, @location_id, @source_id, @campaign_name, @sent, @opened, @clicked, @bounced, @complained, @unsubscribed)
-  `).run(data)
-}
-
-export function getEmailSnapshot(locationId: string, sourceId: string, snapshotDate: string) {
-  ensureEmailSnapshotsTable()
-  return getDb().prepare(
-    "SELECT * FROM email_snapshots WHERE location_id=? AND source_id=? AND snapshot_date<=? ORDER BY snapshot_date DESC LIMIT 1"
-  ).get(locationId, sourceId, snapshotDate) as any
-}
-
-export function getLatestSnapshot(locationId: string, sourceId: string) {
-  ensureEmailSnapshotsTable()
-  return getDb().prepare(
-    "SELECT * FROM email_snapshots WHERE location_id=? AND source_id=? ORDER BY snapshot_date DESC LIMIT 1"
-  ).get(locationId, sourceId) as any
-}
-
-export function getAllSnapshots(locationId: string) {
-  ensureEmailSnapshotsTable()
-  return getDb().prepare(
-    "SELECT * FROM email_snapshots WHERE location_id=? ORDER BY snapshot_date DESC"
-  ).all(locationId) as any[]
-}
+   
