@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import { requireAuth } from '@/lib/auth'
-import { getDb, getAgents, getTasks, getSchedules, createTask } from '@/lib/db'
+import { getDb, getAgents, getTasks, getSchedules, createTask, getWebhooks } from '@/lib/db'
 
 const client = new OpenAI({
   baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
@@ -115,6 +115,22 @@ const TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'send_webhook',
+      description: 'Send content or data to a named outbound webhook. Use this when the user asks to send something to a webhook or external service.',
+      parameters: {
+        type: 'object',
+        properties: {
+          webhook_name: { type: 'string', description: 'Name of the webhook to send to (e.g. "Test Webhook")' },
+          content:      { type: 'string', description: 'The text/content to send' },
+          extra:        { type: 'object', description: 'Optional extra fields to include in the payload', additionalProperties: true },
+        },
+        required: ['webhook_name', 'content'],
+      },
+    },
+  },
 ]
 
 // ── Tool executors ──────────────────────────────────────────────────────────
@@ -196,6 +212,31 @@ async function executeTool(name: string, args: any, baseUrl: string, jwtSecret: 
       if (tasks.length)  parts.push(`Tasks:\n${tasks.map(t => `• [${t.status}] ${t.title}`).join('\n')}`)
       if (logs.length)   parts.push(`Logs:\n${logs.map(l => `• ${l.message.slice(0,80)}`).join('\n')}`)
       return parts.length ? parts.join('\n\n') : `No results found for "${args.query}"`
+    }
+
+    case 'send_webhook': {
+      const webhooks = getWebhooks()
+      const webhook = webhooks.find(w => w.name.toLowerCase() === (args.webhook_name || '').toLowerCase())
+      if (!webhook) {
+        const names = webhooks.map(w => w.name).join(', ')
+        return `❌ Webhook "${args.webhook_name}" not found. Available: ${names || 'none configured'}`
+      }
+      try {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+        try { Object.assign(headers, JSON.parse(webhook.headers)) } catch {}
+        const payload = { content: args.content, ...(args.extra || {}), timestamp: new Date().toISOString() }
+        const res = await fetch(webhook.url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(10000),
+        })
+        return res.ok
+          ? `✅ Sent to webhook "${webhook.name}" (HTTP ${res.status})`
+          : `❌ Webhook "${webhook.name}" returned HTTP ${res.status}`
+      } catch (e: any) {
+        return `❌ Webhook error: ${e.message}`
+      }
     }
 
     default:
