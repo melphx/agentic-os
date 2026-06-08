@@ -72,6 +72,7 @@ async function fetchWorkflowCampaignStats(apiKey: string, locationId: string, st
       if (!res.ok) break
       const d = await res.json() as Record<string, any>
       const batch: any[] = d.campaigns || []
+      console.log(`[campaigns page=${page}] fetched=${batch.length} total_so_far=${allCampaigns.length + batch.length} keys=${Object.keys(d).join(',')}`)
       allCampaigns = allCampaigns.concat(batch)
       hasMore = batch.length > 0; page++
     }
@@ -99,6 +100,9 @@ async function fetchWorkflowCampaignStats(apiKey: string, locationId: string, st
     )
 
     // Aggregate stats
+    const nonNullStats = statsResults.filter(s => s !== null)
+    const nonZeroStats = statsResults.filter((s: any) => s && s.sent > 0)
+    console.log(`[campaign stats] total_campaigns=${campaigns.length} stats_fetched=${nonNullStats.length} with_sends=${nonZeroStats.length}`)
     const workflowDetails: any[] = []
     let campaignCount = 0
     for (const s of statsResults) {
