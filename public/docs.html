@@ -66,6 +66,7 @@ li strong{color:var(--text)}
   <a href="#tasks">Running Tasks</a>
   <a href="#training">Training an Agent</a>
   <a href="#integrations">Integrations</a>
+  <a href="#webhooks-outbound">Outbound Webhooks</a>
   <a href="#pipelines">Pipelines</a>
   <a href="#projects">Projects</a>
   <a href="#skills">Skills</a>
@@ -73,7 +74,6 @@ li strong{color:var(--text)}
   <a href="#triggers">Event Triggers</a>
   <a href="#schedules">Schedules</a>
   <a href="#api">API Access</a>
-  <a href="#webhooks">Outbound Webhooks</a>
   <div class="nav-cat">Platform</div>
   <a href="#analytics">Analytics</a>
   <a href="#search">Semantic Search</a>
@@ -81,6 +81,7 @@ li strong{color:var(--text)}
   <a href="#settings">Settings</a>
   <div class="nav-cat">Reports</div>
   <a href="#email-health">Email Health Report</a>
+  <a href="#snapshots">Snapshots</a>
   <div class="nav-cat">Operations</div>
   <a href="#server">Server &amp; Deployment</a>
   <a href="#troubleshooting">Troubleshooting</a>
@@ -92,39 +93,41 @@ li strong{color:var(--text)}
   <p class="sub">Complete guide to running, managing, and automating your AI agent control center &mdash; built for Phoenix Home Remodeling.</p>
   <div class="badges">
     <span class="badge">Next.js 14</span><span class="badge">GPT-5.4</span><span class="badge">SQLite</span>
-    <span class="badge g">Live on VPS</span><span class="badge">Real-time Streaming</span><span class="badge">6 Default Agents</span><span class="badge">Email Health Reports</span>
+    <span class="badge g">Live on VPS</span><span class="badge">Real-time Streaming</span><span class="badge">6 Default Agents</span>
+    <span class="badge">Email Health Reports</span><span class="badge">Date-Range Snapshots</span>
   </div>
 </div>
 
 <section id="start">
 <h2>Getting Started</h2>
 <h3>Accessing the App</h3>
-<p>Open your browser and go to:</p>
 <pre><code>https://sandbox.phoenixhomeremodeling.net</code></pre>
-<p>Log in with the credentials in <code>.env.local</code> on the server (<code>ADMIN_EMAIL</code> and <code>ADMIN_PASSWORD</code>).</p>
+<p>Log in with the credentials in <code>.env.local</code> on the server (<code>ADMIN_EMAIL</code> / <code>ADMIN_PASSWORD</code>).</p>
 <h3>First Time Setup</h3>
 <ol>
-<li>Log in and explore the 6 default agents</li>
-<li>Go to <strong>Settings &rarr; Company Knowledge Base</strong> and upload your service catalog, pricing, and FAQs</li>
-<li>Go to <strong>Settings &rarr; API Keys</strong> to generate a key for GHL or N8N</li>
+<li>Log in and explore the 6 default agents on the Dashboard</li>
+<li>Go to <strong>Settings &rarr; Company Knowledge Base</strong> — upload your service catalog, pricing, FAQs</li>
+<li>Go to <strong>Settings &rarr; API Keys</strong> — generate a key for GHL or N8N</li>
 <li>Click any agent &rarr; <strong>Train tab</strong> &rarr; write a system prompt for that agent's role</li>
+<li>Go to <strong>Settings &rarr; Outbound Webhooks</strong> — add your N8N or GHL webhook URLs</li>
 </ol>
 </section>
 
 <section id="dashboard">
 <h2>The Dashboard</h2>
-<p>Shows active agents, completed tasks, tokens used, and a live activity feed. The <strong>Hermes chat panel</strong> on the right controls everything with natural language.</p>
+<p>Shows active agents, completed tasks, tokens used, and a live activity feed. The <strong>Hermes chat panel</strong> on the right controls everything with natural language — dispatch tasks, create agents, schedule jobs.</p>
 <table>
 <tr><th>Sidebar Item</th><th>What it does</th></tr>
-<tr><td><strong>Dashboard</strong></td><td>Overview and live activity feed</td></tr>
+<tr><td><strong>Dashboard</strong></td><td>Overview, live activity feed, agent fleet cards</td></tr>
 <tr><td><strong>Agents</strong></td><td>View and manage individual agents</td></tr>
 <tr><td><strong>Tasks</strong></td><td>All tasks across all agents</td></tr>
 <tr><td><strong>Projects</strong></td><td>Group related tasks under a project</td></tr>
-<tr><td><strong>Pipelines</strong></td><td>Chain agents into automated workflows</td></tr>
-<tr><td><strong>Analytics</strong></td><td>Stats, token costs, charts</td></tr>
+<tr><td><strong>Pipelines</strong></td><td>Chain agents into automated multi-step workflows</td></tr>
+<tr><td><strong>Analytics</strong></td><td>Stats, token costs, charts, 14-day history</td></tr>
 <tr><td><strong>Triggers</strong></td><td>Auto-run agents when GHL events happen</td></tr>
-<tr><td><strong>Skills</strong></td><td>Add external AI models (Hermes, Groq, OpenClaw)</td></tr>
-<tr><td><strong>Schedules</strong></td><td>Recurring automated tasks</td></tr>
+<tr><td><strong>Skills</strong></td><td>Add external AI models (Hermes, Groq, Together AI)</td></tr>
+<tr><td><strong>Schedules</strong></td><td>Recurring automated tasks via cron</td></tr>
+<tr><td><strong>📧 Email Health</strong></td><td>Email deliverability report with date-range snapshots</td></tr>
 <tr><td><strong>Settings</strong></td><td>API keys, users, company KB, webhooks, Drive sync</td></tr>
 </table>
 </section>
@@ -139,13 +142,17 @@ li strong{color:var(--text)}
   <div class="ac"><span class="dot" style="background:#f43f5e"></span><h4>Email Manager</h4><p>Draft and manage email communications</p></div>
   <div class="ac"><span class="dot" style="background:#a855f7"></span><h4>Security Analyst</h4><p>Vulnerability scanning, threat analysis</p></div>
 </div>
+<p>Custom agents can be created from the Hermes chat panel or via the <strong>+ New Agent</strong> button.</p>
 <h3>Agent Tabs</h3>
 <table>
 <tr><th>Tab</th><th>What you can do</th></tr>
-<tr><td><strong>Tasks</strong></td><td>All tasks this agent has run — click any to open the full streaming conversation thread</td></tr>
+<tr><td><strong>Tasks</strong></td><td>All tasks this agent has run — click any to open the full streaming thread</td></tr>
 <tr><td><strong>Train</strong></td><td>Upload knowledge files, edit system prompt, manage Drive folders, save task templates</td></tr>
-<tr><td><strong>Tools &#9889;</strong></td><td>Configure external integrations: GHL, N8N, webhooks, Google Sheets/Docs, Obsidian</td></tr>
+<tr><td><strong>Tools &#9889;</strong></td><td>Configure per-agent integrations: GHL, N8N, webhooks, Google Sheets/Docs, Obsidian</td></tr>
 </table>
+<h3>Deleting an Agent</h3>
+<p>Open the agent &rarr; click the red <strong>Delete</strong> button in the top-left of the sidebar (next to "&#8592; All Agents"). Confirms before deleting. Removes all associated knowledge, memory, integrations, and schedules — tasks are preserved with a null agent reference.</p>
+<div class="note note-w">The 6 default agents (research, code, data, writer, email, security) can be deleted but will not be re-created on restart.</div>
 </section>
 
 <section id="tasks">
@@ -154,47 +161,52 @@ li strong{color:var(--text)}
 <table>
 <tr><th>Type</th><th>Best for</th></tr>
 <tr><td><code>general</code></td><td>Writing, analysis, Q&amp;A — default for most tasks</td></tr>
-<tr><td><code>search</code></td><td>Research needing live web results</td></tr>
-<tr><td><code>browser</code></td><td>Visiting and reading a website</td></tr>
+<tr><td><code>search</code></td><td>Research needing live web results (Tavily)</td></tr>
+<tr><td><code>browser</code></td><td>Visiting and reading a website (Playwright)</td></tr>
 <tr><td><code>code</code></td><td>Writing or executing scripts</td></tr>
 <tr><td><code>scrape</code></td><td>Extracting data from a specific URL</td></tr>
 <tr><td><code>file</code></td><td>Reading or writing files on the server</td></tr>
 <tr><td><code>api</code></td><td>Making HTTP requests to external services</td></tr>
 <tr><td><code>security</code></td><td>Running security scans</td></tr>
 </table>
-<h3>Real-time Streaming</h3>
-<p>Results appear word-by-word as the AI writes them. The task thread auto-opens the moment you click Run — no waiting for completion to see progress.</p>
+<h3>Calling Integrations from a Task</h3>
+<p>Agents can call any configured integration or outbound webhook mid-task using the CALL pattern:</p>
+<pre><code>{{CALL:IntegrationName:{"key":"value"}}}</code></pre>
+<p>If the payload is empty <code>{}</code>, the system automatically injects the content the agent wrote before the CALL tag. Agents can make up to 3 calls per task.</p>
+<h3>Sub-agents</h3>
+<p>An agent can spawn a child agent mid-task:</p>
+<pre><code>{{SPAWN:agent_id:task description}}</code></pre>
+<p>The child runs to completion and its result feeds back to the parent automatically.</p>
 <h3>Task Actions</h3>
-<p>Available in the top-right header of every task thread:</p>
 <ul>
-<li><strong>Cancel</strong> — red &#10005; button while running or pending</li>
+<li><strong>Cancel</strong> — red &times; button while running or pending</li>
 <li><strong>Copy</strong> — copy result to clipboard</li>
 <li><strong>Export</strong> — download result as a <code>.md</code> file</li>
 <li><strong>Project</strong> — assign to a project via dropdown</li>
-<li><strong>Refine</strong> — chat input appears after completion to iterate on the result</li>
-<li><strong>Compact</strong> — appears after 4+ refine messages; summarises the conversation to free up context</li>
+<li><strong>Refine</strong> — chat input appears after completion to iterate</li>
+<li><strong>Compact</strong> — appears after 4+ refine messages; summarises conversation to free context</li>
 </ul>
-<h3>Sub-agents</h3>
-<p>An agent can spawn a child agent mid-task using <code>&#123;&#123;SPAWN:agent_id:task description&#125;&#125;</code>. The child runs, completes, and the result feeds back to the parent automatically.</p>
+<div class="note note-t">Tasks auto-fail after 3 minutes via a global timeout. Streaming results appear word-by-word in real time.</div>
 </section>
 
 <section id="training">
 <h2>Training an Agent</h2>
 <h3>System Prompt</h3>
-<p>The core instructions that shape every response. Go to <strong>Agent &rarr; Train &rarr; System Prompt</strong>. Every save creates a version you can roll back to via <code>/api/agents/[id]/versions</code>.</p>
+<p>The core instructions that shape every response. Go to <strong>Agent &rarr; Train &rarr; System Prompt</strong> and save.</p>
 <h3>Knowledge Base (Files)</h3>
-<p>Upload PDFs, TXT, CSV, JSON, HTML, Markdown. Injected into every task the agent runs. Limit: 2MB per file.</p>
+<p>Upload PDFs, TXT, CSV, JSON, HTML, Markdown. Injected into every task the agent runs. Limit: 2MB per file. Re-uploading a file <strong>replaces</strong> the old version — no duplicates accumulate.</p>
 <h3>Google Drive Folders</h3>
-<p>Link Drive folders directly to an agent in the Train tab. Files sync into the knowledge base on demand. Supports Google Docs, Sheets, Slides, PDFs, Word docs, and plain text. Requires Google OAuth connection in Settings.</p>
+<p>Link Drive folders to an agent in the Train tab. Files sync into the knowledge base on demand. Supports Google Docs, Sheets, Slides, PDFs, Word docs, and plain text. Re-syncing a file replaces the old version. Requires Google OAuth in Settings.</p>
 <h3>Task Templates</h3>
-<p>Save reusable prompts with <code>&#123;&#123;variable&#125;&#125;</code> placeholders. Click Use &rarr; fill variables &rarr; dispatch. Templates live in the Train tab.</p>
+<p>Save reusable prompts with <code>&#123;&#123;variable&#125;&#125;</code> placeholders. Click Use &rarr; fill variables &rarr; dispatch.</p>
 <h3>Company Knowledge Base</h3>
-<p>In <strong>Settings &rarr; Company Knowledge Base</strong>, upload files shared automatically by ALL agents. Perfect for service catalogs, pricing, and FAQs. Limit: 5MB per file.</p>
+<p>In <strong>Settings &rarr; Company Knowledge Base</strong> — upload files shared automatically by <em>all</em> agents. Perfect for service catalogs, pricing, and FAQs. Limit: 5MB per file.</p>
+<div class="note note-i">Knowledge base changes take effect immediately on the next task — no restart needed.</div>
 </section>
 
 <section id="integrations">
 <h2>Integrations</h2>
-<p>Configure per-agent in the <strong>Tools &#9889; tab</strong>. Agents call them using <code>&#123;&#123;CALL:Name:&#123;"key":"value"&#125;&#125;&#125;</code> — up to 3 calls per task. Use the &#9654; Test button to verify each one.</p>
+<p>Configure per-agent in the <strong>Tools &#9889; tab</strong>. Agents call them using <code>&#123;&#123;CALL:Name:&#123;"key":"value"&#125;&#125;&#125;</code>. Use the &#9654; Test button to verify.</p>
 <table>
 <tr><th>Type</th><th>What it does</th><th>Key fields</th></tr>
 <tr><td><strong>Webhook / N8N</strong></td><td>POST to any HTTP endpoint</td><td>URL, method, API key, body template</td></tr>
@@ -204,6 +216,35 @@ li strong{color:var(--text)}
 <tr><td><strong>Google Docs</strong></td><td>Read or append to documents</td><td>Document ID, service account</td></tr>
 <tr><td><strong>Obsidian Vault</strong></td><td>Search, read, write notes</td><td>REST API URL or vault path on server</td></tr>
 </table>
+<h3>Body Template</h3>
+<p>The optional <strong>Body Template JSON</strong> field lets you shape the payload sent to a webhook. Use <code>&#123;&#123;content&#125;&#125;</code> as a placeholder:</p>
+<pre><code>{"blog_post": "{{content}}", "source": "Claude OS", "site": "phxhomeremodeling.com"}</code></pre>
+</section>
+
+<section id="webhooks-outbound">
+<h2>Outbound Webhooks</h2>
+<p>Configure in <strong>Settings &rarr; Outbound Webhooks</strong>. Two distinct ways they fire:</p>
+<h3>1. Automatic — on task events</h3>
+<p>Every time a task completes (or fails), Claude OS POSTs to all webhooks subscribed to that event:</p>
+<pre><code>{
+  "event": "task.completed",
+  "task_id": 42,
+  "agent_id": "writer",
+  "title": "Write follow-up email",
+  "result": "Dear John...",
+  "tokens_used": 850,
+  "timestamp": "2026-06-09T14:22:11Z"
+}</code></pre>
+<p>Available events: <code>task.completed</code>, <code>task.failed</code>, or both.</p>
+<h3>2. Agent-initiated — via CALL or chat</h3>
+<p>Agents (and the Hermes chat) can actively send content to any named webhook:</p>
+<pre><code>// From a task (agent uses CALL pattern)
+{{CALL:Test Webhook:{"content":"The blog post text goes here"}}}
+
+// From Hermes chat (uses send_webhook tool automatically)
+"Write a blog post about kitchen remodels and send it to Test Webhook"</code></pre>
+<p>N8N will receive the payload in <code>$json.body.content</code>. Make sure the N8N webhook node is set to <strong>POST</strong> method.</p>
+<div class="note note-w">The webhook must be saved in Settings &rarr; Outbound Webhooks before agents can call it by name.</div>
 </section>
 
 <section id="pipelines">
@@ -213,59 +254,46 @@ li strong{color:var(--text)}
 Step 2: Content Writer  → "Write a blog post based on the research above"
 Step 3: Email Manager   → "Draft a newsletter from this blog post"</code></pre>
 <ul>
-<li>Use <code>&#123;&#123;variable&#125;&#125;</code> in step descriptions for dynamic inputs filled at run time</li>
+<li>Use <code>&#123;&#123;variable&#125;&#125;</code> in step descriptions for dynamic inputs</li>
 <li>Toggle "Pass previous step output" to feed results forward</li>
-<li>Trigger via &#9654; Run button or API: <code>POST /api/pipelines/[id]/run</code></li>
+<li>Trigger via &#9654; Run or API: <code>POST /api/pipelines/[id]/run</code></li>
 </ul>
 </section>
 
 <section id="projects">
 <h2>Projects</h2>
-<p>Group related tasks to track a larger piece of work across multiple agents and sessions.</p>
-<h3>Creating a Project</h3>
-<p>Go to <strong>Projects</strong> in the sidebar &rarr; <strong>+ New</strong>. Give it a name and optional description.</p>
-<h3>Adding Tasks to a Project</h3>
-<p>Open any task thread &rarr; click the <strong>Project</strong> button in the top-right header &rarr; select a project from the dropdown. The task appears immediately in that project's view.</p>
-<h3>Project Statuses</h3>
+<p>Group related tasks to track larger pieces of work across multiple agents and sessions.</p>
 <table>
 <tr><th>Status</th><th>Meaning</th></tr>
 <tr><td><strong>active</strong></td><td>Work in progress</td></tr>
 <tr><td><strong>paused</strong></td><td>On hold</td></tr>
 <tr><td><strong>completed</strong></td><td>Done</td></tr>
 </table>
+<p>Add tasks to a project: open any task thread &rarr; click <strong>Project</strong> in the top-right header &rarr; select from dropdown.</p>
 </section>
 
 <section id="skills">
 <h2>Skills</h2>
-<p>External AI model endpoints your agents can call mid-task. Go to <strong>Skills</strong> in the sidebar to add them.</p>
+<p>External AI model endpoints agents can call mid-task. Go to <strong>Skills</strong> in the sidebar.</p>
 <p>Agents call skills using: <code>&#123;&#123;SKILL:skill_name:your prompt&#125;&#125;</code></p>
-<h3>Quick-Add Presets</h3>
 <table>
 <tr><th>Skill</th><th>Description</th><th>Setup</th></tr>
-<tr><td><strong>Hermes 3 (Ollama)</strong></td><td>Free, local, runs on your VPS</td><td><code>ollama pull nous-hermes3</code></td></tr>
-<tr><td><strong>Groq (Llama 3)</strong></td><td>~500 tokens/sec, free tier available</td><td>Key from console.groq.com</td></tr>
+<tr><td><strong>Hermes 3 (Ollama)</strong></td><td>Free, local, runs on VPS</td><td><code>ollama pull nous-hermes3</code></td></tr>
+<tr><td><strong>Groq (Llama 3)</strong></td><td>~500 tokens/sec, free tier</td><td>Key from console.groq.com</td></tr>
 <tr><td><strong>Together AI</strong></td><td>Many open models, low cost</td><td>Key from api.together.xyz</td></tr>
-<tr><td><strong>OpenClaw</strong></td><td>OpenClaw model endpoint</td><td>Key from OpenClaw</td></tr>
 </table>
-<h3>Example Usage</h3>
-<pre><code>"Write a blog post about kitchen remodeling. Use
-{{SKILL:Groq Fast:Give me 5 catchy headlines for
-a kitchen remodeling blog post in Phoenix}} to get
-headlines first, then pick the best and write the full post."</code></pre>
-<p>The agent calls Groq, gets headlines, picks the best, and continues writing — all in one task.</p>
-<div class="note note-i">Skills are OpenAI-compatible endpoints. Any model that supports the OpenAI chat completions API works here.</div>
+<div class="note note-i">Skills are OpenAI-compatible endpoints. Any model supporting the OpenAI chat completions API works.</div>
 </section>
 
 <section id="triggers">
 <h2>Event Triggers</h2>
-<p>Auto-run agents when something happens in GHL. Polls every 5 minutes. Configure in <strong>Triggers</strong> in the sidebar.</p>
+<p>Auto-run agents when something happens in GHL. Polls every 5 minutes. Configure in <strong>Triggers</strong>.</p>
 <table>
 <tr><th>Event</th><th>What fires</th></tr>
-<tr><td><strong>GHL New Contact</strong></td><td>Creates a task from your template and runs the selected agent</td></tr>
+<tr><td><strong>GHL New Contact</strong></td><td>Creates a task and runs the selected agent</td></tr>
 <tr><td><strong>GHL New Opportunity</strong></td><td>Same, triggered by new opportunities</td></tr>
 </table>
 <p>Template variables: <code>&#123;&#123;name&#125;&#125;</code>, <code>&#123;&#123;email&#125;&#125;</code>, <code>&#123;&#123;phone&#125;&#125;</code>, <code>&#123;&#123;value&#125;&#125;</code>, <code>&#123;&#123;stage&#125;&#125;</code></p>
-<div class="note note-w">First check covers the past hour. Subsequent checks only catch items created since the last check.</div>
 </section>
 
 <section id="schedules">
@@ -278,6 +306,7 @@ headlines first, then pick the best and write the full post."</code></pre>
 <tr><td><code>0 8 1 * *</code></td><td>First of every month at 8 AM</td></tr>
 <tr><td><code>*/30 * * * *</code></td><td>Every 30 minutes</td></tr>
 </table>
+<div class="note note-i">Email snapshots are taken automatically every night at midnight — no manual action needed.</div>
 </section>
 
 <section id="api">
@@ -306,21 +335,6 @@ Content-Type: application/json
 <p>Generate keys in <strong>Settings &rarr; API Keys</strong>. The full key is shown once only — copy immediately.</p>
 </section>
 
-<section id="webhooks">
-<h2>Outbound Webhooks</h2>
-<p>When a task completes, Claude OS POSTs the result to your configured URL — GHL, N8N, Slack, or your own endpoint. Configure in <strong>Settings &rarr; Outbound Webhooks</strong>.</p>
-<pre><code>{
-  "event": "task.completed",
-  "task_id": 42,
-  "agent_id": "writer",
-  "title": "Write follow-up email",
-  "result": "Dear John...",
-  "tokens_used": 850,
-  "timestamp": "2026-06-03T14:22:11Z"
-}</code></pre>
-<p>Available events: <code>task.completed</code>, <code>task.failed</code>, or both.</p>
-</section>
-
 <section id="analytics">
 <h2>Analytics</h2>
 <table>
@@ -329,84 +343,80 @@ Content-Type: application/json
 <tr><td>Success Rate</td><td>Percentage completed without error</td></tr>
 <tr><td>Tokens Used</td><td>Total AI tokens consumed</td></tr>
 <tr><td>Estimated Cost</td><td>Approximate dollar cost based on token usage</td></tr>
-<tr><td>Avg Duration</td><td>How long tasks typically take to complete</td></tr>
+<tr><td>Avg Duration</td><td>How long tasks typically take</td></tr>
 <tr><td>14-Day Chart</td><td>Task volume per day as a bar chart</td></tr>
-<tr><td>By Agent</td><td>Which agents are most active and their token usage</td></tr>
+<tr><td>By Agent</td><td>Most active agents and their token usage</td></tr>
 <tr><td>By Type</td><td>Breakdown by task type</td></tr>
 </table>
 </section>
 
 <section id="search">
 <h2>Semantic Search</h2>
-<p>AI-powered search across all past task results by meaning, not keywords. Press <strong>Ctrl+Shift+F</strong> anywhere in the app to open it.</p>
-<p>Example: searching <em>"kitchen leads Phoenix"</em> finds tasks about kitchen remodeling leads even if those exact words aren't in the results. Results show a percentage match score.</p>
-<div class="note note-i">Every completed task is automatically indexed. Powered by OpenAI's text-embedding-3-small model.</div>
+<p>AI-powered search across all past task results by meaning, not keywords. Press <strong>Ctrl+Shift+F</strong> anywhere to open it.</p>
+<div class="note note-i">Every completed task is automatically indexed. Powered by OpenAI text-embedding-3-small.</div>
 </section>
 
 <section id="users">
 <h2>Multi-User</h2>
-<p>Add team members in <strong>Settings &rarr; Team Members</strong>. Each user logs in with their own email and password.</p>
+<p>Add team members in <strong>Settings &rarr; Team Members</strong>.</p>
 <table>
 <tr><th>Role</th><th>Permissions</th></tr>
 <tr><td><strong>admin</strong></td><td>Full access — agents, settings, users, API keys, everything</td></tr>
 <tr><td><strong>operator</strong></td><td>Create and run tasks, manage integrations, view all results</td></tr>
-<tr><td><strong>viewer</strong></td><td>View tasks and results only — cannot dispatch or configure</td></tr>
+<tr><td><strong>viewer</strong></td><td>View tasks and results only</td></tr>
 </table>
 </section>
 
 <section id="settings">
 <h2>Settings</h2>
-<p>Environment variables are in <code>/root/agentic-os/.env.local</code> on the server:</p>
+<p>Environment variables live in <code>/root/agentic-os/.env.local</code>:</p>
 <table>
 <tr><th>Variable</th><th>Purpose</th></tr>
 <tr><td><code>OPENAI_API_KEY</code></td><td>Your OpenAI API key</td></tr>
-<tr><td><code>OPENAI_MODEL</code></td><td>Model to use (currently <code>gpt-5.4</code>)</td></tr>
-<tr><td><code>OPENAI_BASE_URL</code></td><td>API endpoint (default: OpenAI)</td></tr>
+<tr><td><code>OPENAI_MODEL</code></td><td>Model to use (default: <code>gpt-5.4</code>)</td></tr>
 <tr><td><code>JWT_SECRET</code></td><td>Secret for login session tokens</td></tr>
 <tr><td><code>ADMIN_EMAIL</code></td><td>Primary admin login email</td></tr>
 <tr><td><code>ADMIN_PASSWORD</code></td><td>Primary admin login password</td></tr>
-<tr><td><code>INTERNAL_URL</code></td><td>Internal server URL (default: http://localhost:3000)</td></tr>
 <tr><td><code>TAVILY_API_KEY</code></td><td>For web search tasks</td></tr>
+<tr><td><code>GHL_API_KEY</code></td><td>GHL Private Integration Token</td></tr>
+<tr><td><code>GHL_LOCATION_ID</code></td><td>GHL location ID</td></tr>
+<tr><td><code>GHL_DOMAIN</code></td><td>Your sending domain (e.g. <code>phxhomeremodeling.com</code>)</td></tr>
 </table>
 <div class="note note-w">Restart after any env change: <code>pm2 restart claude-os</code></div>
-<h3>Settings Panels</h3>
-<ul>
-<li><strong>Team Members</strong> — add users with admin/operator/viewer roles</li>
-<li><strong>Company Knowledge Base</strong> — files shared by all agents automatically</li>
-<li><strong>Outbound Webhooks</strong> — POST task results to external systems</li>
-<li><strong>Google Drive Sync</strong> — connect Drive folders and sync files</li>
-<li><strong>API Keys</strong> — generate keys for external systems to trigger agents</li>
-</ul>
 </section>
 
 <section id="email-health">
 <h2>Email Health Report</h2>
-<p>A monthly email deliverability and engagement analysis powered by your GHL contact data. Go to <strong>📧 Email Health</strong> in the sidebar.</p>
+<p>A full email deliverability and engagement analysis powered by GHL contact tags and workflow campaign stats. Go to <strong>&#128231; Email Health</strong> in the sidebar.</p>
 
 <h3>Setup</h3>
-<p>Add your GHL credentials to <code>.env.local</code> on the server so the report runs without entering credentials each time:</p>
 <pre><code>GHL_API_KEY=pit-your-token-here
 GHL_LOCATION_ID=your-location-id
-GHL_DOMAIN=phxhomeremodeling.com</code></pre>
+GHL_DOMAIN=l.phxhomeremodeling.com</code></pre>
+
+<h3>Date Range</h3>
+<p>Select a <strong>From</strong> and <strong>To</strong> date. Quick presets: <strong>This Month</strong>, <strong>Last 7d</strong>, <strong>Last 30d</strong>. Both dates are capped at today — future dates are disabled.</p>
+<p>When a snapshot exists for the start date, the report shows <strong>delta stats</strong> (only what happened in that window). Without a snapshot it falls back to all-time totals.</p>
 
 <h3>What it analyses</h3>
-<p>The report reads <strong>HitTheInbox tags</strong> already applied to your GHL contacts — 16 parallel queries, no full contact pull needed, completes in 2-3 seconds.</p>
 <table>
 <tr><th>Section</th><th>What it shows</th><th>Source</th></tr>
-<tr><td><strong>Health Score</strong></td><td>0-999 score based on list quality</td><td>Calculated from tag ratios</td></tr>
-<tr><td><strong>Send Status</strong></td><td>Green (safe) vs Red (do not send) counts</td><td><code>hti status</code> tags</td></tr>
-<tr><td><strong>Engagement</strong></td><td>Never engaged, never sent, new contacts</td><td><code>hti engagement check</code> tags</td></tr>
-<tr><td><strong>Email Quality</strong></td><td>Bounced, spam risk, invalid, catchall, suspicious</td><td>HitTheInbox quality tags</td></tr>
-<tr><td><strong>Provider Breakdown</strong></td><td>Google vs Yahoo vs Microsoft vs Other %</td><td><code>hti email provider check</code> tags</td></tr>
-<tr><td><strong>AI Analysis</strong></td><td>Analyst notes + prioritised action items</td><td>GPT-5.4 based on tag data</td></tr>
+<tr><td><strong>Health Score</strong></td><td>0–999 Strict + Relaxed scores</td><td>Calculated from tag ratios</td></tr>
+<tr><td><strong>Analyst Notes</strong></td><td>AI narrative of your list health</td><td>GPT-5.4</td></tr>
+<tr><td><strong>Problems</strong></td><td>Issues costing you revenue</td><td>GPT-5.4</td></tr>
+<tr><td><strong>Actions</strong></td><td>HIGH / MEDIUM / LOW priority steps</td><td>GPT-5.4</td></tr>
+<tr><td><strong>Email Performance</strong></td><td>Open rate, click rate, bounce, spam, sent</td><td>GHL workflow campaign stats API</td></tr>
+<tr><td><strong>Engagement Table</strong></td><td>Existing vs new subscriber engagement</td><td>Derived from campaign + tag data</td></tr>
+<tr><td><strong>Segments</strong></td><td>Best Assets / Assets / Liabilities / Worst</td><td>HitTheInbox engagement tags</td></tr>
+<tr><td><strong>Email Quality</strong></td><td>Green (safe) vs Red (do not send), bounced, spam</td><td>HitTheInbox status tags</td></tr>
+<tr><td><strong>Provider Breakdown</strong></td><td>Gmail / Yahoo / Outlook / Other %</td><td>HitTheInbox provider tags</td></tr>
+<tr><td><strong>DMARC &amp; Postmaster</strong></td><td>Domain reputation, SPF, DKIM, inbox placement</td><td>Google Postmaster Tools</td></tr>
 </table>
 
-<div class="note note-w">Campaign open/click stats (open rate, click rate) require the <strong>email campaign API scope</strong> on your GHL Private Integration. Contact your GHL admin to enable it.</div>
-
 <h3>Export</h3>
-<p>Click <strong>Export HTML</strong> in the top right to download a standalone HTML report you can share or print.</p>
+<p>Click <strong>Export</strong> in the top bar to download a complete standalone HTML report including all sections — engagement table, segments, and DMARC data included.</p>
 
-<h3>Score guide</h3>
+<h3>Score Guide</h3>
 <table>
 <tr><th>Score</th><th>Label</th><th>Meaning</th></tr>
 <tr><td>800–999</td><td>Excellent</td><td>Healthy list, strong deliverability</td></tr>
@@ -415,6 +425,33 @@ GHL_DOMAIN=phxhomeremodeling.com</code></pre>
 <tr><td>300–499</td><td>Poor</td><td>Serious deliverability risk</td></tr>
 <tr><td>0–299</td><td>Critical</td><td>Immediate action needed</td></tr>
 </table>
+
+<div class="note note-w">GHL's workflow campaigns API exposes ~10 unique email campaigns regardless of how many total workflows exist. Campaign stats (open rate, click rate) reflect only those accessible campaigns.</div>
+</section>
+
+<section id="snapshots">
+<h2>Snapshots</h2>
+<p>Snapshots save the all-time campaign totals at a specific point in time. The delta between two snapshots equals the activity in that window — the basis for accurate date-range reporting.</p>
+
+<h3>How it works</h3>
+<ol>
+<li><strong>Generating a report</strong> automatically saves a snapshot for today — no manual action needed</li>
+<li><strong>The 📸 button</strong> in the report toolbar opens the snapshot manager</li>
+<li>Take a snapshot manually any time with <strong>Take Snapshot Today</strong></li>
+<li>Snapshots also run automatically every night at midnight</li>
+</ol>
+
+<h3>Running a delta report</h3>
+<ol>
+<li>Generate a report today (auto-saves today's snapshot as baseline)</li>
+<li>Come back next week — set <strong>From = today's date</strong>, <strong>To = next week</strong></li>
+<li>Click Generate — the report shows only what happened in that 7-day window</li>
+</ol>
+
+<h3>Managing snapshots</h3>
+<p>Click the <strong>📸 N snapshots</strong> button to open the manager. Each snapshot shows its date and a <strong>Delete</strong> button. Deleting a snapshot means any report using it as a baseline will fall back to all-time totals.</p>
+
+<div class="note note-t">If a campaign didn't exist at snapshot time (new campaign), the report shows its full current stats as the delta — which is correct since it had 0 sends at the baseline.</div>
 </section>
 
 <section id="server">
@@ -424,13 +461,16 @@ GHL_DOMAIN=phxhomeremodeling.com</code></pre>
 <tr><td>Domain</td><td><code>sandbox.phoenixhomeremodeling.net</code></td></tr>
 <tr><td>App directory</td><td><code>/root/agentic-os</code></td></tr>
 <tr><td>Database</td><td><code>/root/agentic-os/data/claude-os.db</code></td></tr>
-<tr><td>Process manager</td><td>PM2</td></tr>
+<tr><td>Process manager</td><td>PM2 (<code>pm2 list</code> to check status)</td></tr>
 <tr><td>Docs</td><td><code>https://sandbox.phoenixhomeremodeling.net/docs.html</code></td></tr>
 </table>
 <h3>Deploy Updates</h3>
-<pre><code>cd /root/agentic-os && git pull && npm install && npm run build && pm2 restart claude-os</code></pre>
+<pre><code>cd /root/agentic-os
+git pull origin master
+npm run build
+pm2 restart claude-os</code></pre>
 <h3>Useful Commands</h3>
-<pre><code># View live logs
+<pre><code># Live logs
 pm2 logs claude-os
 
 # Clear stuck tasks
@@ -442,28 +482,42 @@ console.log('Cleared');
 "
 
 # Database backup
-cp data/claude-os.db data/backup-$(date +%Y%m%d).db</code></pre>
+cp data/claude-os.db data/backup-$(date +%Y%m%d).db
+
+# Check snapshots
+node -e "
+const db = require('better-sqlite3')('data/claude-os.db');
+const rows = db.prepare('SELECT snapshot_date, COUNT(*) as campaigns FROM email_snapshots GROUP BY snapshot_date ORDER BY snapshot_date DESC').all();
+console.table(rows);
+"</code></pre>
 </section>
 
 <section id="troubleshooting">
 <h2>Troubleshooting</h2>
 <h3>Task stuck on Running</h3>
-<p>Run the clear command above. Tasks also auto-fail after 3 minutes via the global timeout.</p>
+<p>Run the clear command above. Tasks auto-fail after 3 minutes via the global timeout.</p>
 <h3>Agent doesn't know about uploaded files</h3>
-<pre><code>cd /root/agentic-os
-node -e "const db=require('better-sqlite3')('data/claude-os.db');
-console.log(db.prepare('SELECT agent_id,filename,length(content) as chars FROM agent_knowledge').all())"</code></pre>
-<p>If <code>chars</code> is under 100, the file wasn't extracted properly. Re-upload it. PDFs need <code>npm install pdf-parse</code>.</p>
+<pre><code>node -e "
+const db = require('better-sqlite3')('data/claude-os.db');
+console.log(db.prepare('SELECT agent_id,filename,length(content) as chars FROM agent_knowledge').all());
+"</code></pre>
+<p>If <code>chars</code> is under 100 the file wasn't extracted properly. Re-upload it. PDFs need <code>npm install pdf-parse</code>. Re-uploading now <strong>replaces</strong> the old version cleanly — no duplicate accumulation.</p>
 <h3>Build fails</h3>
 <pre><code>git fetch origin && git reset --hard origin/master && npm install && npm run build && pm2 restart claude-os</code></pre>
-<h3>Google Drive returns 0 files</h3>
-<p>Copy the folder ID from the URL — the part after <code>/folders/</code>. Shared Drives are supported. Make sure the folder is shared with your connected Google account.</p>
+<h3>Email report shows all-time stats instead of date range</h3>
+<p>No snapshot exists for the selected start date. Generate a report first (auto-saves a snapshot for today), then use today's date as the start date in future reports.</p>
+<h3>N8N webhook body is empty</h3>
+<ul>
+<li>Make sure the N8N webhook node is set to <strong>POST</strong> method (not GET)</li>
+<li>Make sure the webhook is saved in <strong>Settings &rarr; Outbound Webhooks</strong></li>
+<li>Test by asking Hermes: "Send [some text] to [webhook name]"</li>
+</ul>
 <h3>OpenAI API test</h3>
 <pre><code>cd /root/agentic-os
 export $(grep -E "^OPENAI_API_KEY|^OPENAI_MODEL" .env.local | xargs)
 node -e "
 const OpenAI = require('openai').default;
-new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 10000 })
+new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   .chat.completions.create({ model: process.env.OPENAI_MODEL, max_completion_tokens: 5, messages:[{role:'user',content:'hi'}] })
   .then(r => console.log('OK:', r.choices[0].message.content))
   .catch(e => console.error('FAIL:', e.message));
@@ -474,15 +528,14 @@ new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 10000 })
 <h2>Roadmap</h2>
 <table>
 <tr><th>Feature</th><th>Status</th></tr>
+<tr><td>GitHub Skills installer — paste a repo URL, auto-install as agent tool</td><td>Planned</td></tr>
 <tr><td>Human approval gates in pipelines</td><td>Planned</td></tr>
 <tr><td>Conditional pipeline branching (if/else)</td><td>Planned</td></tr>
 <tr><td>Bulk task dispatch from CSV</td><td>Planned</td></tr>
-<tr><td>Hermes/OpenClaw skill registry browser</td><td>Planned</td></tr>
 <tr><td>Auto-write task results to GHL contact notes</td><td>Planned</td></tr>
 <tr><td>Agent prompt versioning UI</td><td>Planned</td></tr>
 <tr><td>Per-agent token budget UI</td><td>Planned</td></tr>
 <tr><td>Output templates (PDF, Google Doc)</td><td>Planned</td></tr>
-<tr><td>Scheduled Google Drive sync</td><td>Planned</td></tr>
 <tr><td>Mobile app with push notifications</td><td>Planned</td></tr>
 </table>
 </section>
