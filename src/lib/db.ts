@@ -1150,4 +1150,27 @@ export function saveEmailSnapshot(data: {
   getDb().prepare(`
     INSERT OR REPLACE INTO email_snapshots 
     (snapshot_date, location_id, source_id, campaign_name, sent, opened, clicked, bounced, complained, unsubscribed)
-   
+    VALUES (@snapshot_date, @location_id, @source_id, @campaign_name, @sent, @opened, @clicked, @bounced, @complained, @unsubscribed)
+  `).run(data)
+}
+
+export function getEmailSnapshot(locationId: string, sourceId: string, snapshotDate: string) {
+  ensureEmailSnapshotsTable()
+  return getDb().prepare(
+    "SELECT * FROM email_snapshots WHERE location_id=? AND source_id=? AND snapshot_date<=? ORDER BY snapshot_date DESC LIMIT 1"
+  ).get(locationId, sourceId, snapshotDate) as any
+}
+
+export function getLatestSnapshot(locationId: string, sourceId: string) {
+  ensureEmailSnapshotsTable()
+  return getDb().prepare(
+    "SELECT * FROM email_snapshots WHERE location_id=? AND source_id=? ORDER BY snapshot_date DESC LIMIT 1"
+  ).get(locationId, sourceId) as any
+}
+
+export function getAllSnapshots(locationId: string) {
+  ensureEmailSnapshotsTable()
+  return getDb().prepare(
+    "SELECT * FROM email_snapshots WHERE location_id=? ORDER BY snapshot_date DESC"
+  ).all(locationId) as any[]
+}
