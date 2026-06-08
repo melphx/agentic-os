@@ -215,26 +215,32 @@ async function executeTool(name: string, args: any, baseUrl: string, jwtSecret: 
     }
 
     case 'send_webhook': {
+      console.log('[send_webhook] invoked with args:', JSON.stringify(args))
       const webhooks = getWebhooks()
+      console.log('[send_webhook] available webhooks:', webhooks.map(w => w.name))
       const webhook = webhooks.find(w => w.name.toLowerCase() === (args.webhook_name || '').toLowerCase())
       if (!webhook) {
         const names = webhooks.map(w => w.name).join(', ')
+        console.log('[send_webhook] webhook not found')
         return `❌ Webhook "${args.webhook_name}" not found. Available: ${names || 'none configured'}`
       }
       try {
         const headers: Record<string, string> = { 'Content-Type': 'application/json' }
         try { Object.assign(headers, JSON.parse(webhook.headers)) } catch {}
         const payload = { content: args.content, ...(args.extra || {}), timestamp: new Date().toISOString() }
+        console.log('[send_webhook] sending to', webhook.url, 'payload:', JSON.stringify(payload))
         const res = await fetch(webhook.url, {
           method: 'POST',
           headers,
           body: JSON.stringify(payload),
           signal: AbortSignal.timeout(10000),
         })
+        console.log('[send_webhook] response status:', res.status)
         return res.ok
           ? `✅ Sent to webhook "${webhook.name}" (HTTP ${res.status})`
           : `❌ Webhook "${webhook.name}" returned HTTP ${res.status}`
       } catch (e: any) {
+        console.log('[send_webhook] error:', e.message)
         return `❌ Webhook error: ${e.message}`
       }
     }
