@@ -62,9 +62,9 @@ async function fetchWorkflowCampaignStats(apiKey: string, locationId: string, st
   const totals = { sent: 0, opened: 0, clicked: 0, bounced: 0, complained: 0, unsubscribed: 0 }
   try {
     // Fetch campaigns from BOTH endpoints: workflow campaigns + regular/nurture campaigns
-    const fetchCampaignPage = async (endpoint: string, p: number): Promise<{campaigns: any[], total: number}> => {
+    const fetchCampaignPage = async (endpoint: string, offset: number, limit = 20): Promise<{campaigns: any[], total: number}> => {
       const res = await fetch(
-        `https://services.leadconnectorhq.com/emails/public/v2/locations/${locationId}/${endpoint}?page=${p}`,
+        `https://services.leadconnectorhq.com/emails/public/v2/locations/${locationId}/${endpoint}?limit=${limit}&offset=${offset}`,
         { headers: GHL23(apiKey), signal: AbortSignal.timeout(15000), cache: 'no-store' }
       )
       if (!res.ok) return { campaigns: [], total: 0 }
@@ -74,13 +74,13 @@ async function fetchWorkflowCampaignStats(apiKey: string, locationId: string, st
 
     // Paginate workflow campaigns
     let allCampaigns: any[] = []
-    let page = 1, totalFromApi = Infinity
-    while (allCampaigns.length < totalFromApi && page <= 50) {
-      const { campaigns: batch, total } = await fetchCampaignPage('campaigns/workflows', page)
+    let offset = 0, totalFromApi = Infinity
+    while (allCampaigns.length < totalFromApi) {
+      const { campaigns: batch, total } = await fetchCampaignPage('campaigns/workflows', offset)
       if (total > 0) totalFromApi = total
       if (!batch.length) break
       allCampaigns = allCampaigns.concat(batch)
-      page++
+      offset += batch.length
     }
 
     console.log(`[campaigns] total=${totalFromApi} fetched=${allCampaigns.length}`)

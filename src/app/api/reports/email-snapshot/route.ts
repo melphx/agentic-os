@@ -11,10 +11,10 @@ const GHL23 = (apiKey: string) => ({
 async function takeSnapshot(apiKey: string, locationId: string, snapshotDate: string) {
   // Get all campaigns with pagination
   let allCampaigns: any[] = []
-  let page = 1, totalFromApi = Infinity
-  while (allCampaigns.length < totalFromApi && page <= 50) {
+  let offset = 0, totalFromApi = Infinity
+  while (allCampaigns.length < totalFromApi) {
     const res = await fetch(
-      `https://services.leadconnectorhq.com/emails/public/v2/locations/${locationId}/campaigns/workflows?page=${page}`,
+      `https://services.leadconnectorhq.com/emails/public/v2/locations/${locationId}/campaigns/workflows?limit=20&offset=${offset}`,
       { headers: GHL23(apiKey), signal: AbortSignal.timeout(15000), cache: 'no-store' }
     )
     if (!res.ok) break
@@ -23,7 +23,7 @@ async function takeSnapshot(apiKey: string, locationId: string, snapshotDate: st
     const batch: any[] = d.campaigns || []
     if (!batch.length) break
     allCampaigns = allCampaigns.concat(batch)
-    page++
+    offset += batch.length
   }
 
   // Deduplicate by sourceId
