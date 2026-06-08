@@ -82,10 +82,6 @@ async function fetchWorkflowCampaignStats(apiKey: string, locationId: string, st
       if (seen.has(sid)) return false; seen.add(sid); return true
     })
 
-    // Start of selected month
-    const monthStart = new Date(year, month, 1).toISOString()
-    const monthEnd   = new Date(year, month + 1, 0, 23, 59, 59).toISOString()
-
     // Fetch stats for each campaign
     const statsResults = await Promise.all(
       campaigns.map(async (c: any) => {
@@ -397,7 +393,7 @@ Data:\n${dataCtx}` }
 
     return NextResponse.json({
       generated_at: new Date().toISOString(),
-      month, year, domain,
+      startDate, endDate, domain,
       month_label: monthLabel,
 
       // Scores
