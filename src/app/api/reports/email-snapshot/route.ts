@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
   const locationId = process.env.GHL_LOCATION_ID || ''
   const snapshots = getAllSnapshots(locationId)
   // Summarize available snapshots
-  const dates = [...new Set(snapshots.map((s: any) => s.snapshot_date))].sort()
+  const dates = Array.from(new Set(snapshots.map((s: any) => s.snapshot_date as string))).sort()
   return NextResponse.json({ snapshot_dates: dates, total_records: snapshots.length })
 }
 
