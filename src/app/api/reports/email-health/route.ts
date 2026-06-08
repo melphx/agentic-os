@@ -63,18 +63,20 @@ async function fetchWorkflowCampaignStats(apiKey: string, locationId: string, st
   try {
     // Get all campaigns with pagination
     let allCampaigns: any[] = []
-    let page = 1, hasMore = true
-    while (hasMore && page <= 20) {
+    let page = 1, totalFromApi = Infinity
+    while (allCampaigns.length < totalFromApi && page <= 50) {
       const res = await fetch(
-        `https://services.leadconnectorhq.com/emails/public/v2/locations/${locationId}/campaigns/workflows?page=${page}&pageSize=20`,
+        `https://services.leadconnectorhq.com/emails/public/v2/locations/${locationId}/campaigns/workflows?page=${page}`,
         { headers: GHL23(apiKey), signal: AbortSignal.timeout(15000), cache: 'no-store' }
       )
       if (!res.ok) break
       const d = await res.json() as Record<string, any>
+      if (typeof d.total === 'number') totalFromApi = d.total
       const batch: any[] = d.campaigns || []
-      console.log(`[campaigns page=${page}] fetched=${batch.length} total_so_far=${allCampaigns.length + batch.length} keys=${Object.keys(d).join(',')}`)
+      console.log(`[campaigns page=${page}] fetched=${batch.length} api_total=${d.total} unique_so_far=${allCampaigns.length + batch.length}`)
+      if (!batch.length) break
       allCampaigns = allCampaigns.concat(batch)
-      hasMore = batch.length > 0; page++
+      page++
     }
     // Deduplicate by sourceId
     const seen = new Set<string>()
