@@ -92,7 +92,7 @@ async function fetchWorkflowCampaignStats(apiKey: string, locationId: string, st
       if (seen.has(sid)) return false; seen.add(sid); return true
     })
 
-    // Fetch stats — try workflow-campaigns path first, fall back to campaigns path
+    // Fetch stats for workflow campaigns
     const statsResults = await Promise.all(
       campaigns.map(async (c: any) => {
         const sourceId = c.sourceId || c.id
