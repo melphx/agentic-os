@@ -62,7 +62,7 @@ async function fetchWorkflowCampaignStats(apiKey: string, locationId: string, st
   const totals = { sent: 0, opened: 0, clicked: 0, bounced: 0, complained: 0, unsubscribed: 0 }
   try {
     // Fetch campaigns from BOTH endpoints: workflow campaigns + regular/nurture campaigns
-    async function fetchCampaignPage(endpoint: string, p: number): Promise<{campaigns: any[], total: number}> {
+    const fetchCampaignPage = async (endpoint: string, p: number): Promise<{campaigns: any[], total: number}> => {
       const res = await fetch(
         `https://services.leadconnectorhq.com/emails/public/v2/locations/${locationId}/${endpoint}?page=${p}`,
         { headers: GHL23(apiKey), signal: AbortSignal.timeout(15000), cache: 'no-store' }
