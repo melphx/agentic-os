@@ -2983,11 +2983,27 @@ function EmailHealthReportView() {
   const [postmasterData, setPostmasterData] = useState<any | null>(null)
   const [postmasterConnected, setPostmasterConnected] = useState(false)
   const [backend, setBackend] = useState<{configured:boolean;domain:string}|null>(null)
+  const [snapshotInfo, setSnapshotInfo] = useState<{snapshot_dates:string[];total_records:number}|null>(null)
+  const [takingSnapshot, setTakingSnapshot] = useState(false)
 
   useEffect(() => {
     fetch('/api/reports/email-health').then(r=>r.json()).then(d=>setBackend(d)).catch(()=>{})
     fetch('/api/postmaster/oauth?action=status').then(r=>r.json()).then(d=>setPostmasterConnected(d.connected)).catch(()=>{})
+    fetch('/api/reports/email-snapshot').then(r=>r.json()).then(d=>setSnapshotInfo(d)).catch(()=>{})
   }, [])
+
+  async function takeSnapshot() {
+    setTakingSnapshot(true)
+    try {
+      const r = await fetch('/api/reports/email-snapshot', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({}) })
+      const d = await r.json()
+      if (d.ok) {
+        setSnapshotInfo(prev => ({ snapshot_dates: [...(prev?.snapshot_dates||[]), d.snapshot_date].filter((v,i,a)=>a.indexOf(v)===i).sort(), total_records: (prev?.total_records||0)+d.saved }))
+        alert(`Snapshot saved for ${d.snapshot_date}: ${d.saved} campaigns captured. Next month's report will show delta stats for this month.`)
+      } else { alert('Snapshot failed: '+(d.error||'unknown')) }
+    } catch(e:any) { alert('Error: '+e.message) }
+    finally { setTakingSnapshot(false) }
+  }
 
   async function generate() {
     setLoading(true); setError(''); setReport(null); setPostmasterData(null)
@@ -3036,6 +3052,11 @@ function EmailHealthReportView() {
             style={{ padding:'7px 16px', background:'linear-gradient(135deg,#4338ca,#6366f1)', border:'none', borderRadius:8, color:'white', fontWeight:700, fontSize:12, cursor:'pointer', opacity:loading?0.6:1 }}>
             {loading?'⏳ Generating…':'⚡ Generate'}
           </motion.button>
+          <button onClick={takeSnapshot} disabled={takingSnapshot}
+            title={snapshotInfo?.snapshot_dates?.length ? `Last snapshot: ${snapshotInfo.snapshot_dates.slice(-1)[0]}` : 'Take a snapshot now to enable monthly filtering next month'}
+            style={{ padding:'5px 10px', background: snapshotInfo?.snapshot_dates?.length ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)', border:`1px solid ${snapshotInfo?.snapshot_dates?.length ? 'rgba(16,185,129,0.2)' : 'rgba(245,158,11,0.2)'}`, borderRadius:7, color: snapshotInfo?.snapshot_dates?.length ? '#10b981' : '#f59e0b', fontSize:11, cursor:'pointer', flexShrink:0 }}>
+            {takingSnapshot ? '⏳' : snapshotInfo?.snapshot_dates?.length ? `📸 ${snapshotInfo.snapshot_dates.length} snapshot${snapshotInfo.snapshot_dates.length>1?'s':''}` : '📸 Take Snapshot'}
+          </button>
           {report && <button onClick={()=>{
             const html = buildEmailReportHTML(report, postmasterData)
             const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([html],{type:'text/html'}))

@@ -116,3 +116,26 @@ export async function pollEventTriggers(baseUrl: string, secret: string) {
     } catch { /* ignore per-trigger errors */ }
   }
 }
+
+// ── Auto-snapshot email stats on last day of each month ───────────────────
+
+export async function autoSnapshotEmailStats(baseUrl: string, secret: string) {
+  const now = new Date()
+  const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+  if (now.getDate() !== lastDayOfMonth) return // Only run on last day of month
+
+  const apiKey     = process.env.GHL_API_KEY     || ''
+  const locationId = process.env.GHL_LOCATION_ID || ''
+  if (!apiKey || !locationId) return
+
+  try {
+    await fetch(`${baseUrl}/api/reports/email-snapshot`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-internal-scheduler': secret },
+      body: JSON.stringify({ ghl_api_key: apiKey, location_id: locationId }),
+    })
+    console.log('[auto-snapshot] Email stats snapshot taken for', now.toISOString().slice(0,10))
+  } catch (e: any) {
+    console.error('[auto-snapshot] Failed:', e.message)
+  }
+}

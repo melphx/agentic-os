@@ -1093,3 +1093,57 @@ export function clearPostmasterOAuth() {
   ensurePostmasterOAuthTable()
   getDb().prepare('DELETE FROM google_postmaster_oauth').run()
 }
+
+// ── Email Campaign Snapshots (for monthly delta calculations) ──────────────
+
+export function ensureEmailSnapshotsTable() {
+  getDb().exec(`CREATE TABLE IF NOT EXISTS email_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_date TEXT NOT NULL,
+    location_id TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    campaign_name TEXT DEFAULT '',
+    sent INTEGER DEFAULT 0,
+    opened INTEGER DEFAULT 0,
+    clicked INTEGER DEFAULT 0,
+    bounced INTEGER DEFAULT 0,
+    complained INTEGER DEFAULT 0,
+    unsubscribed INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(snapshot_date, location_id, source_id)
+  )`)
+}
+
+export function saveEmailSnapshot(data: {
+  snapshot_date: string; location_id: string; source_id: string;
+  campaign_name: string; sent: number; opened: number; clicked: number;
+  bounced: number; complained: number; unsubscribed: number;
+}) {
+  ensureEmailSnapshotsTable()
+  getDb().prepare(`
+    INSERT OR REPLACE INTO email_snapshots 
+    (snapshot_date, location_id, source_id, campaign_name, sent, opened, clicked, bounced, complained, unsubscribed)
+    VALUES (@snapshot_date, @location_id, @source_id, @campaign_name, @sent, @opened, @clicked, @bounced, @complained, @unsubscribed)
+  `).run(data)
+}
+
+export function getEmailSnapshot(locationId: string, sourceId: string, snapshotDate: string) {
+  ensureEmailSnapshotsTable()
+  return getDb().prepare(
+    "SELECT * FROM email_snapshots WHERE location_id=? AND source_id=? AND snapshot_date<=? ORDER BY snapshot_date DESC LIMIT 1"
+  ).get(locationId, sourceId, snapshotDate) as any
+}
+
+export function getLatestSnapshot(locationId: string, sourceId: string) {
+  ensureEmailSnapshotsTable()
+  return getDb().prepare(
+    "SELECT * FROM email_snapshots WHERE location_id=? AND source_id=? ORDER BY snapshot_date DESC LIMIT 1"
+  ).get(locationId, sourceId) as any
+}
+
+export function getAllSnapshots(locationId: string) {
+  ensureEmailSnapshotsTable()
+  return getDb().prepare(
+    "SELECT * FROM email_snapshots WHERE location_id=? ORDER BY snapshot_date DESC"
+  ).all(locationId) as any[]
+}

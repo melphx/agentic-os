@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
+import { saveEmailSnapshot, getEmailSnapshot, getLatestSnapshot, ensureEmailSnapshotsTable } from '@/lib/db'
 
 const client = new OpenAI({
   baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
@@ -122,17 +123,74 @@ async function fetchWorkflowCampaignStats(apiKey: string, locationId: string, mo
       })
     }
 
+    // Calculate delta using snapshots for monthly accuracy
+    // End of previous month = start of current selected month minus 1 day
+    const prevMonthEnd = new Date(year, month, 0)
+    const prevDateStr = `${prevMonthEnd.getFullYear()}-${String(prevMonthEnd.getMonth()+1).padStart(2,'0')}-${String(prevMonthEnd.getDate()).padStart(2,'0')}`
+
+    // Apply delta calculations where snapshots exist
+    const deltaDetails: any[] = []
+    const deltaTotal = { sent: 0, opened: 0, clicked: 0, bounced: 0, complained: 0, unsubscribed: 0 }
+    let hasSnapshots = false
+
+    for (let i = 0; i < campaigns.length; i++) {
+      const c = campaigns[i]
+      const s = statsResults[i]
+      if (!s || s.sent === 0) continue
+
+      const sourceId = c.sourceId || c.id
+      const prevSnap = getEmailSnapshot(locationId, sourceId, prevDateStr)
+
+      let delta = { ...s }
+      if (prevSnap) {
+        hasSnapshots = true
+        delta = {
+          sent:         Math.max(0, (s.sent        || 0) - prevSnap.sent),
+          opened:       Math.max(0, (s.opened      || 0) - prevSnap.opened),
+          clicked:      Math.max(0, (s.clicked     || 0) - prevSnap.clicked),
+          bounced:      Math.max(0, ((s.permanentFail||s.bounced||0)) - prevSnap.bounced),
+          complained:   Math.max(0, (s.complained  || 0) - prevSnap.complained),
+          unsubscribed: Math.max(0, (s.unsubscribed|| 0) - prevSnap.unsubscribed),
+        }
+        // Auto-save current as snapshot for end of selected month
+        const currMonthEnd = new Date(year, month + 1, 0)
+        const currDateStr = `${currMonthEnd.getFullYear()}-${String(currMonthEnd.getMonth()+1).padStart(2,'0')}-${String(currMonthEnd.getDate()).padStart(2,'0')}`
+        saveEmailSnapshot({ snapshot_date: currDateStr, location_id: locationId, source_id: sourceId, campaign_name: c.name || '', sent: s.sent||0, opened: s.opened||0, clicked: s.clicked||0, bounced: s.permanentFail||s.bounced||0, complained: s.complained||0, unsubscribed: s.unsubscribed||0 })
+      }
+
+      if (delta.sent === 0) continue
+      deltaTotal.sent         += delta.sent
+      deltaTotal.opened       += delta.opened
+      deltaTotal.clicked      += delta.clicked
+      deltaTotal.bounced      += delta.bounced
+      deltaTotal.complained   += delta.complained
+      deltaTotal.unsubscribed += delta.unsubscribed
+
+      deltaDetails.push({
+        name: c.name, sent: delta.sent, opened: delta.opened, clicked: delta.clicked,
+        bounced: delta.bounced, complained: delta.complained,
+        openRate:      delta.sent > 0 ? delta.opened   /delta.sent*100 : (s.openRate||0),
+        clickRate:     delta.sent > 0 ? delta.clicked  /delta.sent*100 : (s.clickRate||0),
+        complaintRate: delta.sent > 0 ? delta.complained/delta.sent*100 : (s.complaintRate||0),
+      })
+    }
+
+    // If we have delta data, use it; otherwise fall back to all-time
+    const useData  = hasSnapshots && deltaTotal.sent > 0 ? deltaTotal : totals
+    const useDetails = hasSnapshots && deltaDetails.length > 0 ? deltaDetails : workflowDetails
+
     return {
-      ...totals, campaigns: campaignCount, workflows: workflowDetails,
-      openRate:      totals.sent > 0 ? totals.opened      / totals.sent * 100 : 0,
-      clickRate:     totals.sent > 0 ? totals.clicked     / totals.sent * 100 : 0,
-      bounceRate:    totals.sent > 0 ? totals.bounced     / totals.sent * 100 : 0,
-      complaintRate: totals.sent > 0 ? totals.complained  / totals.sent * 100 : 0,
-      unsubRate:     totals.sent > 0 ? totals.unsubscribed/ totals.sent * 100 : 0,
+      ...useData, campaigns: hasSnapshots ? deltaDetails.length : campaignCount,
+      workflows: useDetails, is_monthly: hasSnapshots,
+      openRate:      useData.sent > 0 ? useData.opened      / useData.sent * 100 : 0,
+      clickRate:     useData.sent > 0 ? useData.clicked     / useData.sent * 100 : 0,
+      bounceRate:    useData.sent > 0 ? useData.bounced     / useData.sent * 100 : 0,
+      complaintRate: useData.sent > 0 ? useData.complained  / useData.sent * 100 : 0,
+      unsubRate:     useData.sent > 0 ? useData.unsubscribed/ useData.sent * 100 : 0,
     }
   } catch (e: any) {
     console.error('[workflow stats]', e.message)
-    return { ...totals, campaigns: 0, workflows: [], openRate: 0, clickRate: 0, bounceRate: 0, complaintRate: 0, unsubRate: 0 }
+    return { ...totals, campaigns: 0, workflows: [], openRate: 0, clickRate: 0, bounceRate: 0, complaintRate: 0, unsubRate: 0, is_monthly: false }
   }
 }
 
@@ -356,7 +414,7 @@ Data:\n${dataCtx}` }
         spam_rate:      parseFloat(campaignStats.complaintRate.toFixed(3)),
         unsub_rate:     parseFloat(campaignStats.unsubRate.toFixed(2)),
         engagement_rate: parseFloat(campaignStats.openRate.toFixed(1)),
-        note: campaignStats.campaigns === 0 ? 'No workflow campaigns found.' : 'All-time campaign totals.',
+        note: campaignStats.campaigns === 0 ? 'No workflow campaigns found.' : campaignStats.is_monthly ? `Monthly stats for ${MONTHS[month]} ${year} (delta from previous snapshot)` : 'All-time totals — take a snapshot at month end to enable monthly filtering. Go to Reports → Snapshot.',
       },
       workflows: campaignStats.workflows || [],
 
