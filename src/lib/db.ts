@@ -474,7 +474,7 @@ export function getIntegrationContext(agentId: string): string {
   integrations.forEach(i => lines.push(`- [${i.name}] (type: ${i.type}): ${i.description}`))
   webhooks.forEach(w => lines.push(`- [${w.name}] (type: webhook): Send data to the ${w.name} webhook endpoint`))
 
-  return `You have access to the following integrations and webhooks. To call one, output exactly:\n{{CALL:integration_name:json_payload}}\nWhere json_payload is the data/content to send (use {} if none).\n\nAvailable integrations and webhooks:\n${lines.join('\n')}`
+  return `You have access to the following integrations and webhooks. To call one, output EXACTLY this format on its own line:\n{{CALL:integration_name:json_payload}}\n\nIMPORTANT RULES FOR WEBHOOKS:\n- ALWAYS include the content/text you generated inside the json_payload\n- Example: {{CALL:Test Webhook:{"content":"The full text you wrote goes here"}}}\n- Never send an empty payload {{}} when you have content to deliver\n- After the CALL line, confirm what you sent\n\nAvailable integrations and webhooks:\n${lines.join('\n')}`
 }
 
 // ── API Keys (for inbound webhook triggers) ────────────────────────────────
