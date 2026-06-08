@@ -134,7 +134,7 @@ async function ask(agentId: string, systemPrompt: string, userPrompt: string, ma
     totalTokens += roundTokens
 
     // Check for skill calls {{SKILL:name:prompt}}
-    const skillMatch = reply.match(/\{\{SKILL:([^:]+):([\s\S]+?)\}\}/)
+    const skillMatch = reply.match(/\{\{SKILL:([^:]+):([\s\S]+)\}\}/)
     if (skillMatch) {
       const [, skillName, skillPrompt] = skillMatch
       const skills = getSkills()
@@ -157,7 +157,7 @@ async function ask(agentId: string, systemPrompt: string, userPrompt: string, ma
     }
 
     // Check for sub-agent spawning {{SPAWN:agent_id:description}}
-    const spawnMatch = reply.match(/\{\{SPAWN:([^:]+):([\s\S]+?)\}\}/)
+    const spawnMatch = reply.match(/\{\{SPAWN:([^:]+):([\s\S]+)\}\}/)
     if (spawnMatch) {
       const [, spawnAgentId, spawnDesc] = spawnMatch
       const baseUrl = process.env.INTERNAL_URL || 'http://localhost:3000'
@@ -179,7 +179,7 @@ async function ask(agentId: string, systemPrompt: string, userPrompt: string, ma
     }
 
     // Check if agent wants to call an integration
-    const callMatch = reply.match(/\{\{CALL:([^:]+):([\s\S]+?)\}\}/)
+    const callMatch = reply.match(/\{\{CALL:([^:]+):([\s\S]+)\}\}/)
     if (!callMatch) {
       finalContent = reply
       break
