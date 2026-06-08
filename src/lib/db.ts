@@ -252,9 +252,9 @@ export interface TaskLog {
 }
 
 export function saveMemory(agentId: string, summary: string, taskId?: number) {
-  getDb().prepare(`
+  try { getDb().prepare(`
     INSERT INTO agent_memory (agent_id, summary, task_id) VALUES (?, ?, ?)
-  `).run(agentId, summary, taskId ?? null)
+  `).run(agentId, summary, taskId ?? null) } catch {}
   // Keep only the last 20 memories per agent
   getDb().prepare(`
     DELETE FROM agent_memory WHERE agent_id = ? AND id NOT IN (
@@ -354,9 +354,9 @@ export function getMetricHistory(agentId: string, metric: string, limit = 12): n
 }
 
 export function recordMetric(agentId: string, metric: string, value: number) {
-  getDb().prepare(`
+  try { getDb().prepare(`
     INSERT INTO metrics (agent_id, metric, value) VALUES (?, ?, ?)
-  `).run(agentId, metric, value)
+  `).run(agentId, metric, value) } catch {}
 }
 
 // ── Agent Knowledge (training files) ──────────────────────────────────────
