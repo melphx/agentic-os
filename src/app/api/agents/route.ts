@@ -43,3 +43,15 @@ export async function POST(req: NextRequest) {
   const agent = db.prepare('SELECT * FROM agents WHERE id = ?').get(id)
   return NextResponse.json(agent, { status: 201 })
 }
+
+export async function DELETE(req: NextRequest) {
+  const { error } = await requireAuth(req)
+  if (error) return error
+
+  const id = req.nextUrl.searchParams.get('id')
+  if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 })
+
+  const { deleteAgent } = await import('@/lib/db')
+  deleteAgent(id)
+  return NextResponse.json({ ok: true })
+}

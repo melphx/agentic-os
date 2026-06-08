@@ -121,8 +121,7 @@ export async function pollEventTriggers(baseUrl: string, secret: string) {
 
 export async function autoSnapshotEmailStats(baseUrl: string, secret: string) {
   const now = new Date()
-  const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
-  if (now.getDate() !== lastDayOfMonth) return // Only run on last day of month
+  // Run daily — takes a snapshot each day so date-range deltas work
 
   const apiKey     = process.env.GHL_API_KEY     || ''
   const locationId = process.env.GHL_LOCATION_ID || ''

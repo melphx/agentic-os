@@ -305,6 +305,19 @@ export function getAgent(id: string): Agent | null {
   return (getDb().prepare('SELECT * FROM agents WHERE id = ?').get(id) as Agent) ?? null
 }
 
+export function deleteAgent(id: string) {
+  const db = getDb()
+  // Clean up all agent data before deleting
+  try { db.prepare('DELETE FROM agent_memory WHERE agent_id = ?').run(id) } catch {}
+  try { db.prepare('DELETE FROM agent_knowledge WHERE agent_id = ?').run(id) } catch {}
+  try { db.prepare('DELETE FROM agent_integrations WHERE agent_id = ?').run(id) } catch {}
+  try { db.prepare('DELETE FROM agent_settings WHERE agent_id = ?').run(id) } catch {}
+  try { db.prepare('DELETE FROM schedules WHERE agent_id = ?').run(id) } catch {}
+  try { db.prepare('DELETE FROM metrics WHERE agent_id = ?').run(id) } catch {}
+  try { db.prepare('UPDATE tasks SET agent_id = NULL WHERE agent_id = ?').run(id) } catch {}
+  db.prepare('DELETE FROM agents WHERE id = ?').run(id)
+}
+
 export function updateAgent(id: string, fields: Partial<Agent>) {
   const allowed = ['status','current_task','tokens_used','tasks_completed','uptime_seconds','progress']
   const updates = Object.entries(fields)
@@ -1177,6 +1190,16 @@ export function getEmailSnapshot(snapshotDate: string, locationId: string, sourc
   return getDb().prepare(`
     SELECT * FROM email_snapshots WHERE snapshot_date=? AND location_id=? AND source_id=?
   `).get(snapshotDate, locationId, sourceId) as EmailSnapshot | null
+}
+
+// Get the most recent snapshot on or before a given date
+export function getClosestSnapshot(targetDate: string, locationId: string, sourceId: string): EmailSnapshot | null {
+  ensureEmailSnapshotsTable()
+  return getDb().prepare(`
+    SELECT * FROM email_snapshots
+    WHERE location_id=? AND source_id=? AND snapshot_date <= ?
+    ORDER BY snapshot_date DESC LIMIT 1
+  `).get(locationId, sourceId, targetDate) as EmailSnapshot | null
 }
 
 export function getLatestSnapshot(locationId: string, sourceId: string): EmailSnapshot | null {

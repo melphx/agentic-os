@@ -1106,7 +1106,7 @@ const AGENT_TEMPLATES: Record<string, { label: string; description: string; type
 
 // ── Agent Detail ───────────────────────────────────────────────────────────
 
-function AgentDetailView({ agent, onBack, onRunTask, newTaskId, onNewTaskConsumed }: { agent: Agent; onBack: () => void; onRunTask: (a: Agent, prefill?: Partial<{ title: string; description: string; type: string }>) => void; newTaskId?: number | null; onNewTaskConsumed?: () => void }) {
+function AgentDetailView({ agent, onBack, onRunTask, onDelete, newTaskId, onNewTaskConsumed }: { agent: Agent; onBack: () => void; onRunTask: (a: Agent, prefill?: Partial<{ title: string; description: string; type: string }>) => void; onDelete?: (id: string) => void; newTaskId?: number | null; onNewTaskConsumed?: () => void }) {
   const [tasks, setTasks] = useState<Task[]>(agent.tasks || [])
   // BUG FIX: track by ID only — never overwritten by polls
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null)
@@ -1152,9 +1152,21 @@ function AgentDetailView({ agent, onBack, onRunTask, newTaskId, onNewTaskConsume
 
         {/* Agent header */}
         <div style={{ padding: '16px 14px 12px', borderBottom: '1px solid rgba(99,102,241,0.1)', flexShrink: 0 }}>
-          <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: 'rgba(148,163,184,0.5)', cursor: 'pointer', fontSize: 12, padding: 0, marginBottom: 12 }}>
-            <ChevronLeft size={13} /> All Agents
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: 'rgba(148,163,184,0.5)', cursor: 'pointer', fontSize: 12, padding: 0 }}>
+              <ChevronLeft size={13} /> All Agents
+            </button>
+            {onDelete && (
+              <button onClick={async () => {
+                if (!confirm(`Delete ${agent.name}? This cannot be undone.`)) return
+                await fetch(`/api/agents?id=${agent.id}`, { method: 'DELETE' })
+                onDelete(agent.id)
+                onBack()
+              }} style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, color: '#f87171', cursor: 'pointer', fontSize: 10, padding: '3px 8px' }}>
+                Delete
+              </button>
+            )}
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <AgentAvatar agent={agent} size={34} pulse />
             <div>
@@ -2974,9 +2986,10 @@ function ApprovalsModal({ onClose }: { onClose: () => void }) {
 // ── Email Health Report View ───────────────────────────────────────────────
 
 function EmailHealthReportView() {
-  const today = new Date()
-  const [month, setMonth] = useState(today.getMonth())
-  const [year, setYear] = useState(today.getFullYear())
+  const todayStr = new Date().toISOString().slice(0,10)
+  const firstOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0,10)
+  const [startDate, setStartDate] = useState(firstOfMonth)
+  const [endDate, setEndDate] = useState(todayStr)
   const [loading, setLoading] = useState(false)
   const [report, setReport] = useState<any | null>(null)
   const [error, setError] = useState('')
@@ -2999,7 +3012,7 @@ function EmailHealthReportView() {
       const d = await r.json()
       if (d.ok) {
         setSnapshotInfo(prev => ({ snapshot_dates: [...(prev?.snapshot_dates||[]), d.snapshot_date].filter((v,i,a)=>a.indexOf(v)===i).sort(), total_records: (prev?.total_records||0)+d.saved }))
-        alert(`Snapshot saved for ${d.snapshot_date}: ${d.saved} campaigns captured. Next month's report will show delta stats for this month.`)
+        alert(`Snapshot saved for ${d.snapshot_date}: ${d.saved} campaigns captured. Select a date range starting from this date to see delta stats.`)
       } else { alert('Snapshot failed: '+(d.error||'unknown')) }
     } catch(e:any) { alert('Error: '+e.message) }
     finally { setTakingSnapshot(false) }
@@ -3010,7 +3023,7 @@ function EmailHealthReportView() {
     try {
       const r = await fetch('/api/reports/email-health', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ month, year }),
+        body: JSON.stringify({ startDate, endDate }),
       })
       const d = await r.json()
       if (!r.ok) { setError(d.error || 'Failed'); return }
@@ -3041,26 +3054,33 @@ function EmailHealthReportView() {
           {backend?.configured && <span style={{ fontSize:10, color:'#10b981', background:'rgba(16,185,129,0.1)', border:'1px solid rgba(16,185,129,0.2)', padding:'1px 7px', borderRadius:10 }}>Connected</span>}
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-          <select value={month} onChange={e=>setMonth(parseInt(e.target.value))} style={{ background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:7, padding:'5px 8px', color:'white', fontSize:12, cursor:'pointer', outline:'none', fontFamily:'inherit' }}>
-            {MONTHS.map((m,i)=><option key={i} value={i} style={{background:'#0f1623'}}>{m}</option>)}
-          </select>
-          <select value={year} onChange={e=>setYear(parseInt(e.target.value))} style={{ background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:7, padding:'5px 8px', color:'white', fontSize:12, cursor:'pointer', outline:'none', fontFamily:'inherit' }}>
-            {[2024,2025,2026].map(y=><option key={y} value={y} style={{background:'#0f1623'}}>{y}</option>)}
-          </select>
+          <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+            <span style={{ color:'rgba(148,163,184,0.4)', fontSize:11 }}>From</span>
+            <input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)}
+              style={{ background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:7, padding:'5px 8px', color:'white', fontSize:12, outline:'none', fontFamily:'inherit', colorScheme:'dark' }} />
+            <span style={{ color:'rgba(148,163,184,0.4)', fontSize:11 }}>To</span>
+            <input type="date" value={endDate} onChange={e=>setEndDate(e.target.value)}
+              style={{ background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:7, padding:'5px 8px', color:'white', fontSize:12, outline:'none', fontFamily:'inherit', colorScheme:'dark' }} />
+          </div>
+          <div style={{ display:'flex', gap:4 }}>
+            <button onClick={()=>{ const t=new Date(); setStartDate(new Date(t.getFullYear(),t.getMonth(),1).toISOString().slice(0,10)); setEndDate(t.toISOString().slice(0,10)) }} style={{ padding:'4px 8px', background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:6, color:'#a5b4fc', fontSize:10, cursor:'pointer' }}>This Month</button>
+            <button onClick={()=>{ const t=new Date(); const s=new Date(t); s.setDate(t.getDate()-7); setStartDate(s.toISOString().slice(0,10)); setEndDate(t.toISOString().slice(0,10)) }} style={{ padding:'4px 8px', background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:6, color:'#a5b4fc', fontSize:10, cursor:'pointer' }}>Last 7d</button>
+            <button onClick={()=>{ const t=new Date(); const s=new Date(t); s.setDate(t.getDate()-30); setStartDate(s.toISOString().slice(0,10)); setEndDate(t.toISOString().slice(0,10)) }} style={{ padding:'4px 8px', background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:6, color:'#a5b4fc', fontSize:10, cursor:'pointer' }}>Last 30d</button>
+          </div>
           {!postmasterConnected && <button onClick={()=>{window.location.href='/api/postmaster/oauth?action=start'}} style={{ padding:'5px 10px', background:'rgba(16,185,129,0.1)', border:'1px solid rgba(16,185,129,0.2)', borderRadius:7, color:'#10b981', fontSize:11, cursor:'pointer' }}>+ Postmaster</button>}
           <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.98}} onClick={generate} disabled={loading}
             style={{ padding:'7px 16px', background:'linear-gradient(135deg,#4338ca,#6366f1)', border:'none', borderRadius:8, color:'white', fontWeight:700, fontSize:12, cursor:'pointer', opacity:loading?0.6:1 }}>
             {loading?'⏳ Generating…':'⚡ Generate'}
           </motion.button>
           <button onClick={takeSnapshot} disabled={takingSnapshot}
-            title={snapshotInfo?.snapshot_dates?.length ? `Last snapshot: ${snapshotInfo.snapshot_dates.slice(-1)[0]}` : 'Take a snapshot now to enable monthly filtering next month'}
+            title={snapshotInfo?.snapshot_dates?.length ? `Last snapshot: ${snapshotInfo.snapshot_dates.slice(-1)[0]}` : 'Take a snapshot now — run the report later to see delta stats for any date range starting from today'}
             style={{ padding:'5px 10px', background: snapshotInfo?.snapshot_dates?.length ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)', border:`1px solid ${snapshotInfo?.snapshot_dates?.length ? 'rgba(16,185,129,0.2)' : 'rgba(245,158,11,0.2)'}`, borderRadius:7, color: snapshotInfo?.snapshot_dates?.length ? '#10b981' : '#f59e0b', fontSize:11, cursor:'pointer', flexShrink:0 }}>
             {takingSnapshot ? '⏳' : snapshotInfo?.snapshot_dates?.length ? `📸 ${snapshotInfo.snapshot_dates.length} snapshot${snapshotInfo.snapshot_dates.length>1?'s':''}` : '📸 Take Snapshot'}
           </button>
           {report && <button onClick={()=>{
             const html = buildEmailReportHTML(report, postmasterData)
             const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([html],{type:'text/html'}))
-            a.download = `email-health-${MONTHS[month].toLowerCase()}-${year}.html`; a.click()
+            a.download = `email-health-${startDate}-to-${endDate}.html`; a.click()
           }} style={{ padding:'5px 10px', background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:7, color:'#a5b4fc', fontSize:11, cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}>
             <Download size={11}/> Export
           </button>}
@@ -3328,41 +3348,185 @@ function EmailHealthReportView() {
 function buildEmailReportHTML(report: any, pm: any): string {
   const sc = report.health_score >= 800 ? '#10b981' : report.health_score >= 650 ? '#06b6d4' : report.health_score >= 500 ? '#f59e0b' : report.health_score >= 300 ? '#f43f5e' : '#dc2626'
   const pct = (n: number, d: number) => d > 0 ? (n/d*100).toFixed(1)+'%' : '0%'
+  const seg = report.segments || {}
+  const et = report.engagement_table
+
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Email Health Report - ${report.month_label}</title>
-<style>*{box-sizing:border-box;margin:0;padding:0}body{background:#080c14;color:#e2e8f0;font-family:Inter,sans-serif;padding:32px;max-width:900px;margin:0 auto}
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#080c14;color:#e2e8f0;font-family:Inter,system-ui,sans-serif;padding:32px;max-width:900px;margin:0 auto}
 .card{background:rgba(15,20,35,.9);border:1px solid rgba(99,102,241,.15);border-radius:14px;padding:20px;margin:14px 0}
 .title{color:#a5b4fc;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:12px}
 p{color:rgba(148,163,184,.7);line-height:1.7;margin-bottom:8px}
-.row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(99,102,241,.06)}
-.score{font-size:60px;font-weight:900;color:${sc}}.label{font-size:20px;font-weight:800;color:${sc}}
-.kpi{text-align:center;flex:1}.kpi-val{font-size:20px;font-weight:700;color:${sc}}.kpi-lbl{font-size:9px;color:rgba(148,163,184,.4);text-transform:uppercase}
-.badge-high{background:rgba(244,63,94,.15);border:1px solid rgba(244,63,94,.3);color:#f43f5e;padding:1px 6px;border-radius:4px;font-size:9px;font-weight:700;text-transform:uppercase}
-.badge-medium{background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.3);color:#f59e0b;padding:1px 6px;border-radius:4px;font-size:9px;font-weight:700;text-transform:uppercase}
-.badge-low{background:rgba(6,182,212,.15);border:1px solid rgba(6,182,212,.3);color:#06b6d4;padding:1px 6px;border-radius:4px;font-size:9px;font-weight:700;text-transform:uppercase}
+.row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid rgba(99,102,241,.06)}
+.kpi{text-align:center;flex:1;padding:8px 4px}
+.kpi-val{font-size:20px;font-weight:700;color:${sc}}
+.kpi-lbl{font-size:9px;color:rgba(148,163,184,.4);text-transform:uppercase;margin-top:2px}
+.badge-high{background:rgba(244,63,94,.15);border:1px solid rgba(244,63,94,.3);color:#f43f5e;padding:1px 7px;border-radius:4px;font-size:9px;font-weight:700;text-transform:uppercase}
+.badge-medium{background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.3);color:#f59e0b;padding:1px 7px;border-radius:4px;font-size:9px;font-weight:700;text-transform:uppercase}
+.badge-low{background:rgba(6,182,212,.15);border:1px solid rgba(6,182,212,.3);color:#06b6d4;padding:1px 7px;border-radius:4px;font-size:9px;font-weight:700;text-transform:uppercase}
+table{width:100%;border-collapse:collapse}
+th{color:rgba(148,163,184,.4);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;padding:6px 10px;text-align:left;border-bottom:1px solid rgba(99,102,241,.1)}
+td{padding:8px 10px;border-bottom:1px solid rgba(99,102,241,.06);font-size:13px;color:rgba(148,163,184,.75)}
 </style></head><body>
-<div style="display:flex;justify-content:space-between;margin-bottom:20px">
-<div><div class="score">${report.health_score}</div><div class="label">${report.score_label}</div>
-<div style="color:rgba(148,163,184,.4);font-size:11px;margin-top:4px">Strict Email Health Score · ${report.month_label} · via HighLevel</div>
-<div style="margin-top:6px;font-size:12px"><span style="color:rgba(148,163,184,.5)">Strict: </span><span style="color:${sc};font-weight:700">${report.strict_score}</span>&nbsp;&nbsp;
-<span style="color:rgba(148,163,184,.5)">Relaxed: </span><span style="color:#06b6d4;font-weight:700">${report.relaxed_score}</span></div></div>
-<div style="text-align:right"><div style="font-size:18px;font-weight:700;color:white">Phoenix Home Remodeling</div><div style="color:rgba(148,163,184,.4);font-size:12px">${report.domain}</div></div></div>
+
+<!-- HEADER -->
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px">
+  <div>
+    <div style="font-size:64px;font-weight:900;color:${sc};line-height:1">${report.health_score}</div>
+    <div style="font-size:22px;font-weight:800;color:${sc};margin-top:2px">${report.score_label}</div>
+    <div style="color:rgba(148,163,184,.4);font-size:11px;margin-top:6px">Strict Email Health Score · ${report.month_label} · via HighLevel</div>
+    <div style="margin-top:8px;font-size:13px">
+      <span style="color:rgba(148,163,184,.5)">Strict: </span><span style="color:${sc};font-weight:700">${report.strict_score}</span>&nbsp;&nbsp;
+      <span style="color:rgba(148,163,184,.5)">Relaxed: </span><span style="color:#06b6d4;font-weight:700">${report.relaxed_score}</span>
+    </div>
+  </div>
+  <div style="text-align:right">
+    <div style="font-size:20px;font-weight:700;color:white">Phoenix Home Remodeling</div>
+    <div style="color:rgba(148,163,184,.4);font-size:13px;margin-top:4px">${report.domain}</div>
+  </div>
+</div>
+
+<!-- ANALYST NOTES -->
 <div class="card"><div class="title">Analyst Notes</div><p>${report.analysis?.analyst_notes||''}</p></div>
-<div class="card"><div class="title">Executive Summary</div>${Array.isArray(report.analysis?.executive_summary_bullets)?report.analysis.executive_summary_bullets.map((b:string)=>`<p>• ${b}</p>`).join(''):''}
+
+<!-- EXECUTIVE SUMMARY -->
+<div class="card"><div class="title">Executive Summary</div>
+  ${Array.isArray(report.analysis?.executive_summary_bullets)?report.analysis.executive_summary_bullets.map((b:string)=>`<p>• ${b}</p>`).join(''):''}
 </div>
-${Array.isArray(report.analysis?.problems)?`<div class="card" style="border-color:rgba(244,63,94,.15)"><div class="title" style="color:#f43f5e">⚠️ Problems Costing You Revenue</div>${report.analysis.problems.map((p:any)=>`<div style="padding:8px 0;border-bottom:1px solid rgba(244,63,94,.08)"><strong style="color:white">${p.title}</strong><p style="margin-top:4px">${p.description}</p></div>`).join('')}</div>`:''}
-<div class="card"><div class="title">Actions to Take</div>
-${['high','medium','low'].map(level=>{const items=report.analysis?.[`actions_${level}`]||[];return items.map((a:string)=>`<div style="display:flex;gap:8px;padding:7px 0;border-bottom:1px solid rgba(99,102,241,.06)"><span class="badge-${level}">${level}</span><span style="color:rgba(148,163,184,.75);font-size:13px">${a}</span></div>`).join('')}).join('')}
-</div>
-${report.stats.campaigns_analyzed>0?`<div class="card"><div class="title">Email Performance (${report.stats.campaigns_analyzed} Workflows, All-Time)</div>
-<div style="display:flex;margin-bottom:12px">${[['Engagement',report.stats.open_rate+'%'],['Open Rate',report.stats.open_rate+'%'],['Click Rate',report.stats.click_rate+'%'],['Bounce',report.stats.bounce_rate+'%'],['Spam',report.stats.spam_rate+'%'],['Sent',report.stats.total_sent.toLocaleString()]].map(([l,v])=>`<div class="kpi"><div class="kpi-val">${v}</div><div class="kpi-lbl">${l}</div></div>`).join('')}</div>
+
+<!-- PROBLEMS -->
+${Array.isArray(report.analysis?.problems)&&report.analysis.problems.length?`
+<div class="card" style="border-color:rgba(244,63,94,.2)">
+  <div class="title" style="color:#f43f5e">⚠️ Problems Costing You Revenue</div>
+  ${report.analysis.problems.map((p:any)=>`
+    <div style="padding:10px 0;border-bottom:1px solid rgba(244,63,94,.08)">
+      <strong style="color:white;font-size:14px">${p.title}</strong>
+      <p style="margin-top:4px">${p.description}</p>
+    </div>`).join('')}
 </div>`:''}
+
+<!-- ACTIONS -->
+<div class="card"><div class="title">Actions to Take</div>
+  ${['high','medium','low'].map((level:string)=>{
+    const items:string[] = report.analysis?.[`actions_${level}`]||[]
+    return items.map((a:string)=>`
+      <div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid rgba(99,102,241,.06)">
+        <span class="badge-${level}" style="flex-shrink:0;margin-top:2px">${level}</span>
+        <span style="color:rgba(148,163,184,.8);font-size:13px">${a}</span>
+      </div>`).join('')
+  }).join('')}
+</div>
+
+<!-- EMAIL PERFORMANCE STATS -->
+${report.stats.campaigns_analyzed>0?`
+<div class="card">
+  <div class="title">Email Performance — ${report.stats.campaigns_analyzed} Workflows</div>
+  <div style="display:flex;margin-bottom:8px">
+    ${[['Engagement',report.stats.open_rate+'%'],['Open Rate',report.stats.open_rate+'%'],['Click Rate',report.stats.click_rate+'%'],['Bounce Rate',report.stats.bounce_rate+'%'],['Spam Rate',report.stats.spam_rate+'%'],['Total Sent',report.stats.total_sent.toLocaleString()]].map(([l,v])=>`
+    <div class="kpi"><div class="kpi-val">${v}</div><div class="kpi-lbl">${l}</div></div>`).join('')}
+  </div>
+</div>`:''}
+
+<!-- ENGAGEMENT TABLE -->
+${et?`
+<div class="card">
+  <div class="title">Engagement This Period</div>
+  <table>
+    <tr><th>Segment</th><th>Mailed</th><th>Open %</th><th>Click %</th></tr>
+    <tr>
+      <td style="color:white;font-weight:600">Existing Subscribers</td>
+      <td style="color:white;font-weight:600">${et.existing?.mailed?.toLocaleString()||'—'}</td>
+      <td style="color:#10b981;font-weight:600">${et.existing?.open_pct||'—'}%</td>
+      <td style="color:#10b981;font-weight:600">${et.existing?.click_pct||'—'}%</td>
+    </tr>
+    <tr>
+      <td style="color:white;font-weight:600">New Subscribers</td>
+      <td style="color:white;font-weight:600">${et.new_subs?.mailed?.toLocaleString()||'—'}</td>
+      <td style="color:#10b981;font-weight:600">${et.new_subs?.open_pct||'—'}%</td>
+      <td style="color:#10b981;font-weight:600">${et.new_subs?.click_pct||'—'}%</td>
+    </tr>
+  </table>
+</div>`:''}
+
+<!-- SEGMENTS -->
+${seg.total?`
+<div class="card">
+  <div class="title">List Health — Engagement Segments</div>
+  <p style="color:rgba(148,163,184,.35);font-size:11px;margin-bottom:12px">Engagement quality of your existing contact list</p>
+  <!-- Segment bar -->
+  <div style="display:flex;height:10px;border-radius:5px;overflow:hidden;margin-bottom:16px;background:rgba(99,102,241,.08)">
+    ${[[seg.active,'#10b981'],[seg.warmingUp,'#06b6d4'],[seg.cold,'#f59e0b'],[seg.dead,'#f43f5e']].map(([n,c])=>`<div style="width:${seg.total>0?(n as number)/seg.total*100:0}%;background:${c};min-width:${(n as number)>0?3:0}px"></div>`).join('')}
+  </div>
+  ${[
+    {label:'Best Assets',sub:'Opened in last 30 days',count:seg.active,color:'#10b981'},
+    {label:'Assets',sub:'Opened in last 30-90 days',count:seg.warmingUp,color:'#06b6d4'},
+    {label:'Liabilities',sub:'Opened in last 90-365 days',count:seg.cold,color:'#f59e0b'},
+    {label:'Worst Liabilities',sub:'Never opened or over 1 year',count:seg.dead,color:'#f43f5e'},
+  ].map(s=>`
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(99,102,241,.06)">
+      <div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="width:10px;height:10px;border-radius:50%;background:${s.color};flex-shrink:0"></div>
+          <span style="color:white;font-size:13px;font-weight:600">${s.label}</span>
+        </div>
+        <div style="color:rgba(148,163,184,.4);font-size:11px;margin-left:18px;margin-top:2px">${s.sub}</div>
+      </div>
+      <div style="text-align:right">
+        <span style="color:${s.color};font-weight:700;font-size:15px">${(s.count as number).toLocaleString()}</span>
+        <span style="color:rgba(148,163,184,.3);font-size:11px;margin-left:6px">${pct(s.count as number,seg.total)}</span>
+      </div>
+    </div>`).join('')}
+  <!-- Summary stats -->
+  <div style="display:flex;gap:0;margin-top:14px;border-top:1px solid rgba(99,102,241,.08);padding-top:12px">
+    ${[['Contacts',seg.total,'#a5b4fc'],['Opted Out',seg.optedOut,'rgba(148,163,184,.5)'],['Marketable',seg.marketable,'#10b981'],['New',seg.new,'#6366f1']].map(([l,v,c])=>`
+    <div style="flex:1;text-align:center">
+      <div style="font-size:18px;font-weight:700;color:${c}">${(v as number).toLocaleString()}</div>
+      <div style="font-size:9px;color:rgba(148,163,184,.4);text-transform:uppercase;margin-top:2px">${l}</div>
+    </div>`).join('')}
+  </div>
+</div>`:''}
+
+<!-- EMAIL QUALITY + PROVIDERS -->
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-<div class="card"><div class="title">Email Quality</div>
-${[['✅ Safe to send',report.quality.green,'#10b981'],['🚫 Do not send',report.quality.red,'#f43f5e'],['⚠️ Bounced',report.quality.bounced,'#f59e0b'],['🚨 Spam risk',report.quality.spam,'#dc2626']].map(([l,c,col])=>`<div class="row"><span>${l}</span><span style="color:${col};font-weight:700">${(c as number).toLocaleString()}</span></div>`).join('')}</div>
-<div class="card"><div class="title">Marketable by Provider</div>
-${report.providers?[['Gmail',report.providers.google],['Yahoo',report.providers.yahoo],['Outlook',report.providers.microsoft],['Other',report.providers.other]].map(([l,c])=>`<div class="row"><span>${l}</span><span style="color:white;font-weight:700">${(c as number).toLocaleString()} (${pct(c as number,report.providers.scanned)})</span></div>`).join(''):''}
-${pm?`<div style="margin-top:10px;padding:8px;background:rgba(16,185,129,.06);border-radius:7px"><strong style="color:#10b981">Domain Rep: ${pm.domain_reputation}</strong> · DMARC ${pm.dmarc_success_ratio!=null?(pm.dmarc_success_ratio*100).toFixed(1)+'%':'N/A'} · SPF ${pm.spf_success_ratio!=null?(pm.spf_success_ratio*100).toFixed(0)+'%':'N/A'}</div>`:''}</div></div>
-<p style="color:rgba(148,163,184,.2);font-size:11px;text-align:center;padding:20px 0">Generated ${new Date(report.generated_at).toLocaleString()} · ${report.domain}</p>
+  <div class="card">
+    <div class="title">Email Quality</div>
+    ${[['✅ Safe to send',report.quality?.green,'#10b981'],['🚫 Do not send',report.quality?.red,'#f43f5e'],['⚠️ Bounced',report.quality?.bounced,'#f59e0b'],['🚨 Spam risk',report.quality?.spam,'#dc2626']].map(([l,c,col])=>`
+    <div class="row"><span>${l}</span><span style="color:${col};font-weight:700">${((c||0) as number).toLocaleString()}</span></div>`).join('')}
+  </div>
+  <div class="card">
+    <div class="title">Marketable by Provider</div>
+    ${report.providers?[['Gmail',report.providers.google],['Yahoo',report.providers.yahoo],['Outlook',report.providers.microsoft],['Other',report.providers.other]].map(([l,c])=>`
+    <div class="row"><span>${l}</span><span style="color:white;font-weight:700">${((c||0) as number).toLocaleString()} (${pct((c||0) as number,report.providers.scanned)})</span></div>`).join(''):'<p>No provider data</p>'}
+  </div>
+</div>
+
+<!-- DMARC + GOOGLE SIGNALS -->
+${pm?`
+<div class="card" style="border-color:rgba(16,185,129,.15)">
+  <div class="title">DMARC &amp; Google Postmaster Signals</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+    <div>
+      <div style="color:rgba(148,163,184,.4);font-size:10px;margin-bottom:8px">DMARC Compliance</div>
+      <div style="font-size:28px;font-weight:700;color:#10b981">${pm.dmarc_success_ratio!=null?(pm.dmarc_success_ratio*100).toFixed(1)+'%':'N/A'}</div>
+      <div style="color:rgba(148,163,184,.4);font-size:11px;margin-top:4px">Excellent DMARC Compliance Score</div>
+      <div style="margin-top:12px">
+        <div class="row"><span>SPF Pass Rate</span><span style="color:#10b981;font-weight:700">${pm.spf_success_ratio!=null?(pm.spf_success_ratio*100).toFixed(0)+'%':'N/A'}</span></div>
+        <div class="row"><span>DKIM Pass Rate</span><span style="color:#10b981;font-weight:700">${pm.dkim_success_ratio!=null?(pm.dkim_success_ratio*100).toFixed(0)+'%':'N/A'}</span></div>
+      </div>
+    </div>
+    <div>
+      <div style="color:rgba(148,163,184,.4);font-size:10px;margin-bottom:8px">Domain Reputation</div>
+      <div style="font-size:22px;font-weight:700;color:#10b981">${pm.domain_reputation||'UNKNOWN'}</div>
+      <div style="margin-top:12px">
+        <div class="row"><span>Spam Rate</span><span style="color:white;font-weight:700">${pm.spam_rate!=null?(pm.spam_rate*100).toFixed(3)+'%':'N/A'}</span></div>
+        <div class="row"><span>Inbox Rate</span><span style="color:#10b981;font-weight:700">${pm.inbox_placement_rate!=null?(pm.inbox_placement_rate*100).toFixed(1)+'%':'N/A'}</span></div>
+      </div>
+    </div>
+  </div>
+</div>`:''}
+
+<p style="color:rgba(148,163,184,.2);font-size:11px;text-align:center;padding:24px 0">Generated ${new Date(report.generated_at).toLocaleString()} · ${report.domain} · Phoenix Home Remodeling</p>
 </body></html>`
 }
 
@@ -4018,7 +4182,7 @@ export default function Page() {
 
   function mainContent() {
     if (liveSelectedAgent) return (
-      <AgentDetailView agent={liveSelectedAgent} onBack={() => setSelectedAgent(null)} onRunTask={a => setRunAgent(a)} newTaskId={newTaskId} onNewTaskConsumed={() => setNewTaskId(null)} />
+      <AgentDetailView agent={liveSelectedAgent} onBack={() => setSelectedAgent(null)} onRunTask={a => setRunAgent(a)} onDelete={id => { setAgents(prev => prev.filter(a => a.id !== id)); setSelectedAgent(null) }} newTaskId={newTaskId} onNewTaskConsumed={() => setNewTaskId(null)} />
     )
     switch (view) {
       case 'dashboard': return <DashboardView agents={agents} metrics={metrics} activity={activity} onSelectAgent={a => { setSelectedAgent(a); setView('agents') }} />

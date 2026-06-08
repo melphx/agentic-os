@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
-import { saveEmailSnapshot, getEmailSnapshot, getLatestSnapshot, ensureEmailSnapshotsTable } from '@/lib/db'
+import { saveEmailSnapshot, getEmailSnapshot, getClosestSnapshot, getLatestSnapshot, ensureEmailSnapshotsTable } from '@/lib/db'
 
 const client = new OpenAI({
   baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
@@ -58,22 +58,22 @@ async function getTotalContacts(apiKey: string, locationId: string): Promise<num
 }
 
 // ── Workflow campaign stats with month filtering ───────────────────────────
-async function fetchWorkflowCampaignStats(apiKey: string, locationId: string, month: number, year: number) {
+async function fetchWorkflowCampaignStats(apiKey: string, locationId: string, startDate: string, endDate: string) {
   const totals = { sent: 0, opened: 0, clicked: 0, bounced: 0, complained: 0, unsubscribed: 0 }
   try {
     // Get all campaigns with pagination
     let allCampaigns: any[] = []
     let page = 1, hasMore = true
-    while (hasMore && page <= 10) {
+    while (hasMore && page <= 20) {
       const res = await fetch(
-        `https://services.leadconnectorhq.com/emails/public/v2/locations/${locationId}/campaigns/workflows?page=${page}`,
+        `https://services.leadconnectorhq.com/emails/public/v2/locations/${locationId}/campaigns/workflows?page=${page}&limit=100`,
         { headers: GHL23(apiKey), signal: AbortSignal.timeout(15000), cache: 'no-store' }
       )
       if (!res.ok) break
       const d = await res.json() as Record<string, any>
       const batch: any[] = d.campaigns || []
       allCampaigns = allCampaigns.concat(batch)
-      hasMore = batch.length === 10; page++
+      hasMore = batch.length >= 100; page++
     }
     // Deduplicate by sourceId
     const seen = new Set<string>()
@@ -123,12 +123,10 @@ async function fetchWorkflowCampaignStats(apiKey: string, locationId: string, mo
       })
     }
 
-    // Calculate delta using snapshots for monthly accuracy
-    // End of previous month = start of current selected month minus 1 day
-    const prevMonthEnd = new Date(year, month, 0)
-    const prevDateStr = `${prevMonthEnd.getFullYear()}-${String(prevMonthEnd.getMonth()+1).padStart(2,'0')}-${String(prevMonthEnd.getDate()).padStart(2,'0')}`
+    // Date-range delta: startDate snapshot as baseline, endDate (or live) as current
+    const today = new Date().toISOString().slice(0, 10)
+    const isLiveEnd = endDate >= today
 
-    // Apply delta calculations where snapshots exist
     const deltaDetails: any[] = []
     const deltaTotal = { sent: 0, opened: 0, clicked: 0, bounced: 0, complained: 0, unsubscribed: 0 }
     let hasSnapshots = false
@@ -139,23 +137,37 @@ async function fetchWorkflowCampaignStats(apiKey: string, locationId: string, mo
       if (!s || s.sent === 0) continue
 
       const sourceId = c.sourceId || c.id
-      const prevSnap = getEmailSnapshot(locationId, sourceId, prevDateStr)
 
-      let delta = { ...s }
-      if (prevSnap) {
+      // Find closest snapshot on or before startDate as baseline
+      const startSnap = getClosestSnapshot(startDate, locationId, sourceId)
+
+      // End = live stats if endDate is today/future, else closest snapshot at/before endDate
+      let endStats = { sent: s.sent||0, opened: s.opened||0, clicked: s.clicked||0,
+        bounced: s.permanentFail||s.bounced||0, complained: s.complained||0, unsubscribed: s.unsubscribed||0 }
+      if (!isLiveEnd) {
+        const endSnap = getClosestSnapshot(endDate, locationId, sourceId)
+        if (endSnap) endStats = { sent: endSnap.sent, opened: endSnap.opened, clicked: endSnap.clicked,
+          bounced: endSnap.bounced, complained: endSnap.complained, unsubscribed: endSnap.unsubscribed }
+      }
+
+      let delta = { ...endStats }
+      if (startSnap) {
         hasSnapshots = true
         delta = {
-          sent:         Math.max(0, (s.sent        || 0) - prevSnap.sent),
-          opened:       Math.max(0, (s.opened      || 0) - prevSnap.opened),
-          clicked:      Math.max(0, (s.clicked     || 0) - prevSnap.clicked),
-          bounced:      Math.max(0, ((s.permanentFail||s.bounced||0)) - prevSnap.bounced),
-          complained:   Math.max(0, (s.complained  || 0) - prevSnap.complained),
-          unsubscribed: Math.max(0, (s.unsubscribed|| 0) - prevSnap.unsubscribed),
+          sent:         Math.max(0, endStats.sent         - startSnap.sent),
+          opened:       Math.max(0, endStats.opened       - startSnap.opened),
+          clicked:      Math.max(0, endStats.clicked      - startSnap.clicked),
+          bounced:      Math.max(0, endStats.bounced      - startSnap.bounced),
+          complained:   Math.max(0, endStats.complained   - startSnap.complained),
+          unsubscribed: Math.max(0, endStats.unsubscribed - startSnap.unsubscribed),
         }
-        // Auto-save current as snapshot for end of selected month
-        const currMonthEnd = new Date(year, month + 1, 0)
-        const currDateStr = `${currMonthEnd.getFullYear()}-${String(currMonthEnd.getMonth()+1).padStart(2,'0')}-${String(currMonthEnd.getDate()).padStart(2,'0')}`
-        saveEmailSnapshot({ snapshot_date: currDateStr, location_id: locationId, source_id: sourceId, campaign_name: c.name || '', sent: s.sent||0, opened: s.opened||0, clicked: s.clicked||0, bounced: s.permanentFail||s.bounced||0, complained: s.complained||0, unsubscribed: s.unsubscribed||0 })
+      }
+
+      // Auto-save today's live stats as a snapshot for future delta use
+      if (isLiveEnd) {
+        saveEmailSnapshot({ snapshot_date: today, location_id: locationId, source_id: sourceId,
+          campaign_name: c.name || '', sent: s.sent||0, opened: s.opened||0, clicked: s.clicked||0,
+          bounced: s.permanentFail||s.bounced||0, complained: s.complained||0, unsubscribed: s.unsubscribed||0 })
       }
 
       if (delta.sent === 0) continue
@@ -248,13 +260,16 @@ export async function POST(req: NextRequest) {
   const apiKey     = (body.ghl_api_key  || process.env.GHL_API_KEY     || '').trim()
   const locationId = (body.location_id  || process.env.GHL_LOCATION_ID || '').trim()
   const domain     = (body.domain       || process.env.GHL_DOMAIN       || 'phxhomeremodeling.com').trim()
-  const month: number = body.month ?? new Date().getMonth()
-  const year: number  = body.year  ?? new Date().getFullYear()
+  const todayStr = new Date().toISOString().slice(0, 10)
+  const firstOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10)
+  const startDate: string = body.startDate ?? firstOfMonth
+  const endDate: string   = body.endDate   ?? todayStr
 
   if (!apiKey || !locationId) return NextResponse.json({ error: 'ghl_api_key and location_id required' }, { status: 400 })
 
   try {
     const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
+    const monthLabel = startDate === endDate ? startDate : `${startDate} → ${endDate}`
 
     const [
       total, google, microsoft, yahoo, otherProvider,
@@ -278,7 +293,7 @@ export async function POST(req: NextRequest) {
       countByTag(apiKey, locationId, 'hti valid check = not found'),
       countByTag(apiKey, locationId, '01. status -> email engagement manager: email bounced'),
       countByTag(apiKey, locationId, 'spam likely'),
-      fetchWorkflowCampaignStats(apiKey, locationId, month, year),
+      fetchWorkflowCampaignStats(apiKey, locationId, startDate, endDate),
     ])
 
     const scannedTotal = google + microsoft + yahoo + otherProvider || total
@@ -309,7 +324,7 @@ export async function POST(req: NextRequest) {
 
     // Build AI prompt with full context
     const dataCtx = `
-Email Health Report for ${domain} — ${MONTHS[month]} ${year}
+Email Health Report for ${domain} — ${monthLabel}
 
 SCORES:
 Strict Email Health Score: ${strictScore}/999 (${scoreLabel(strictScore)})
@@ -383,7 +398,7 @@ Data:\n${dataCtx}` }
     return NextResponse.json({
       generated_at: new Date().toISOString(),
       month, year, domain,
-      month_label: `${MONTHS[month]} ${year}`,
+      month_label: monthLabel,
 
       // Scores
       health_score: strictScore,
@@ -414,7 +429,7 @@ Data:\n${dataCtx}` }
         spam_rate:      parseFloat(campaignStats.complaintRate.toFixed(3)),
         unsub_rate:     parseFloat(campaignStats.unsubRate.toFixed(2)),
         engagement_rate: parseFloat(campaignStats.openRate.toFixed(1)),
-        note: campaignStats.campaigns === 0 ? 'No workflow campaigns found.' : campaignStats.is_monthly ? `Monthly stats for ${MONTHS[month]} ${year} (delta from previous snapshot)` : 'All-time totals — take a snapshot at month end to enable monthly filtering. Go to Reports → Snapshot.',
+        note: campaignStats.campaigns === 0 ? 'No workflow campaigns found.' : campaignStats.is_monthly ? `Monthly stats for ${monthLabel} (delta from previous snapshot)` : 'All-time totals — take a snapshot at month end to enable monthly filtering. Go to Reports → Snapshot.',
       },
       workflows: campaignStats.workflows || [],
 
