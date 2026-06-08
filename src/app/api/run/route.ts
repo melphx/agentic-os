@@ -197,6 +197,11 @@ async function ask(agentId: string, systemPrompt: string, userPrompt: string, ma
       try {
         let payload: Record<string, any> = {}
         try { payload = JSON.parse(payloadRaw) } catch {}
+        // If agent sent empty payload, auto-inject content written before the CALL tag
+        if (!payload.content && Object.keys(payload).length === 0) {
+          const contentBeforeCall = reply.replace(/\{\{CALL:[\s\S]+\}\}/, '').trim()
+          if (contentBeforeCall) payload = { content: contentBeforeCall }
+        }
         callResult = await executeIntegration(integ.type, JSON.parse(integ.config), payload)
       } catch (e: any) {
         callResult = `Integration error: ${e.message}`
@@ -205,6 +210,11 @@ async function ask(agentId: string, systemPrompt: string, userPrompt: string, ma
       try {
         let payload: Record<string, any> = {}
         try { payload = JSON.parse(payloadRaw) } catch { payload = { content: payloadRaw } }
+        // If agent sent empty payload, auto-inject the content it wrote before the CALL tag
+        if (!payload.content && Object.keys(payload).length === 0) {
+          const contentBeforeCall = reply.replace(/\{\{CALL:[\s\S]+\}\}/, '').trim()
+          if (contentBeforeCall) payload = { content: contentBeforeCall }
+        }
         const headers: Record<string, string> = { 'Content-Type': 'application/json' }
         try { Object.assign(headers, JSON.parse(webhook.headers)) } catch {}
         const res = await fetch(webhook.url, {
