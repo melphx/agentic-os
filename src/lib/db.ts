@@ -1193,3 +1193,10 @@ export function getSnapshotDates(locationId: string): string[] {
   `).all(locationId) as { snapshot_date: string }[]
   return rows.map(r => r.snapshot_date)
 }
+
+export function getAllSnapshots(locationId: string): EmailSnapshot[] {
+  ensureEmailSnapshotsTable()
+  return getDb().prepare(`
+    SELECT * FROM email_snapshots WHERE location_id=? ORDER BY snapshot_date DESC
+  `).all(locationId) as EmailSnapshot[]
+}
