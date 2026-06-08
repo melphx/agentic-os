@@ -2982,9 +2982,11 @@ function EmailHealthReportView() {
   const [error, setError] = useState('')
   const [postmasterData, setPostmasterData] = useState<any | null>(null)
   const [postmasterConnected, setPostmasterConnected] = useState(false)
+  const [backend, setBackend] = useState<{configured:boolean;domain:string}|null>(null)
 
   useEffect(() => {
-    fetch('/api/postmaster/oauth?action=status').then(r => r.json()).then(d => setPostmasterConnected(d.connected)).catch(() => {})
+    fetch('/api/reports/email-health').then(r=>r.json()).then(d=>setBackend(d)).catch(()=>{})
+    fetch('/api/postmaster/oauth?action=status').then(r=>r.json()).then(d=>setPostmasterConnected(d.connected)).catch(()=>{})
   }, [])
 
   async function generate() {
@@ -2999,333 +3001,347 @@ function EmailHealthReportView() {
       setReport(d)
       if (postmasterConnected) {
         fetch('/api/postmaster/data?domain=l.phxhomeremodeling.com')
-          .then(r2 => r2.json()).then(pd => { if (!pd.error) setPostmasterData(pd) }).catch(() => {})
+          .then(r2=>r2.json()).then(pd=>{ if(!pd.error) setPostmasterData(pd) }).catch(()=>{})
       }
     } catch (e: any) { setError(e.message) }
     finally { setLoading(false) }
   }
 
   const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
-  const sc = !report ? '#6366f1' : report.health_score >= 800 ? '#10b981' : report.health_score >= 650 ? '#06b6d4' : report.health_score >= 500 ? '#f59e0b' : '#f43f5e'
+  const sc = !report ? '#6366f1' : report.health_score >= 800 ? '#10b981' : report.health_score >= 650 ? '#06b6d4' : report.health_score >= 500 ? '#f59e0b' : report.health_score >= 300 ? '#f43f5e' : '#dc2626'
   const pct = (n: number, d: number) => d > 0 ? (n/d*100).toFixed(1)+'%' : '0%'
+
+  const badge = (level: string) => {
+    const colors: Record<string,string> = { high:'#f43f5e', medium:'#f59e0b', low:'#06b6d4' }
+    return <span style={{ padding:'1px 6px', borderRadius:4, background:`${colors[level]}20`, border:`1px solid ${colors[level]}40`, color:colors[level], fontSize:9, fontWeight:700, textTransform:'uppercase' as const, marginRight:6 }}>{level}</span>
+  }
 
   return (
     <div style={{ height:'100%', overflowY:'auto', background:'#080c14' }}>
-      {/* Sticky header */}
-      <div style={{ padding:'14px 24px', borderBottom:'1px solid rgba(99,102,241,0.1)', display:'flex', alignItems:'center', justifyContent:'space-between', background:'rgba(15,20,35,0.95)', position:'sticky', top:0, zIndex:10, gap:8, flexWrap:'wrap' }}>
-        <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+      {/* Sticky top bar */}
+      <div style={{ padding:'12px 22px', borderBottom:'1px solid rgba(99,102,241,0.1)', display:'flex', alignItems:'center', justifyContent:'space-between', background:'rgba(15,20,35,0.97)', position:'sticky', top:0, zIndex:10, gap:8, flexWrap:'wrap' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
           <span style={{ color:'white', fontWeight:700, fontSize:15 }}>📧 Email Health Report</span>
-          <span style={{ color:'rgba(148,163,184,0.35)', fontSize:12 }}>via HighLevel</span>
+          {backend?.configured && <span style={{ fontSize:10, color:'#10b981', background:'rgba(16,185,129,0.1)', border:'1px solid rgba(16,185,129,0.2)', padding:'1px 7px', borderRadius:10 }}>Connected</span>}
         </div>
-        <div style={{ display:'flex', alignItems:'center', gap:7, flexWrap:'wrap' }}>
-          <select value={month} onChange={e => setMonth(parseInt(e.target.value))}
-            style={{ background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:7, padding:'6px 10px', color:'white', fontSize:12, cursor:'pointer', outline:'none', fontFamily:'inherit' }}>
-            {MONTHS.map((m,i) => <option key={i} value={i} style={{background:'#0f1623'}}>{m}</option>)}
+        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+          <select value={month} onChange={e=>setMonth(parseInt(e.target.value))} style={{ background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:7, padding:'5px 8px', color:'white', fontSize:12, cursor:'pointer', outline:'none', fontFamily:'inherit' }}>
+            {MONTHS.map((m,i)=><option key={i} value={i} style={{background:'#0f1623'}}>{m}</option>)}
           </select>
-          <select value={year} onChange={e => setYear(parseInt(e.target.value))}
-            style={{ background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:7, padding:'6px 10px', color:'white', fontSize:12, cursor:'pointer', outline:'none', fontFamily:'inherit' }}>
-            {[2024,2025,2026].map(y => <option key={y} value={y} style={{background:'#0f1623'}}>{y}</option>)}
+          <select value={year} onChange={e=>setYear(parseInt(e.target.value))} style={{ background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:7, padding:'5px 8px', color:'white', fontSize:12, cursor:'pointer', outline:'none', fontFamily:'inherit' }}>
+            {[2024,2025,2026].map(y=><option key={y} value={y} style={{background:'#0f1623'}}>{y}</option>)}
           </select>
-          {!postmasterConnected && (
-            <button onClick={() => { window.location.href='/api/postmaster/oauth?action=start' }}
-              style={{ padding:'6px 11px', background:'rgba(16,185,129,0.1)', border:'1px solid rgba(16,185,129,0.2)', borderRadius:7, color:'#10b981', fontSize:11, cursor:'pointer' }}>
-              + Postmaster
-            </button>
-          )}
+          {!postmasterConnected && <button onClick={()=>{window.location.href='/api/postmaster/oauth?action=start'}} style={{ padding:'5px 10px', background:'rgba(16,185,129,0.1)', border:'1px solid rgba(16,185,129,0.2)', borderRadius:7, color:'#10b981', fontSize:11, cursor:'pointer' }}>+ Postmaster</button>}
           <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.98}} onClick={generate} disabled={loading}
             style={{ padding:'7px 16px', background:'linear-gradient(135deg,#4338ca,#6366f1)', border:'none', borderRadius:8, color:'white', fontWeight:700, fontSize:12, cursor:'pointer', opacity:loading?0.6:1 }}>
-            {loading ? '⏳ Generating…' : '⚡ Generate'}
+            {loading?'⏳ Generating…':'⚡ Generate'}
           </motion.button>
-          {report && (
-            <button onClick={() => {
-              const html = buildEmailReportHTML(report, postmasterData, MONTHS[month], year)
-              const blob = new Blob([html], {type:'text/html'})
-              const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
-              a.download = `email-health-${MONTHS[month].toLowerCase()}-${year}.html`; a.click()
-            }} style={{ padding:'6px 11px', background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:7, color:'#a5b4fc', fontSize:11, cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}>
-              <Download size={11}/> Export
-            </button>
-          )}
+          {report && <button onClick={()=>{
+            const html = buildEmailReportHTML(report, postmasterData)
+            const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([html],{type:'text/html'}))
+            a.download = `email-health-${MONTHS[month].toLowerCase()}-${year}.html`; a.click()
+          }} style={{ padding:'5px 10px', background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:7, color:'#a5b4fc', fontSize:11, cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}>
+            <Download size={11}/> Export
+          </button>}
         </div>
       </div>
 
-      {error && <div style={{ margin:20, padding:'12px 16px', background:'rgba(244,63,94,0.08)', border:'1px solid rgba(244,63,94,0.2)', borderRadius:10, color:'#f43f5e', fontSize:13 }}>{error}</div>}
+      {error && <div style={{ margin:16, padding:'10px 14px', background:'rgba(244,63,94,0.08)', border:'1px solid rgba(244,63,94,0.2)', borderRadius:9, color:'#f43f5e', fontSize:13 }}>{error}</div>}
 
       {!report && !loading && (
         <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', minHeight:'60vh', gap:14, padding:40, textAlign:'center' }}>
           <div style={{ fontSize:44 }}>📧</div>
           <h2 style={{ color:'white', fontWeight:700, fontSize:20, margin:0 }}>Email Health Report</h2>
-          <p style={{ color:'rgba(148,163,184,0.5)', fontSize:13, maxWidth:380 }}>Select a month above and click Generate for your full analysis — subscriber segments, quality scores, domain reputation, and AI recommendations.</p>
-          {!postmasterConnected && <p style={{ color:'rgba(16,185,129,0.6)', fontSize:12 }}>Click + Postmaster above to add Google domain reputation data</p>}
+          <p style={{ color:'rgba(148,163,184,0.5)', fontSize:13, maxWidth:400 }}>Select a month and generate your full email deliverability report — powered by HitTheInbox data from GHL and Google Postmaster.</p>
         </div>
       )}
 
       {report && (
-        <div style={{ maxWidth:860, margin:'0 auto', padding:'20px 24px 48px' }}>
+        <div style={{ maxWidth:900, margin:'0 auto', padding:'20px 24px 60px' }}>
 
-          {/* Score hero */}
-          <div style={{ background:`linear-gradient(135deg,${sc}15,rgba(15,20,35,0.95))`, border:`1px solid ${sc}30`, borderRadius:16, padding:'24px 28px', marginBottom:16, display:'flex', alignItems:'center', gap:24 }}>
+          {/* ── 1. SCORE HERO ── */}
+          <div style={{ background:`linear-gradient(135deg,${sc}18,rgba(15,20,35,0.95))`, border:`1px solid ${sc}30`, borderRadius:16, padding:'24px 28px', marginBottom:14, display:'flex', alignItems:'center', gap:24 }}>
             <div style={{ flexShrink:0, textAlign:'center' }}>
-              <div style={{ fontSize:60, fontWeight:900, color:sc, lineHeight:1 }}>{report.health_score}</div>
-              <div style={{ color:'rgba(148,163,184,0.35)', fontSize:10, marginTop:3 }}>out of 999</div>
+              <div style={{ fontSize:58, fontWeight:900, color:sc, lineHeight:1 }}>{report.health_score}</div>
+              <div style={{ color:'rgba(148,163,184,0.35)', fontSize:9, marginTop:3 }}>out of 999</div>
             </div>
             <div style={{ flex:1 }}>
-              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:5 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
                 <span style={{ color:sc, fontWeight:800, fontSize:22 }}>{report.score_label}</span>
-                <span style={{ padding:'1px 8px', background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.15)', borderRadius:20, color:'rgba(148,163,184,0.4)', fontSize:10 }}>Strict Email Health Score</span>
+                <span style={{ padding:'1px 8px', background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.15)', borderRadius:20, color:'rgba(148,163,184,0.4)', fontSize:9 }}>Strict Email Health Score</span>
               </div>
-              <p style={{ color:'rgba(148,163,184,0.6)', fontSize:13, margin:'0 0 8px', lineHeight:1.6 }}>{report.analysis?.score_explanation || ''}</p>
-              <span style={{ color:'rgba(148,163,184,0.3)', fontSize:11 }}>{MONTHS[month]} {year} · phxhomeremodeling.com</span>
-            </div>
-          </div>
-
-          {/* Analyst Notes */}
-          <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
-            <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:11, letterSpacing:'0.07em', textTransform:'uppercase', marginBottom:8 }}>Analyst Notes</div>
-            <p style={{ color:'rgba(148,163,184,0.75)', fontSize:13.5, margin:0, lineHeight:1.7 }}>{report.analysis?.analyst_notes || ''}</p>
-          </div>
-
-          {/* Executive Summary */}
-          <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
-            <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:11, letterSpacing:'0.07em', textTransform:'uppercase', marginBottom:12 }}>Executive Summary</div>
-            <div style={{ display:'flex', flexDirection:'column', gap:0 }}>
-              {report.providers?.scanned > 0 && [
-                { icon:'📧', text:`${pct(report.providers.google, report.providers.scanned)} of your subscribers use Google email — better inbox placement odds.` },
-                { icon:'💼', text:`${pct(report.providers.microsoft, report.providers.scanned)} use Microsoft — the toughest inbox to reach.` },
-              ].map((b,i) => (
-                <div key={i} style={{ display:'flex', gap:10, padding:'9px 0', borderBottom:'1px solid rgba(99,102,241,0.06)' }}>
-                  <span style={{ fontSize:14 }}>{b.icon}</span>
-                  <span style={{ color:'rgba(148,163,184,0.7)', fontSize:13 }}>{b.text}</span>
-                </div>
-              ))}
-              {postmasterData && [
-                { icon:'✅', text:`Google trusts your domain — reputation for l.phxhomeremodeling.com is ${postmasterData.domain_reputation}.` },
-                { icon:'🔒', text:`Strong authentication — DMARC ${postmasterData.dmarc_success_ratio!=null?(postmasterData.dmarc_success_ratio*100).toFixed(1)+'%':'N/A'} · SPF ${postmasterData.spf_success_ratio!=null?(postmasterData.spf_success_ratio*100).toFixed(0)+'%':'N/A'} · DKIM ${postmasterData.dkim_success_ratio!=null?(postmasterData.dkim_success_ratio*100).toFixed(0)+'%':'N/A'}` },
-              ].map((b,i) => (
-                <div key={i} style={{ display:'flex', gap:10, padding:'9px 0', borderBottom:'1px solid rgba(99,102,241,0.06)' }}>
-                  <span style={{ fontSize:14 }}>{b.icon}</span>
-                  <span style={{ color:'rgba(148,163,184,0.7)', fontSize:13 }}>{b.text}</span>
-                </div>
-              ))}
-              <div style={{ display:'flex', gap:10, padding:'9px 0', borderBottom:'1px solid rgba(99,102,241,0.06)' }}>
-                <span style={{ fontSize:14 }}>{report.quality.red > report.segments.total * 0.3 ? '🚨' : '⚠️'}</span>
-                <span style={{ color:'rgba(148,163,184,0.7)', fontSize:13 }}>{report.quality.red.toLocaleString()} contacts ({pct(report.quality.red,report.segments.total)}) flagged Do Not Send by HitTheInbox.</span>
-              </div>
-              <div style={{ display:'flex', gap:10, padding:'9px 0' }}>
-                <span style={{ fontSize:14 }}>📊</span>
-                <span style={{ color:'rgba(148,163,184,0.5)', fontSize:13 }}>{report.stats?.campaigns_analyzed > 0 ? report.stats.open_rate + '% open · ' + report.stats.click_rate + '% click · ' + report.stats.campaigns_analyzed + ' workflow campaigns' : 'Campaign stats loading from workflow campaigns…'}</span>
+              <p style={{ color:'rgba(148,163,184,0.6)', fontSize:12, margin:'0 0 6px', lineHeight:1.5 }}>{report.analysis?.score_explanation_strict || 'Your Strict Email Health Score reflects how well subscribers who were emailed in the last month engaged.'}</p>
+              <div style={{ display:'flex', gap:16 }}>
+                <div><span style={{ color:'rgba(148,163,184,0.4)', fontSize:10 }}>STRICT </span><span style={{ color:sc, fontWeight:700, fontSize:13 }}>{report.strict_score}</span></div>
+                <div><span style={{ color:'rgba(148,163,184,0.4)', fontSize:10 }}>RELAXED </span><span style={{ color:'#06b6d4', fontWeight:700, fontSize:13 }}>{report.relaxed_score}</span></div>
+                <div><span style={{ color:'rgba(148,163,184,0.35)', fontSize:10 }}>{report.month_label} via HighLevel</span></div>
               </div>
             </div>
           </div>
 
-          {/* Audience Breakdown */}
+          {/* ── 2. ANALYST NOTES ── */}
           <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
-            <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:11, letterSpacing:'0.07em', textTransform:'uppercase', marginBottom:4 }}>Audience Breakdown</div>
+            <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:8 }}>Analyst Notes</div>
+            <p style={{ color:'rgba(148,163,184,0.8)', fontSize:13.5, margin:0, lineHeight:1.7 }}>{report.analysis?.analyst_notes || 'Generating analysis…'}</p>
+          </div>
+
+          {/* ── 3. EXECUTIVE SUMMARY ── */}
+          <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
+            <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:12 }}>Executive Summary</div>
+            {Array.isArray(report.analysis?.executive_summary_bullets) && report.analysis.executive_summary_bullets.map((b:string,i:number)=>(
+              <div key={i} style={{ display:'flex', gap:10, padding:'7px 0', borderBottom:'1px solid rgba(99,102,241,0.06)' }}>
+                <span style={{ color:'#6366f1', flexShrink:0, fontSize:14 }}>•</span>
+                <span style={{ color:'rgba(148,163,184,0.75)', fontSize:13 }}>{b}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* ── 4. PROBLEMS COSTING REVENUE ── */}
+          {Array.isArray(report.analysis?.problems) && report.analysis.problems.length > 0 && (
+            <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(244,63,94,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
+              <div style={{ color:'#f43f5e', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:12 }}>⚠️ Problems Costing You Revenue</div>
+              {report.analysis.problems.map((p:any,i:number)=>(
+                <div key={i} style={{ padding:'10px 0', borderBottom:'1px solid rgba(244,63,94,0.07)' }}>
+                  <div style={{ display:'flex', alignItems:'baseline', gap:6, marginBottom:3 }}>
+                    <span style={{ color:'white', fontWeight:600, fontSize:13 }}>{p.title}</span>
+                  </div>
+                  <p style={{ color:'rgba(148,163,184,0.6)', fontSize:12, margin:0, lineHeight:1.6 }}>{p.description}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── 5. ACTIONS TO TAKE ── */}
+          <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
+            <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:12 }}>Actions to Take</div>
+            {[
+              { key:'actions_high', level:'high', items: report.analysis?.actions_high },
+              { key:'actions_medium', level:'medium', items: report.analysis?.actions_medium },
+              { key:'actions_low', level:'low', items: report.analysis?.actions_low },
+            ].map(({key, level, items})=> Array.isArray(items) && items.map((a:string,i:number)=>(
+              <div key={key+i} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid rgba(99,102,241,0.06)', alignItems:'flex-start' }}>
+                <span style={{ flexShrink:0, marginTop:1 }}>{badge(level)}</span>
+                <span style={{ color:'rgba(148,163,184,0.75)', fontSize:13, lineHeight:1.55 }}>{a}</span>
+              </div>
+            )))}
+          </div>
+
+          {/* ── 6. EMAIL PERFORMANCE ── */}
+          {report.stats.campaigns_analyzed > 0 && (
+            <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
+              <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:12 }}>📊 Email Performance — {report.stats.campaigns_analyzed} Workflow Campaigns</div>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10, marginBottom:14 }}>
+                {[['Engagement Rate',report.stats.open_rate+'%',true],['Open Rate',report.stats.open_rate+'%',report.stats.open_rate>=25],['Click Rate',report.stats.click_rate+'%',report.stats.click_rate>=3],['Bounce Rate',report.stats.bounce_rate+'%',report.stats.bounce_rate<2],['Spam Rate',report.stats.spam_rate+'%',report.stats.spam_rate<0.1],['Total Sent',report.stats.total_sent.toLocaleString(),true]].map(([l,v,g])=>(
+                  <div key={l as string} style={{ background:'rgba(99,102,241,0.06)', borderRadius:9, padding:'10px 12px' }}>
+                    <div style={{ fontSize:10, color:'rgba(148,163,184,0.4)', marginBottom:2, textTransform:'uppercase' as const }}>{l}</div>
+                    <div style={{ fontSize:18, fontWeight:700, color:(g as boolean)?'#10b981':'#f43f5e' }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              {/* Engagement table */}
+              {report.engagement_table && (
+                <>
+                  <div style={{ color:'rgba(148,163,184,0.4)', fontSize:10, textTransform:'uppercase' as const, marginBottom:8, letterSpacing:'0.05em' }}>Engagement This Period</div>
+                  <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                    <thead>
+                      <tr style={{ borderBottom:'1px solid rgba(99,102,241,0.15)' }}>
+                        {['','# Mailed','% Opened','% Clicked'].map(h=>(
+                          <th key={h} style={{ padding:'5px 10px', textAlign:'left', color:'rgba(148,163,184,0.4)', fontWeight:600, fontSize:10, textTransform:'uppercase' as const }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr style={{ borderBottom:'1px solid rgba(99,102,241,0.05)' }}>
+                        <td style={{ padding:'7px 10px', color:'rgba(148,163,184,0.8)', fontSize:12 }}>Existing Subscribers</td>
+                        <td style={{ padding:'7px 10px', color:'white', fontWeight:600, fontSize:12 }}>{report.engagement_table.existing.mailed.toLocaleString()}</td>
+                        <td style={{ padding:'7px 10px', color:'#10b981', fontWeight:600, fontSize:12 }}>{report.engagement_table.existing.open_pct}%</td>
+                        <td style={{ padding:'7px 10px', color:'#10b981', fontWeight:600, fontSize:12 }}>{report.engagement_table.existing.click_pct}%</td>
+                      </tr>
+                      <tr>
+                        <td style={{ padding:'7px 10px', color:'rgba(148,163,184,0.8)', fontSize:12 }}>New Subscribers</td>
+                        <td style={{ padding:'7px 10px', color:'white', fontWeight:600, fontSize:12 }}>{report.engagement_table.new_subs.mailed.toLocaleString()}</td>
+                        <td style={{ padding:'7px 10px', color:'#10b981', fontWeight:600, fontSize:12 }}>{report.engagement_table.new_subs.open_pct}%</td>
+                        <td style={{ padding:'7px 10px', color:'#10b981', fontWeight:600, fontSize:12 }}>{report.engagement_table.new_subs.click_pct}%</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <p style={{ color:'rgba(148,163,184,0.3)', fontSize:10, margin:'8px 0 0' }}>* Campaign stats are all-time totals. Monthly filtering requires GHL email campaign API scope.</p>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ── 7. AUDIENCE BREAKDOWN ── */}
+          <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
+            <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:4 }}>Audience Breakdown</div>
             <p style={{ color:'rgba(148,163,184,0.35)', fontSize:11, margin:'0 0 14px' }}>Engagement quality of your existing contact list</p>
-            {/* Visual bar */}
             <div style={{ display:'flex', height:10, borderRadius:8, overflow:'hidden', marginBottom:14 }}>
               {([
-                [report.segments.active,'#10b981'],
-                [report.segments.warmingUp,'#06b6d4'],
-                [report.segments.cold,'#f59e0b'],
-                [report.segments.dead,'#f43f5e'],
-              ] as [number,string][]).map(([n,c],i) => (
-                <div key={i} style={{ width:`${report.segments.total>0?n/report.segments.total*100:0}%`, background:c, minWidth:n>0?3:0 }} />
+                [report.segments.active,'#10b981'],[report.segments.warmingUp,'#06b6d4'],
+                [report.segments.cold,'#f59e0b'],[report.segments.dead,'#f43f5e'],
+              ] as [number,string][]).map(([n,c],i)=>(
+                <div key={i} style={{ width:`${report.segments.total>0?n/report.segments.total*100:0}%`, background:c, minWidth:n>0?3:0 }}/>
               ))}
             </div>
             {[
-              { label:'Best Assets', sub:'Engaged in last 30 days', count:report.segments.active, color:'#10b981' },
-              { label:'Assets', sub:'Engaged 30-90 days ago', count:report.segments.warmingUp, color:'#06b6d4' },
-              { label:'Liabilities', sub:'Engaged 90 days – 1 year ago', count:report.segments.cold, color:'#f59e0b' },
-              { label:'Worst Liabilities', sub:"Haven't engaged in 1+ year or never opened", count:report.segments.dead, color:'#f43f5e' },
-            ].map(s => (
+              { label:'Best Assets', sub:'Have opened something in the last 30 days', count:report.segments.active, color:'#10b981' },
+              { label:'Assets', sub:'Have opened something in the last 30-90 days', count:report.segments.warmingUp, color:'#06b6d4' },
+              { label:'Liabilities', sub:'Have only opened in the last 90-365 days', count:report.segments.cold, color:'#f59e0b' },
+              { label:'Worst Liabilities', sub:"Haven't opened in over a year, or have never opened", count:report.segments.dead, color:'#f43f5e' },
+            ].map(s=>(
               <div key={s.label} style={{ display:'flex', alignItems:'center', gap:10, padding:'7px 0', borderBottom:'1px solid rgba(99,102,241,0.06)' }}>
-                <div style={{ width:9, height:9, borderRadius:'50%', background:s.color, flexShrink:0 }} />
-                <div style={{ flex:1 }}><span style={{ color:'white', fontSize:13, fontWeight:600 }}>{s.label}</span><span style={{ color:'rgba(148,163,184,0.4)', fontSize:11, marginLeft:8 }}>{s.sub}</span></div>
-                <span style={{ color:'white', fontWeight:600, fontSize:13 }}>{s.count.toLocaleString()}</span>
-                <span style={{ color:'rgba(148,163,184,0.3)', fontSize:11, width:44, textAlign:'right' }}>{pct(s.count, report.segments.total)}</span>
+                <div style={{ width:9, height:9, borderRadius:'50%', background:s.color, flexShrink:0 }}/>
+                <div style={{ flex:1 }}><span style={{ color:'white', fontSize:13, fontWeight:600 }}>{s.label} </span><span style={{ color:'rgba(148,163,184,0.4)', fontSize:11 }}>{s.sub}</span></div>
+                <span style={{ color:'white', fontWeight:700, fontSize:13 }}>{s.count.toLocaleString()}</span>
+                <span style={{ color:'rgba(148,163,184,0.3)', fontSize:11, width:44, textAlign:'right' as const }}>{pct(s.count, report.segments.total)}</span>
               </div>
             ))}
             <div style={{ display:'flex', gap:16, marginTop:12, padding:'10px 14px', background:'rgba(99,102,241,0.05)', borderRadius:9 }}>
-              {[['Total',report.segments.total,'#a5b4fc'],['New',report.segments.new,'#6366f1'],['Never Engaged',report.segments.neverEngaged,'#f43f5e'],['Spam Risk',report.segments.spamRisk||0,'#f43f5e']].map(([l,v,c]) => (
-                <div key={l as string} style={{ flex:1, textAlign:'center' }}>
+              {[['Contacts',report.segments.total,'#a5b4fc'],['Opted Out',report.segments.optedOut,'rgba(148,163,184,0.5)'],['Marketable',report.segments.marketable,'#10b981'],['New',report.segments.new,'#6366f1']].map(([l,v,c])=>(
+                <div key={l as string} style={{ flex:1, textAlign:'center' as const }}>
                   <div style={{ fontSize:18, fontWeight:700, color:c as string }}>{(v as number).toLocaleString()}</div>
-                  <div style={{ fontSize:10, color:'rgba(148,163,184,0.4)', marginTop:2, textTransform:'uppercase' }}>{l}</div>
+                  <div style={{ fontSize:9, color:'rgba(148,163,184,0.4)', marginTop:2, textTransform:'uppercase' as const }}>{l}</div>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Quality + Providers */}
+          {/* ── 8. EMAIL QUALITY + PROVIDERS ── */}
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
             <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px' }}>
-              <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:11, letterSpacing:'0.07em', textTransform:'uppercase', marginBottom:10 }}>Email Quality</div>
-              {[['✅ Safe to send',report.quality.green,'#10b981'],['🚫 Do not send',report.quality.red,'#f43f5e'],['⚠️ Bounced',report.quality.bounced,'#f59e0b'],['🚨 Spam risk',report.quality.spam,'#dc2626'],['❓ Invalid',report.quality.notFound,'rgba(148,163,184,0.4)'],['🔀 Catchall',report.quality.catchall,'rgba(148,163,184,0.4)']].map(([l,c,col]) => (
+              <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:10 }}>Email Quality</div>
+              {[['✅ Safe to send',report.quality.green,'#10b981'],['🚫 Do not send',report.quality.red,'#f43f5e'],['⚠️ Bounced',report.quality.bounced,'#f59e0b'],['🚨 Spam risk',report.quality.spam,'#dc2626'],['❓ Invalid',report.quality.notFound,'rgba(148,163,184,0.4)'],['🔀 Catchall',report.quality.catchall,'rgba(148,163,184,0.4)']].map(([l,c,col])=>(
                 <div key={l as string} style={{ display:'flex', justifyContent:'space-between', padding:'5px 0', borderBottom:'1px solid rgba(99,102,241,0.05)' }}>
                   <span style={{ color:'rgba(148,163,184,0.6)', fontSize:12 }}>{l as string}</span>
-                  <span style={{ color:col as string, fontWeight:600, fontSize:12 }}>{(c as number).toLocaleString()}</span>
+                  <span style={{ color:col as string, fontWeight:700, fontSize:12 }}>{(c as number).toLocaleString()}</span>
                 </div>
               ))}
             </div>
             <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px' }}>
-              <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:11, letterSpacing:'0.07em', textTransform:'uppercase', marginBottom:10 }}>Email Providers</div>
-              {report.providers && [['Gmail',report.providers.google,'#10b981'],['Yahoo',report.providers.yahoo,'#f59e0b'],['Outlook',report.providers.microsoft,'#06b6d4'],['Other',report.providers.other,'rgba(148,163,184,0.5)']].map(([l,c,col]) => (
-                <div key={l as string} style={{ display:'flex', alignItems:'center', gap:7, padding:'5px 0', borderBottom:'1px solid rgba(99,102,241,0.05)' }}>
-                  <div style={{ width:7, height:7, borderRadius:'50%', background:col as string, flexShrink:0 }} />
+              <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:10 }}>Marketable Contacts by Provider</div>
+              {report.providers && [['Gmail',report.providers.google,'#10b981'],['Yahoo',report.providers.yahoo,'#f59e0b'],['Outlook/Microsoft',report.providers.microsoft,'#06b6d4'],['Other',report.providers.other,'rgba(148,163,184,0.5)']].map(([l,c,col])=>(
+                <div key={l as string} style={{ display:'flex', alignItems:'center', gap:6, padding:'5px 0', borderBottom:'1px solid rgba(99,102,241,0.05)' }}>
+                  <div style={{ width:7, height:7, borderRadius:'50%', background:col as string, flexShrink:0 }}/>
                   <span style={{ color:'rgba(148,163,184,0.6)', fontSize:12, flex:1 }}>{l as string}</span>
                   <span style={{ color:'white', fontWeight:600, fontSize:12 }}>{(c as number).toLocaleString()}</span>
-                  <span style={{ color:'rgba(148,163,184,0.3)', fontSize:10, width:36, textAlign:'right' }}>{pct(c as number, report.providers.scanned)}</span>
+                  <span style={{ color:'rgba(148,163,184,0.3)', fontSize:10, width:38, textAlign:'right' as const }}>{pct(c as number, report.providers.scanned)}</span>
                 </div>
               ))}
-              {postmasterData && (
-                <div style={{ marginTop:10, padding:'8px 10px', background:'rgba(16,185,129,0.06)', borderRadius:7 }}>
-                  <div style={{ color:'rgba(148,163,184,0.4)', fontSize:10, textTransform:'uppercase', marginBottom:3 }}>Google Postmaster</div>
-                  <div style={{ color:'#10b981', fontWeight:700, fontSize:13 }}>Reputation: {postmasterData.domain_reputation}</div>
-                  <div style={{ color:'rgba(148,163,184,0.5)', fontSize:11, marginTop:2 }}>DMARC {postmasterData.dmarc_success_ratio!=null?(postmasterData.dmarc_success_ratio*100).toFixed(1)+'%':'N/A'} · SPF {postmasterData.spf_success_ratio!=null?(postmasterData.spf_success_ratio*100).toFixed(0)+'%':'N/A'} · DKIM {postmasterData.dkim_success_ratio!=null?(postmasterData.dkim_success_ratio*100).toFixed(0)+'%':'N/A'}</div>
-                </div>
-              )}
             </div>
           </div>
 
-          {/* Problem Areas */}
-          {report.segments && (report.segments.warmingUp > 0 || report.segments.cold > 0 || report.segments.dead > 0) && (
+          {/* ── 9. DMARC + GOOGLE SIGNALS ── */}
+          {postmasterData && (
             <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
-              <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:11, letterSpacing:'0.07em', textTransform:'uppercase', marginBottom:12 }}>⚠️ Problems Costing You Revenue</div>
-              {[
-                report.segments.warmingUp > 0 && { icon:'🟡', count: report.segments.warmingUp, label: 'subscribers are losing interest', sub: 'No engagement in 1-3 months. Re-engage now before they go cold.' },
-                report.segments.cold > 0 && { icon:'🔴', count: report.segments.cold, label: 'subscribers have gone cold', sub: 'Zero engagement in 3-12 months. These are costing you deliverability.' },
-                report.segments.dead > 0 && { icon:'⚫', count: report.segments.dead, label: 'subscribers are dead weight', sub: "Haven't engaged in over a year. Stop emailing them immediately." },
-                (report.segments.spamRisk || 0) > 0 && { icon:'🚨', count: report.segments.spamRisk, label: 'contacts tagged as spam risk', sub: 'Remove these to protect your sender reputation.' },
-                report.quality?.bounced > 0 && { icon:'📧', count: report.quality.bounced, label: 'bounced email addresses', sub: 'Invalid addresses hurting your deliverability score.' },
-              ].filter(Boolean).map((p: any) => (
-                <div key={p.label} style={{ display:'flex', gap:12, padding:'10px 0', borderBottom:'1px solid rgba(99,102,241,0.07)' }}>
-                  <span style={{ fontSize:16, flexShrink:0 }}>{p.icon}</span>
-                  <div>
-                    <span style={{ color:'white', fontWeight:600, fontSize:13 }}>{(p.count as number).toLocaleString()} </span>
-                    <span style={{ color:'rgba(148,163,184,0.7)', fontSize:13 }}>{p.label}</span>
-                    <p style={{ color:'rgba(148,163,184,0.4)', fontSize:12, margin:'2px 0 0' }}>{p.sub}</p>
-                  </div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+                <div>
+                  <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:10 }}>DMARC Compliance</div>
+                  <div style={{ fontSize:28, fontWeight:800, color:'#10b981', marginBottom:4 }}>{postmasterData.dmarc_success_ratio!=null?(postmasterData.dmarc_success_ratio*100).toFixed(1)+'%':'N/A'}</div>
+                  <div style={{ color:'rgba(148,163,184,0.4)', fontSize:10, marginBottom:10 }}>Excellent DMARC Compliance Score</div>
+                  {[['SPF', postmasterData.spf_success_ratio],['DKIM', postmasterData.dkim_success_ratio]].map(([l,v])=>(
+                    <div key={l as string} style={{ display:'flex', justifyContent:'space-between', padding:'4px 0' }}>
+                      <span style={{ color:'rgba(148,163,184,0.5)', fontSize:12 }}>{l as string}</span>
+                      <span style={{ color:'#10b981', fontWeight:700, fontSize:12 }}>{(v as number)!=null?((v as number)*100).toFixed(1)+'%':'N/A'}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          )}
-
-          {/* Campaign Performance + Workflow Table */}
-          {report.stats && (
-            <div style={{ background:'rgba(15,20,35,0.9)', border:`1px solid ${report.stats.campaigns_analyzed>0?'rgba(99,102,241,0.15)':'rgba(245,158,11,0.12)'}`, borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
-              {report.stats.campaigns_analyzed > 0 ? (
-                <>
-                  <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:11, letterSpacing:'0.07em', textTransform:'uppercase', marginBottom:12 }}>📊 Campaign Performance — {report.stats.campaigns_analyzed} Workflow Campaigns (all-time totals)</div>
-                  {/* Summary KPIs */}
-                  <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8, marginBottom:16 }}>
-                    {([['Open Rate',report.stats.open_rate+'%',report.stats.open_rate>=25],['Click Rate',report.stats.click_rate+'%',report.stats.click_rate>=3],['Bounce Rate',report.stats.bounce_rate+'%',report.stats.bounce_rate<2],['Spam Rate',report.stats.spam_rate+'%',report.stats.spam_rate<0.1],['Unsub Rate',report.stats.unsub_rate+'%',report.stats.unsub_rate<0.5],['Total Sent',report.stats.total_sent.toLocaleString(),true]] as [string,string,boolean][]).map(([l,v,g]) => (
-                      <div key={l} style={{ background:'rgba(99,102,241,0.06)', borderRadius:9, padding:'9px 12px' }}>
-                        <div style={{ fontSize:10, color:'rgba(148,163,184,0.4)', marginBottom:2, textTransform:'uppercase' }}>{l}</div>
-                        <div style={{ fontSize:16, fontWeight:700, color:g?'#10b981':'#f43f5e' }}>{v}</div>
+                <div>
+                  <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:10 }}>Google Signals</div>
+                  {[['l.phxhomeremodeling.com', postmasterData.domain_reputation],['phxhomeremodeling.com', postmasterData.domain_reputation]].map(([d,rep])=>(
+                    <div key={d as string} style={{ marginBottom:8 }}>
+                      <div style={{ color:'rgba(148,163,184,0.5)', fontSize:10, marginBottom:2 }}>{d}</div>
+                      <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                        <div style={{ width:8, height:8, borderRadius:'50%', background: rep==='HIGH'?'#10b981':'#f59e0b' }}/>
+                        <span style={{ color: rep==='HIGH'?'#10b981':'#f59e0b', fontWeight:700, fontSize:13 }}>Domain Reputation: {rep}</span>
                       </div>
-                    ))}
-                  </div>
-                  {/* Per-workflow table */}
-                  {report.workflows && report.workflows.length > 0 && (
-                    <div style={{ overflowX:'auto' }}>
-                      <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
-                        <thead>
-                          <tr style={{ borderBottom:'1px solid rgba(99,102,241,0.15)' }}>
-                            {['Workflow','Sent','Open %','Click %','Bounce %','Spam %'].map(h => (
-                              <th key={h} style={{ padding:'6px 10px', textAlign:'left', color:'rgba(148,163,184,0.4)', fontWeight:600, fontSize:10, textTransform:'uppercase', letterSpacing:'0.05em' }}>{h}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(report.workflows as any[]).map((w: any) => (
-                            <tr key={w.id} style={{ borderBottom:'1px solid rgba(99,102,241,0.05)' }}>
-                              <td style={{ padding:'7px 10px', color:'rgba(148,163,184,0.8)', maxWidth:200, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={w.name}>{w.name.length > 35 ? w.name.slice(0,35)+'…' : w.name}</td>
-                              <td style={{ padding:'7px 10px', color:'white', fontWeight:600 }}>{w.sent.toLocaleString()}</td>
-                              <td style={{ padding:'7px 10px', color: w.openRate >= 25 ? '#10b981' : '#f59e0b', fontWeight:600 }}>{w.openRate.toFixed(1)}%</td>
-                              <td style={{ padding:'7px 10px', color: w.clickRate >= 3 ? '#10b981' : '#f59e0b', fontWeight:600 }}>{w.clickRate.toFixed(1)}%</td>
-                              <td style={{ padding:'7px 10px', color: w.bounced/w.sent*100 < 2 ? '#10b981' : '#f43f5e', fontWeight:600 }}>{w.sent>0?(w.bounced/w.sent*100).toFixed(2):0}%</td>
-                              <td style={{ padding:'7px 10px', color: w.complaintRate < 0.1 ? '#10b981' : '#f43f5e', fontWeight:600 }}>{w.complaintRate.toFixed(3)}%</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                    </div>
+                  ))}
+                  {postmasterData.spam_rate != null && (
+                    <div style={{ marginTop:6, padding:'6px 10px', background:'rgba(16,185,129,0.06)', borderRadius:7 }}>
+                      <span style={{ color:'rgba(148,163,184,0.5)', fontSize:10 }}>GMAIL SPAM RATE </span>
+                      <span style={{ color:'#10b981', fontWeight:700, fontSize:13 }}>{(postmasterData.spam_rate*100).toFixed(3)}%</span>
                     </div>
                   )}
-                </>
-              ) : (
-                <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-                  <span style={{ fontSize:14 }}>📊</span>
-                  <span style={{ color:'rgba(148,163,184,0.4)', fontSize:12 }}>{report.stats.note || 'No workflow campaign activity found for this period.'}</span>
                 </div>
-              )}
+              </div>
             </div>
           )}
 
-          {/* Actions */}
-          {report.analysis?.top_priority && (
-            <div style={{ background:'rgba(244,63,94,0.05)', border:'1px solid rgba(244,63,94,0.15)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
-              <div style={{ color:'#f43f5e', fontWeight:700, fontSize:11, letterSpacing:'0.07em', textTransform:'uppercase', marginBottom:10 }}>🚨 Urgent Actions</div>
-              <p style={{ color:'rgba(148,163,184,0.8)', fontSize:13, marginBottom:8 }}><strong style={{color:'white'}}>Top priority:</strong> {report.analysis.top_priority}</p>
-              {Array.isArray(report.analysis.actions_urgent) && report.analysis.actions_urgent.map((a:string,i:number) => (
-                <div key={i} style={{ display:'flex', gap:8, marginBottom:5 }}>
-                  <span style={{ color:'#f43f5e', flexShrink:0 }}>•</span>
-                  <span style={{ color:'rgba(148,163,184,0.7)', fontSize:13 }}>{a}</span>
-                </div>
-              ))}
-            </div>
-          )}
-          {Array.isArray(report.analysis?.actions_medium) && (
-            <div style={{ background:'rgba(245,158,11,0.05)', border:'1px solid rgba(245,158,11,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
-              <div style={{ color:'#f59e0b', fontWeight:700, fontSize:11, letterSpacing:'0.07em', textTransform:'uppercase', marginBottom:10 }}>📋 Recommended Actions</div>
-              {report.analysis.actions_medium.map((a:string,i:number) => (
-                <div key={i} style={{ display:'flex', gap:8, marginBottom:5 }}>
-                  <span style={{ color:'#f59e0b', flexShrink:0 }}>•</span>
-                  <span style={{ color:'rgba(148,163,184,0.7)', fontSize:13 }}>{a}</span>
-                </div>
-              ))}
+          {/* ── 10. WORKFLOW TABLE ── */}
+          {report.workflows && report.workflows.length > 0 && (
+            <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
+              <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:12 }}>Workflow Campaign Details</div>
+              <div style={{ overflowX:'auto' as const }}>
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
+                  <thead>
+                    <tr style={{ borderBottom:'1px solid rgba(99,102,241,0.15)' }}>
+                      {['Workflow','Sent','Open %','Click %','Bounce %','Spam %'].map(h=>(
+                        <th key={h} style={{ padding:'5px 8px', textAlign:'left' as const, color:'rgba(148,163,184,0.4)', fontWeight:600, fontSize:9, textTransform:'uppercase' as const }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(report.workflows as any[]).map((w:any)=>(
+                      <tr key={w.name} style={{ borderBottom:'1px solid rgba(99,102,241,0.05)' }}>
+                        <td style={{ padding:'6px 8px', color:'rgba(148,163,184,0.8)', maxWidth:200, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' as const }} title={w.name}>{w.name.length>35?w.name.slice(0,35)+'…':w.name}</td>
+                        <td style={{ padding:'6px 8px', color:'white', fontWeight:600 }}>{w.sent.toLocaleString()}</td>
+                        <td style={{ padding:'6px 8px', color:w.openRate>=25?'#10b981':'#f59e0b', fontWeight:600 }}>{w.openRate.toFixed(1)}%</td>
+                        <td style={{ padding:'6px 8px', color:w.clickRate>=3?'#10b981':'#f59e0b', fontWeight:600 }}>{w.clickRate.toFixed(1)}%</td>
+                        <td style={{ padding:'6px 8px', color:w.bounced/w.sent*100<2?'#10b981':'#f43f5e', fontWeight:600 }}>{w.sent>0?(w.bounced/w.sent*100).toFixed(2):0}%</td>
+                        <td style={{ padding:'6px 8px', color:w.complaintRate<0.1?'#10b981':'#f43f5e', fontWeight:600 }}>{w.complaintRate.toFixed(3)}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
-          <p style={{ color:'rgba(148,163,184,0.2)', fontSize:11, textAlign:'center' }}>Generated {new Date(report.generated_at).toLocaleString()} · l.phxhomeremodeling.com via HighLevel</p>
+          <p style={{ color:'rgba(148,163,184,0.2)', fontSize:11, textAlign:'center' as const }}>Generated {new Date(report.generated_at).toLocaleString()} · {report.domain} via HighLevel</p>
         </div>
       )}
     </div>
   )
 }
 
-function buildEmailReportHTML(report: any, pm: any, month: string, year: number): string {
-  const sc = report.health_score >= 800 ? '#10b981' : report.health_score >= 650 ? '#06b6d4' : report.health_score >= 500 ? '#f59e0b' : '#f43f5e'
+function buildEmailReportHTML(report: any, pm: any): string {
+  const sc = report.health_score >= 800 ? '#10b981' : report.health_score >= 650 ? '#06b6d4' : report.health_score >= 500 ? '#f59e0b' : report.health_score >= 300 ? '#f43f5e' : '#dc2626'
   const pct = (n: number, d: number) => d > 0 ? (n/d*100).toFixed(1)+'%' : '0%'
-  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Email Health - ${month} ${year}</title>
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Email Health Report - ${report.month_label}</title>
 <style>*{box-sizing:border-box;margin:0;padding:0}body{background:#080c14;color:#e2e8f0;font-family:Inter,sans-serif;padding:32px;max-width:900px;margin:0 auto}
-.score{font-size:72px;font-weight:900;color:${sc}}.label{font-size:22px;font-weight:800;color:${sc}}
-.card{background:rgba(15,20,35,0.9);border:1px solid rgba(99,102,241,0.15);border-radius:14px;padding:20px;margin:14px 0}
-.title{color:#a5b4fc;font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;margin-bottom:12px}
-p{color:rgba(148,163,184,0.7);line-height:1.7;margin-bottom:8px}
-.row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(99,102,241,0.06)}
-.row:last-child{border-bottom:none}
-.kpi{text-align:center;flex:1}.kpi-val{font-size:20px;font-weight:700;color:${sc}}.kpi-lbl{font-size:10px;color:rgba(148,163,184,0.4);text-transform:uppercase}
+.card{background:rgba(15,20,35,.9);border:1px solid rgba(99,102,241,.15);border-radius:14px;padding:20px;margin:14px 0}
+.title{color:#a5b4fc;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:12px}
+p{color:rgba(148,163,184,.7);line-height:1.7;margin-bottom:8px}
+.row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(99,102,241,.06)}
+.score{font-size:60px;font-weight:900;color:${sc}}.label{font-size:20px;font-weight:800;color:${sc}}
+.kpi{text-align:center;flex:1}.kpi-val{font-size:20px;font-weight:700;color:${sc}}.kpi-lbl{font-size:9px;color:rgba(148,163,184,.4);text-transform:uppercase}
+.badge-high{background:rgba(244,63,94,.15);border:1px solid rgba(244,63,94,.3);color:#f43f5e;padding:1px 6px;border-radius:4px;font-size:9px;font-weight:700;text-transform:uppercase}
+.badge-medium{background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.3);color:#f59e0b;padding:1px 6px;border-radius:4px;font-size:9px;font-weight:700;text-transform:uppercase}
+.badge-low{background:rgba(6,182,212,.15);border:1px solid rgba(6,182,212,.3);color:#06b6d4;padding:1px 6px;border-radius:4px;font-size:9px;font-weight:700;text-transform:uppercase}
 </style></head><body>
-<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px">
+<div style="display:flex;justify-content:space-between;margin-bottom:20px">
 <div><div class="score">${report.health_score}</div><div class="label">${report.score_label}</div>
-<div style="color:rgba(148,163,184,0.4);font-size:12px;margin-top:4px">Strict Email Health Score · ${month} ${year} · via HighLevel</div></div>
-<div style="text-align:right"><div style="font-size:18px;font-weight:700;color:white">Phoenix Home Remodeling</div>
-<div style="color:rgba(148,163,184,0.4);font-size:12px">l.phxhomeremodeling.com</div></div></div>
+<div style="color:rgba(148,163,184,.4);font-size:11px;margin-top:4px">Strict Email Health Score · ${report.month_label} · via HighLevel</div>
+<div style="margin-top:6px;font-size:12px"><span style="color:rgba(148,163,184,.5)">Strict: </span><span style="color:${sc};font-weight:700">${report.strict_score}</span>&nbsp;&nbsp;
+<span style="color:rgba(148,163,184,.5)">Relaxed: </span><span style="color:#06b6d4;font-weight:700">${report.relaxed_score}</span></div></div>
+<div style="text-align:right"><div style="font-size:18px;font-weight:700;color:white">Phoenix Home Remodeling</div><div style="color:rgba(148,163,184,.4);font-size:12px">${report.domain}</div></div></div>
 <div class="card"><div class="title">Analyst Notes</div><p>${report.analysis?.analyst_notes||''}</p></div>
-<div class="card"><div class="title">Audience Breakdown</div>
-${[['Best Assets (last 30d)',report.segments.active,'#10b981'],['Assets (30-90d)',report.segments.warmingUp,'#06b6d4'],['Liabilities (90d-1yr)',report.segments.cold,'#f59e0b'],['Worst Liabilities (1yr+)',report.segments.dead,'#f43f5e']].map(([l,c,col])=>`<div class="row"><span>${l}</span><span style="color:${col};font-weight:700">${(c as number).toLocaleString()} (${pct(c as number,report.segments.total)})</span></div>`).join('')}
-<div style="display:flex;margin-top:12px;padding:10px;background:rgba(99,102,241,0.05);border-radius:8px">
-${[['Total',report.segments.total],['New',report.segments.new],['Never Engaged',report.segments.neverEngaged],['Spam Risk',report.segments.spamRisk||0]].map(([l,v])=>`<div class="kpi"><div class="kpi-val">${(v as number).toLocaleString()}</div><div class="kpi-lbl">${l}</div></div>`).join('')}
-</div></div>
+<div class="card"><div class="title">Executive Summary</div>${Array.isArray(report.analysis?.executive_summary_bullets)?report.analysis.executive_summary_bullets.map((b:string)=>`<p>• ${b}</p>`).join(''):''}
+</div>
+${Array.isArray(report.analysis?.problems)?`<div class="card" style="border-color:rgba(244,63,94,.15)"><div class="title" style="color:#f43f5e">⚠️ Problems Costing You Revenue</div>${report.analysis.problems.map((p:any)=>`<div style="padding:8px 0;border-bottom:1px solid rgba(244,63,94,.08)"><strong style="color:white">${p.title}</strong><p style="margin-top:4px">${p.description}</p></div>`).join('')}</div>`:''}
+<div class="card"><div class="title">Actions to Take</div>
+${['high','medium','low'].map(level=>{const items=report.analysis?.[`actions_${level}`]||[];return items.map((a:string)=>`<div style="display:flex;gap:8px;padding:7px 0;border-bottom:1px solid rgba(99,102,241,.06)"><span class="badge-${level}">${level}</span><span style="color:rgba(148,163,184,.75);font-size:13px">${a}</span></div>`).join('')}).join('')}
+</div>
+${report.stats.campaigns_analyzed>0?`<div class="card"><div class="title">Email Performance (${report.stats.campaigns_analyzed} Workflows, All-Time)</div>
+<div style="display:flex;margin-bottom:12px">${[['Engagement',report.stats.open_rate+'%'],['Open Rate',report.stats.open_rate+'%'],['Click Rate',report.stats.click_rate+'%'],['Bounce',report.stats.bounce_rate+'%'],['Spam',report.stats.spam_rate+'%'],['Sent',report.stats.total_sent.toLocaleString()]].map(([l,v])=>`<div class="kpi"><div class="kpi-val">${v}</div><div class="kpi-lbl">${l}</div></div>`).join('')}</div>
+</div>`:''}
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
 <div class="card"><div class="title">Email Quality</div>
 ${[['✅ Safe to send',report.quality.green,'#10b981'],['🚫 Do not send',report.quality.red,'#f43f5e'],['⚠️ Bounced',report.quality.bounced,'#f59e0b'],['🚨 Spam risk',report.quality.spam,'#dc2626']].map(([l,c,col])=>`<div class="row"><span>${l}</span><span style="color:${col};font-weight:700">${(c as number).toLocaleString()}</span></div>`).join('')}</div>
-<div class="card"><div class="title">Providers</div>
-${report.providers?[['Gmail',report.providers.google,'#10b981'],['Yahoo',report.providers.yahoo,'#f59e0b'],['Outlook',report.providers.microsoft,'#06b6d4'],['Other',report.providers.other,'rgba(148,163,184,0.5)']].map(([l,c,col])=>`<div class="row"><span>${l}</span><span style="color:${col};font-weight:700">${(c as number).toLocaleString()} (${pct(c as number,report.providers.scanned)})</span></div>`).join(''):''}
-${pm?`<div style="margin-top:10px;padding:8px;background:rgba(16,185,129,0.06);border-radius:6px;font-size:12px"><strong style="color:#10b981">Domain Reputation: ${pm.domain_reputation}</strong><br>DMARC ${pm.dmarc_success_ratio!=null?(pm.dmarc_success_ratio*100).toFixed(1)+'%':'N/A'} · SPF ${pm.spf_success_ratio!=null?(pm.spf_success_ratio*100).toFixed(0)+'%':'N/A'} · DKIM ${pm.dkim_success_ratio!=null?(pm.dkim_success_ratio*100).toFixed(0)+'%':'N/A'}</div>`:''}</div></div>
-${report.analysis?.top_priority?`<div class="card" style="border-color:rgba(244,63,94,0.2)"><div class="title" style="color:#f43f5e">🚨 Urgent Actions</div><p><strong style="color:white">Top priority:</strong> ${report.analysis.top_priority}</p>${Array.isArray(report.analysis.actions_urgent)?report.analysis.actions_urgent.map((a:string)=>`<p>• ${a}</p>`).join(''):''}
-</div>`:''}
-<p style="color:rgba(148,163,184,0.2);font-size:11px;text-align:center;padding:16px 0">Generated ${new Date(report.generated_at).toLocaleString()}</p>
+<div class="card"><div class="title">Marketable by Provider</div>
+${report.providers?[['Gmail',report.providers.google],['Yahoo',report.providers.yahoo],['Outlook',report.providers.microsoft],['Other',report.providers.other]].map(([l,c])=>`<div class="row"><span>${l}</span><span style="color:white;font-weight:700">${(c as number).toLocaleString()} (${pct(c as number,report.providers.scanned)})</span></div>`).join(''):''}
+${pm?`<div style="margin-top:10px;padding:8px;background:rgba(16,185,129,.06);border-radius:7px"><strong style="color:#10b981">Domain Rep: ${pm.domain_reputation}</strong> · DMARC ${pm.dmarc_success_ratio!=null?(pm.dmarc_success_ratio*100).toFixed(1)+'%':'N/A'} · SPF ${pm.spf_success_ratio!=null?(pm.spf_success_ratio*100).toFixed(0)+'%':'N/A'}</div>`:''}</div></div>
+<p style="color:rgba(148,163,184,.2);font-size:11px;text-align:center;padding:20px 0">Generated ${new Date(report.generated_at).toLocaleString()} · ${report.domain}</p>
 </body></html>`
 }
 
