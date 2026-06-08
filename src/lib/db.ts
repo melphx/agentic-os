@@ -19,7 +19,30 @@ export function getDb(): Database.Database {
   _db.pragma('foreign_keys = ON')
   initSchema(_db)
   seedAdminUser(_db)
+  deduplicateKnowledge(_db)
   return _db
+}
+
+// One-time migration: remove duplicate knowledge rows that built up before
+// the upsert fix. Keeps only the most-recently-inserted row per (agent_id, filename)
+// and per filename in company_knowledge.
+function deduplicateKnowledge(db: Database.Database) {
+  try {
+    db.exec(`
+      DELETE FROM agent_knowledge
+      WHERE id NOT IN (
+        SELECT MAX(id) FROM agent_knowledge GROUP BY agent_id, filename
+      );
+    `)
+  } catch {}
+  try {
+    db.exec(`
+      DELETE FROM company_knowledge
+      WHERE id NOT IN (
+        SELECT MAX(id) FROM company_knowledge GROUP BY filename
+      );
+    `)
+  } catch {}
 }
 
 // Auto-seed admin user from env vars on first startup
@@ -364,6 +387,8 @@ export function getKnowledgeContent(agentId: string): string {
 }
 
 export function saveKnowledge(agentId: string, filename: string, fileType: string, fileSize: number, content: string): AgentKnowledge {
+  // Delete old version first so re-uploads/re-syncs replace stale content
+  getDb().prepare('DELETE FROM agent_knowledge WHERE agent_id = ? AND filename = ?').run(agentId, filename)
   const info = getDb().prepare(`
     INSERT INTO agent_knowledge (agent_id, filename, file_type, file_size, content)
     VALUES (?, ?, ?, ?, ?)
@@ -749,6 +774,8 @@ export function getCompanyKnowledgeContent(): string {
 
 export function saveCompanyKnowledge(filename: string, fileType: string, fileSize: number, content: string): CompanyKnowledge {
   ensureCompanyKbTable()
+  // Delete old version first so re-uploads/re-syncs replace stale content
+  getDb().prepare('DELETE FROM company_knowledge WHERE filename=?').run(filename)
   const info = getDb().prepare('INSERT INTO company_knowledge (filename,file_type,file_size,content) VALUES (?,?,?,?)').run(filename, fileType, fileSize, content)
   return getDb().prepare('SELECT * FROM company_knowledge WHERE id=?').get(info.lastInsertRowid) as CompanyKnowledge
 }
@@ -1123,27 +1150,4 @@ export function saveEmailSnapshot(data: {
   getDb().prepare(`
     INSERT OR REPLACE INTO email_snapshots 
     (snapshot_date, location_id, source_id, campaign_name, sent, opened, clicked, bounced, complained, unsubscribed)
-    VALUES (@snapshot_date, @location_id, @source_id, @campaign_name, @sent, @opened, @clicked, @bounced, @complained, @unsubscribed)
-  `).run(data)
-}
-
-export function getEmailSnapshot(locationId: string, sourceId: string, snapshotDate: string) {
-  ensureEmailSnapshotsTable()
-  return getDb().prepare(
-    "SELECT * FROM email_snapshots WHERE location_id=? AND source_id=? AND snapshot_date<=? ORDER BY snapshot_date DESC LIMIT 1"
-  ).get(locationId, sourceId, snapshotDate) as any
-}
-
-export function getLatestSnapshot(locationId: string, sourceId: string) {
-  ensureEmailSnapshotsTable()
-  return getDb().prepare(
-    "SELECT * FROM email_snapshots WHERE location_id=? AND source_id=? ORDER BY snapshot_date DESC LIMIT 1"
-  ).get(locationId, sourceId) as any
-}
-
-export function getAllSnapshots(locationId: string) {
-  ensureEmailSnapshotsTable()
-  return getDb().prepare(
-    "SELECT * FROM email_snapshots WHERE location_id=? ORDER BY snapshot_date DESC"
-  ).all(locationId) as any[]
-}
+   
