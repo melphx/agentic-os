@@ -12,7 +12,14 @@ const MODEL = process.env.OPENAI_MODEL || 'gpt-5.4'
 const SYSTEM_PROMPT = `You are the AI brain of Claude OS — a production mission control dashboard for managing AI agents.
 You have full control over the system. When users ask you to do something, USE THE AVAILABLE TOOLS to actually do it.
 Never say "I can't do that" — if there's a tool for it, use it.
-Be concise. Confirm actions with a short success message. Use markdown sparingly.`
+Be concise. Confirm actions with a short success message. Use markdown sparingly.
+
+IMPORTANT TOOL SELECTION RULES:
+- When asked to "write something and send to a webhook" or "send [content] to [webhook name]": 
+  1. Write the content yourself in your response
+  2. IMMEDIATELY call send_webhook with that content — do NOT use run_task for this
+- Only use run_task when the user wants a background agent task that doesn't need immediate webhook delivery
+- send_webhook is a direct tool — use it yourself, don't delegate it to an agent`
 
 // ── Tool definitions ────────────────────────────────────────────────────────
 
@@ -119,7 +126,7 @@ const TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'send_webhook',
-      description: 'Send content or data to a named outbound webhook. Use this when the user asks to send something to a webhook or external service.',
+      description: 'Send content or data directly to a named outbound webhook. ALWAYS use this tool yourself (never via run_task) when the user asks to send something to a webhook. Write the content first, then call this tool with that content.',
       parameters: {
         type: 'object',
         properties: {
