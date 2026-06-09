@@ -2042,7 +2042,7 @@ function GoogleOAuthSetupModal({ onClose }: { onClose: () => void }) {
               <strong style={{ color: 'white' }}>Before you start:</strong><br/>
               1. Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" style={{ color: '#a5b4fc' }}>Google Cloud Console → Credentials</a><br/>
               2. Edit your OAuth client → add this redirect URI:<br/>
-              <code style={{ background: 'rgba(0,0,0,0.3)', padding: '3px 8px', borderRadius: 4, color: '#c4b5fd', fontSize: 11 }}>https://sandbox.phoenixhomeremodeling.net/api/drive-sync/oauth</code><br/>
+              <code style={{ background: 'rgba(0,0,0,0.3)', padding: '3px 8px', borderRadius: 4, color: '#c4b5fd', fontSize: 11 }}>https://ai.phoenixhomeremodeling.net/api/drive-sync/oauth</code><br/>
               3. Save, then paste your Client ID and Secret below.
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
@@ -3787,7 +3787,7 @@ function ApiKeysPanel() {
       ))}
 
       <div style={{ marginTop: 14, padding: 12, background: 'rgba(99,102,241,0.05)', borderRadius: 8, fontSize: 11, color: 'rgba(148,163,184,0.5)', lineHeight: 1.7 }}>
-        <strong style={{ color: '#a5b4fc' }}>Endpoint:</strong> POST https://sandbox.phoenixhomeremodeling.net/api/trigger<br/>
+        <strong style={{ color: '#a5b4fc' }}>Endpoint:</strong> POST https://ai.phoenixhomeremodeling.net/api/trigger<br/>
         <strong style={{ color: '#a5b4fc' }}>Headers:</strong> x-api-key: your-key, Content-Type: application/json<br/>
         <strong style={{ color: '#a5b4fc' }}>Body:</strong> {'{'}&#34;agent_id&#34;:&#34;writer&#34;,&#34;title&#34;:&#34;Task title&#34;,&#34;description&#34;:&#34;Details&#34;,&#34;type&#34;:&#34;general&#34;{'}'}
       </div>

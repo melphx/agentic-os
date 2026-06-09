@@ -29,7 +29,7 @@
 
 Open your browser and go to:
 ```
-https://sandbox.phoenixhomeremodeling.net
+https://ai.phoenixhomeremodeling.net
 ```
 
 You'll be prompted to log in. Use the credentials set in your `.env.local` file on the server (`ADMIN_EMAIL` and `ADMIN_PASSWORD`).
@@ -434,7 +434,7 @@ You can trigger your agents from external systems — GoHighLevel workflows, N8N
 Send a POST request to your trigger endpoint:
 
 ```
-POST https://sandbox.phoenixhomeremodeling.net/api/trigger
+POST https://ai.phoenixhomeremodeling.net/api/trigger
 ```
 
 **Headers:**
@@ -508,11 +508,11 @@ Restart the server after changing this value.
 | Item | Value |
 |------|-------|
 | Provider | VPS |
-| Domain | sandbox.phoenixhomeremodeling.net |
+| Domain | ai.phoenixhomeremodeling.net |
 | App Directory | `/root/agentic-os` |
 | Database | `/root/agentic-os/data/claude-os.db` |
 | Process Manager | PM2 |
-| Port | 3000 (proxied via Nginx on 443) |
+| Port | 7432 (proxied via Nginx on 443) |
 
 ### Environment Variables
 

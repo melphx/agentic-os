@@ -101,7 +101,7 @@ li strong{color:var(--text)}
 <section id="start">
 <h2>Getting Started</h2>
 <h3>Accessing the App</h3>
-<pre><code>https://sandbox.phoenixhomeremodeling.net</code></pre>
+<pre><code>https://ai.phoenixhomeremodeling.net</code></pre>
 <p>Log in with the credentials in <code>.env.local</code> on the server (<code>ADMIN_EMAIL</code> / <code>ADMIN_PASSWORD</code>).</p>
 <h3>First Time Setup</h3>
 <ol>
@@ -312,7 +312,7 @@ Step 3: Email Manager   → "Draft a newsletter from this blog post"</code></pre
 <section id="api">
 <h2>API Access</h2>
 <p>Trigger agents from GHL, N8N, Zapier, or any system that can send HTTP requests.</p>
-<pre><code>POST https://sandbox.phoenixhomeremodeling.net/api/trigger
+<pre><code>POST https://ai.phoenixhomeremodeling.net/api/trigger
 x-api-key: cos_live_your_key_here
 Content-Type: application/json
 
@@ -458,11 +458,11 @@ GHL_DOMAIN=l.phxhomeremodeling.com</code></pre>
 <h2>Server &amp; Deployment</h2>
 <table>
 <tr><th>Item</th><th>Value</th></tr>
-<tr><td>Domain</td><td><code>sandbox.phoenixhomeremodeling.net</code></td></tr>
+<tr><td>Domain</td><td><code>ai.phoenixhomeremodeling.net</code></td></tr>
 <tr><td>App directory</td><td><code>/root/agentic-os</code></td></tr>
 <tr><td>Database</td><td><code>/root/agentic-os/data/claude-os.db</code></td></tr>
 <tr><td>Process manager</td><td>PM2 (<code>pm2 list</code> to check status)</td></tr>
-<tr><td>Docs</td><td><code>https://sandbox.phoenixhomeremodeling.net/docs.html</code></td></tr>
+<tr><td>Docs</td><td><code>https://ai.phoenixhomeremodeling.net/docs.html</code></td></tr>
 </table>
 <h3>Deploy Updates</h3>
 <pre><code>cd /root/agentic-os

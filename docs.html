@@ -130,7 +130,7 @@ li strong{color:var(--text)}
 <h3>Accessing the App</h3>
 
 <p>Open your browser and go to:</p>
-<pre><code>https://sandbox.phoenixhomeremodeling.net</code></pre>
+<pre><code>https://ai.phoenixhomeremodeling.net</code></pre>
 
 <p>You'll be prompted to log in. Use the credentials set in your <code>.env.local</code> file on the server (<code>ADMIN_EMAIL</code> and <code>ADMIN_PASSWORD</code>).</p>
 
@@ -500,7 +500,7 @@ li strong{color:var(--text)}
 
 <p>Send a POST request to your trigger endpoint:</p>
 
-<pre><code>POST https://sandbox.phoenixhomeremodeling.net/api/trigger</code></pre>
+<pre><code>POST https://ai.phoenixhomeremodeling.net/api/trigger</code></pre>
 
 <strong>Headers:</strong>
 <pre><code>x-api-key: cos_live_your_key_here
@@ -557,7 +557,7 @@ li strong{color:var(--text)}
 
 <h3>Server Details</h3>
 
-<table><tr><th>Item</th><th>Value</th></tr><tr><td>Provider</td><td>VPS</td></tr><tr><td>Domain</td><td>sandbox.phoenixhomeremodeling.net</td></tr><tr><td>App Directory</td><td><code>/root/agentic-os</code></td></tr><tr><td>Database</td><td><code>/root/agentic-os/data/claude-os.db</code></td></tr><tr><td>Process Manager</td><td>PM2</td></tr><tr><td>Port</td><td>3000 (proxied via Nginx on 443)</td></tr></table>
+<table><tr><th>Item</th><th>Value</th></tr><tr><td>Provider</td><td>VPS</td></tr><tr><td>Domain</td><td>ai.phoenixhomeremodeling.net</td></tr><tr><td>App Directory</td><td><code>/root/agentic-os</code></td></tr><tr><td>Database</td><td><code>/root/agentic-os/data/claude-os.db</code></td></tr><tr><td>Process Manager</td><td>PM2</td></tr><tr><td>Port</td><td>7432 (proxied via Nginx on 443)</td></tr></table>
 <h3>Environment Variables</h3>
 
 <p>Located at <code>/root/agentic-os/.env.local</code>:</p>
