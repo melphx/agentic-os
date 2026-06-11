@@ -67,13 +67,12 @@ export default function LoginPage() {
           <div style={{ textAlign: 'center', marginBottom: 32 }}>
             <div style={{
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              width: 64, height: 64, borderRadius: 18, marginBottom: 16,
-              background: 'linear-gradient(135deg, #6366f1, #a855f7)',
-              boxShadow: '0 0 32px rgba(99,102,241,0.45)',
+              width: 88, height: 88, borderRadius: 20, marginBottom: 16, overflow: 'hidden',
+              boxShadow: '0 0 32px rgba(99,102,241,0.35)',
             }}>
-              <span style={{ fontSize: 30 }}>⬡</span>
+              <img src="/phr-logo.png" alt="PHR OS" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             </div>
-            <h1 style={{ color: 'white', fontWeight: 800, fontSize: 24, margin: 0, letterSpacing: '-0.02em' }}>Claude OS</h1>
+            <h1 style={{ color: 'white', fontWeight: 800, fontSize: 24, margin: 0, letterSpacing: '-0.02em' }}>PHR OS</h1>
             <p style={{ color: 'rgba(148,163,184,0.6)', fontSize: 13, margin: '6px 0 0' }}>Mission Control · Sign in</p>
           </div>
 
@@ -126,7 +125,7 @@ export default function LoginPage() {
           </form>
 
           <p style={{ textAlign: 'center', fontSize: 11, color: 'rgba(148,163,184,0.35)', marginTop: 24, marginBottom: 0 }}>
-            Claude OS · Powered by Hermes
+            PHR OS · Powered by Hermes
           </p>
         </div>
       </motion.div>

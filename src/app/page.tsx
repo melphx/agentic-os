@@ -222,7 +222,9 @@ const NAV = [
 function Sidebar({ view, setView, agents, onLogout, onSearch }: { view: string; setView: (v: string) => void; agents: Agent[]; onLogout: () => void; onSearch: () => void }) {
   return (
     <div style={{ width: 64, flexShrink: 0, background: 'rgba(8,12,20,0.95)', borderRight: '1px solid rgba(99,102,241,0.12)', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 20, paddingBottom: 16, gap: 4, zIndex: 50 }}>
-      <div style={{ width: 36, height: 36, borderRadius: 10, background: 'linear-gradient(135deg,#6366f1,#a855f7)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 20, boxShadow: '0 0 20px rgba(99,102,241,0.4)', fontSize: 18, flexShrink: 0 }}>⬡</div>
+      <div style={{ width: 44, height: 44, borderRadius: 12, overflow: 'hidden', marginBottom: 20, flexShrink: 0, boxShadow: '0 0 20px rgba(99,102,241,0.3)' }}>
+        <img src="/phr-logo.png" alt="PHR OS" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+      </div>
       {NAV.map(n => (
         <motion.button key={n.id} onClick={() => setView(n.id)} whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.95 }}
           title={n.label}
@@ -3652,7 +3654,7 @@ function TasksView({ tasks, agents }: { tasks: Task[]; agents: Agent[] }) {
 
 function TerminalView({ agents, metrics }: { agents: Agent[]; metrics: Metrics | null }) {
   const [history, setHistory] = useState<string[]>([
-    '⬡ Claude OS Terminal v2.0 — Production',
+    '⬡ PHR OS Terminal v2.0 — Production',
     'Type "help" for available commands.',
     '',
   ])
@@ -3677,7 +3679,7 @@ function TerminalView({ agents, metrics }: { agents: Agent[]; metrics: Metrics |
         lines.push(`  completed=${metrics?.tasks_completed||0}  running=${metrics?.tasks_running||0}  pending=${metrics?.tasks_pending||0}  failed=${metrics?.tasks_failed||0}`)
         break
       case 'version':
-        lines.push('  Claude OS v2.0.0 · Next.js 14 · SQLite · OpenAI · JWT Auth')
+        lines.push('  PHR OS v2.0.0 · Next.js 14 · SQLite · OpenAI · JWT Auth')
         break
       case 'clear':
         setHistory(['⬡ Terminal cleared.', '']); return
