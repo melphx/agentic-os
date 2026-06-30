@@ -216,6 +216,7 @@ const NAV = [
   { id: 'schedules',  icon: <Clock size={18} />,           label: 'Schedules'  },
   { id: 'hermes',    icon: <span style={{fontSize:16}}>⚡</span>, label: 'Hermes'    },
   { id: 'email-health', icon: <span style={{fontSize:14}}>📧</span>, label: 'Email Health' },
+  { id: 'mcd-reports', icon: <span style={{fontSize:14}}>📊</span>, label: 'MCD Reports' },
   { id: 'settings',   icon: <Settings size={18} />,        label: 'Settings'   },
 ]
 
@@ -2985,6 +2986,172 @@ function ApprovalsModal({ onClose }: { onClose: () => void }) {
 }
 
 
+// ── MCD Reports View ──────────────────────────────────────────────────────
+
+interface McdReport {
+  id: number
+  report_type: string
+  period_start: string
+  period_end: string
+  content: string
+  delivered_gchat: number
+  created_at: string
+}
+
+function McdReportsView() {
+  const [reports, setReports]       = useState<McdReport[]>([])
+  const [selected, setSelected]     = useState<McdReport | null>(null)
+  const [loading, setLoading]       = useState(true)
+  const [running, setRunning]       = useState(false)
+  const [runMsg, setRunMsg]         = useState('')
+  const [pollTimer, setPollTimer]   = useState<ReturnType<typeof setInterval> | null>(null)
+
+  const fetchReports = async () => {
+    try {
+      const r = await fetch('/api/mcd/reports?limit=20')
+      const d = await r.json()
+      if (d.reports) {
+        setReports(d.reports)
+        if (!selected && d.reports.length > 0) setSelected(d.reports[0])
+        // Update selected if a new one appeared
+        if (selected && d.reports[0]?.id !== selected.id) setSelected(d.reports[0])
+      }
+    } catch {}
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    fetchReports()
+    return () => { if (pollTimer) clearInterval(pollTimer) }
+  }, [])
+
+  async function handleRunNow() {
+    setRunning(true)
+    setRunMsg('Queuing report run...')
+    try {
+      const r = await fetch('/api/mcd/reports', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'run' }) })
+      const d = await r.json()
+      setRunMsg(d.message || 'Report queued. Refreshing every 15s...')
+      // Poll for new report
+      const t = setInterval(fetchReports, 15000)
+      setPollTimer(t)
+      setTimeout(() => { clearInterval(t); setPollTimer(null); setRunning(false) }, 300000)
+    } catch (e: any) {
+      setRunMsg('Error: ' + e.message)
+      setRunning(false)
+    }
+  }
+
+  const fmtDate = (s: string) => {
+    try { return new Date(s).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) }
+    catch { return s }
+  }
+
+  const typeColor: Record<string, string> = {
+    weekly: '#6366f1', monthly: '#8b5cf6', quarterly: '#06b6d4', daily: '#10b981', manual: '#f59e0b',
+  }
+
+  // Simple markdown-to-JSX: bold headers and line breaks
+  function renderReport(text: string) {
+    return text.split('\n').map((line, i) => {
+      if (line.startsWith('## ')) return <div key={i} style={{ fontSize: 14, fontWeight: 700, color: '#a5b4fc', marginTop: 18, marginBottom: 6, paddingBottom: 4, borderBottom: '1px solid rgba(99,102,241,0.15)' }}>{line.slice(3)}</div>
+      if (line.startsWith('### ')) return <div key={i} style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8', marginTop: 12, marginBottom: 4 }}>{line.slice(4)}</div>
+      if (line.startsWith('# '))  return <div key={i} style={{ fontSize: 16, fontWeight: 700, color: 'white', marginTop: 8, marginBottom: 10 }}>{line.slice(2)}</div>
+      if (line.startsWith('- ') || line.startsWith('* ')) return <div key={i} style={{ fontSize: 12, color: 'rgba(203,213,225,0.85)', lineHeight: 1.7, paddingLeft: 14, position: 'relative' }}><span style={{ position:'absolute', left:2 }}>•</span>{line.slice(2)}</div>
+      if (line.match(/^\d+\./)) return <div key={i} style={{ fontSize: 12, color: 'rgba(203,213,225,0.85)', lineHeight: 1.7, paddingLeft: 20 }}>{line}</div>
+      if (line.trim() === '') return <div key={i} style={{ height: 8 }} />
+      // Inline bold
+      const parts = line.split(/(\*\*[^*]+\*\*)/g)
+      return (
+        <div key={i} style={{ fontSize: 12, color: 'rgba(203,213,225,0.85)', lineHeight: 1.8 }}>
+          {parts.map((p, j) => p.startsWith('**') && p.endsWith('**')
+            ? <strong key={j} style={{ color: 'white', fontWeight: 600 }}>{p.slice(2,-2)}</strong>
+            : p)}
+        </div>
+      )
+    })
+  }
+
+  return (
+    <div style={{ height: '100%', overflowY: 'auto', background: '#080c14' }}>
+      {/* Top bar */}
+      <div style={{ padding: '12px 22px', borderBottom: '1px solid rgba(99,102,241,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(15,20,35,0.97)', position: 'sticky', top: 0, zIndex: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 16 }}>📊</span>
+          <span style={{ color: 'white', fontWeight: 700, fontSize: 15 }}>MCD Reports</span>
+          <span style={{ fontSize: 10, color: 'rgba(148,163,184,0.5)', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.15)', padding: '1px 7px', borderRadius: 10 }}>Marketing &amp; Conversions Director</span>
+        </div>
+        <button
+          onClick={handleRunNow}
+          disabled={running}
+          style={{ padding: '6px 14px', background: running ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 8, color: running ? 'rgba(165,180,252,0.5)' : '#a5b4fc', fontSize: 12, fontWeight: 600, cursor: running ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+          {running ? '⏳ Running...' : '▶ Run Now'}
+        </button>
+      </div>
+
+      {runMsg && (
+        <div style={{ margin: '10px 22px', padding: '8px 14px', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, fontSize: 12, color: '#a5b4fc' }}>
+          {runMsg}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 0, height: 'calc(100% - 56px)' }}>
+        {/* Left: report list */}
+        <div style={{ width: 240, flexShrink: 0, borderRight: '1px solid rgba(99,102,241,0.1)', overflowY: 'auto', padding: '12px 0' }}>
+          {loading && <div style={{ padding: '20px', color: 'rgba(148,163,184,0.4)', fontSize: 12, textAlign: 'center' }}>Loading...</div>}
+          {!loading && reports.length === 0 && (
+            <div style={{ padding: '20px 16px', color: 'rgba(148,163,184,0.4)', fontSize: 12, textAlign: 'center', lineHeight: 1.6 }}>
+              No reports yet.<br /><br />
+              Reports run automatically Monday 7:30 AM Phoenix time, or click "Run Now" above.
+            </div>
+          )}
+          {reports.map(r => (
+            <div key={r.id} onClick={() => setSelected(r)}
+              style={{ padding: '10px 14px', cursor: 'pointer', borderLeft: selected?.id === r.id ? '2px solid #6366f1' : '2px solid transparent', background: selected?.id === r.id ? 'rgba(99,102,241,0.08)' : 'transparent', transition: 'all 0.1s' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: `${typeColor[r.report_type] || '#6366f1'}22`, color: typeColor[r.report_type] || '#6366f1', textTransform: 'uppercase' as const }}>
+                  {r.report_type}
+                </span>
+                {r.delivered_gchat ? <span title="Delivered to Google Chat" style={{ fontSize: 9, color: '#10b981' }}>✓ Chat</span> : null}
+              </div>
+              <div style={{ fontSize: 12, color: 'rgba(203,213,225,0.8)', fontWeight: 500 }}>{fmtDate(r.period_start)}</div>
+              <div style={{ fontSize: 10, color: 'rgba(148,163,184,0.4)' }}>through {fmtDate(r.period_end)}</div>
+              <div style={{ fontSize: 10, color: 'rgba(148,163,184,0.3)', marginTop: 2 }}>{new Date(r.created_at).toLocaleString()}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Right: report content */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 28px' }}>
+          {!selected && !loading && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'rgba(148,163,184,0.3)', fontSize: 14 }}>
+              Select a report to read it
+            </div>
+          )}
+          {selected && (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 5, background: `${typeColor[selected.report_type] || '#6366f1'}22`, color: typeColor[selected.report_type] || '#6366f1', textTransform: 'uppercase' as const }}>
+                  {selected.report_type} report
+                </span>
+                <span style={{ fontSize: 12, color: 'rgba(148,163,184,0.5)' }}>
+                  {fmtDate(selected.period_start)} &rarr; {fmtDate(selected.period_end)}
+                </span>
+                {selected.delivered_gchat
+                  ? <span style={{ fontSize: 10, color: '#10b981', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)', padding: '1px 7px', borderRadius: 10 }}>Delivered to Google Chat</span>
+                  : <span style={{ fontSize: 10, color: 'rgba(148,163,184,0.4)', background: 'rgba(148,163,184,0.05)', border: '1px solid rgba(148,163,184,0.1)', padding: '1px 7px', borderRadius: 10 }}>Not yet delivered</span>}
+              </div>
+              <div style={{ background: 'rgba(15,20,35,0.6)', border: '1px solid rgba(99,102,241,0.12)', borderRadius: 12, padding: '20px 24px', lineHeight: 1.75 }}>
+                {renderReport(selected.content)}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Email Health Report View ───────────────────────────────────────────────
 
 function EmailHealthReportView() {
@@ -4124,7 +4291,7 @@ export default function Page() {
     setToasts(t => [...t, { id, message, type }])
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 4000)
   }
-  // Poll data every 8s
+
   const fetchAll = useCallback(async () => {
     const [agRes, tkRes, meRes] = await Promise.all([
       fetch('/api/agents'),
@@ -4186,7 +4353,6 @@ export default function Page() {
     if (res.ok) {
       const json = await res.json()
       addToast('Task dispatched: ' + data.title, 'success')
-      // Auto-select the new task so SSE connects immediately (before task completes)
       if (json.taskId) setNewTaskId(json.taskId)
       setTimeout(fetchAll, 800)
     } else {
@@ -4194,7 +4360,6 @@ export default function Page() {
     }
   }
 
-  // Ctrl+Shift+F for semantic search
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.ctrlKey && e.shiftKey && e.key === 'F') { e.preventDefault(); setShowSemanticSearch(s => !s) } }
     window.addEventListener('keydown', handler)
@@ -4206,7 +4371,6 @@ export default function Page() {
     window.location.href = '/login'
   }
 
-  // Inject updated sparklines into selectedAgent
   const liveSelectedAgent = selectedAgent ? agents.find(a => a.id === selectedAgent.id) || selectedAgent : null
 
   function mainContent() {
@@ -4223,11 +4387,12 @@ export default function Page() {
           </div>
         </div>
       )
-      case 'tasks':    return <TasksView tasks={tasks} agents={agents} />
-      case 'terminal': return <TerminalView agents={agents} metrics={metrics} />
-      case 'schedules': return <SchedulesView agents={agents} />
+      case 'tasks':      return <TasksView tasks={tasks} agents={agents} />
+      case 'terminal':   return <TerminalView agents={agents} metrics={metrics} />
+      case 'schedules':  return <SchedulesView agents={agents} />
       case 'analytics':  return <AnalyticsView />
       case 'email-health': return <EmailHealthReportView />
+      case 'mcd-reports':  return <McdReportsView />
       case 'hermes':     return <HermesView messages={messages} onSend={handleSend} loading={chatLoading} />
       case 'projects':   return <ProjectsView agents={agents} onSelectAgent={a => { setSelectedAgent(a); setView('agents') }} />
       case 'triggers':   return <TriggersPanel agents={agents} />
@@ -4244,7 +4409,6 @@ export default function Page() {
 
   return (
     <div style={{ display: 'flex', height: '100vh', background: '#080c14', color: 'white', fontFamily: 'Inter, sans-serif', overflow: 'hidden', position: 'relative' }}>
-      {/* Grid bg */}
       <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', backgroundImage: 'linear-gradient(rgba(99,102,241,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(99,102,241,0.03) 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
 
       <Sidebar view={view} setView={v => { setView(v); setSelectedAgent(null) }} agents={agents} onLogout={handleLogout} onSearch={() => setShowSearch(true)} />

@@ -166,6 +166,16 @@ function initSchema(db: Database.Database) {
     CREATE TABLE IF NOT EXISTS users_new_check (id INTEGER PRIMARY KEY);
     DROP TABLE IF EXISTS users_new_check;
 
+    CREATE TABLE IF NOT EXISTS mcd_reports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      report_type TEXT NOT NULL CHECK(report_type IN ('weekly','monthly','quarterly','daily','manual')),
+      period_start TEXT NOT NULL,
+      period_end TEXT NOT NULL,
+      content TEXT NOT NULL,
+      delivered_gchat INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
     -- Seed default agents if table is empty
     INSERT OR IGNORE INTO agents (id, name, short, description, accent, accent_dark) VALUES
       ('research',  'Research Agent',  'RES', 'Web research, data gathering, and summarisation', '#06b6d4', '#0e7490'),
@@ -173,7 +183,8 @@ function initSchema(db: Database.Database) {
       ('data',      'Data Analyst',    'DAT', 'Data analysis, SQL queries, and visualisation',   '#10b981', '#047857'),
       ('writer',    'Content Writer',  'WRT', 'Blog posts, emails, and marketing copy',          '#f59e0b', '#b45309'),
       ('email',     'Email Manager',   'EML', 'Inbox management and automated responses',        '#f43f5e', '#be123c'),
-      ('security',  'Security Analyst','SEC', 'Vulnerability scanning and threat analysis',      '#a855f7', '#7c3aed');
+      ('security',  'Security Analyst','SEC', 'Vulnerability scanning and threat analysis',      '#a855f7', '#7c3aed'),
+      ('mcd',       'MCD',             'MCD', 'Marketing and Conversions Director. Analyst, prioritizer, and blunt coach for Jeremy. Pulls live data from GHL, GA4, GSC, GTM, and Search Console.', '#3b82f6', '#1d4ed8');
   `)
 
   // ── Migration: expand tasks.type CHECK constraint to include browser/security/search ──
@@ -1222,4 +1233,46 @@ export function getAllSnapshots(locationId: string): EmailSnapshot[] {
   return getDb().prepare(`
     SELECT * FROM email_snapshots WHERE location_id=? ORDER BY snapshot_date DESC
   `).all(locationId) as EmailSnapshot[]
+}
+
+// ── MCD Reports ────────────────────────────────────────────────────────────
+
+export interface McdReport {
+  id: number
+  report_type: 'weekly' | 'monthly' | 'quarterly' | 'daily' | 'manual'
+  period_start: string
+  period_end: string
+  content: string
+  delivered_gchat: number
+  created_at: string
+}
+
+export function saveMcdReport(data: {
+  report_type: McdReport['report_type']
+  period_start: string
+  period_end: string
+  content: string
+  delivered_gchat?: number
+}): McdReport {
+  const db = getDb()
+  const info = db.prepare(`
+    INSERT INTO mcd_reports (report_type, period_start, period_end, content, delivered_gchat)
+    VALUES (@report_type, @period_start, @period_end, @content, @delivered_gchat)
+  `).run({ ...data, delivered_gchat: data.delivered_gchat ?? 0 })
+  return db.prepare('SELECT * FROM mcd_reports WHERE id=?').get(info.lastInsertRowid) as McdReport
+}
+
+export function getMcdReports(limit = 20): McdReport[] {
+  return getDb().prepare('SELECT * FROM mcd_reports ORDER BY created_at DESC LIMIT ?').all(limit) as McdReport[]
+}
+
+export function getLatestMcdReport(type?: McdReport['report_type']): McdReport | null {
+  if (type) {
+    return (getDb().prepare("SELECT * FROM mcd_reports WHERE report_type=? ORDER BY created_at DESC LIMIT 1").get(type) as McdReport) ?? null
+  }
+  return (getDb().prepare('SELECT * FROM mcd_reports ORDER BY created_at DESC LIMIT 1').get() as McdReport) ?? null
+}
+
+export function markMcdReportDelivered(id: number) {
+  getDb().prepare('UPDATE mcd_reports SET delivered_gchat=1 WHERE id=?').run(id)
 }
