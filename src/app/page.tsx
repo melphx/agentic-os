@@ -3191,9 +3191,9 @@ function McdChatView() {
                 {msg.role === 'user'
                   ? <span style={{ fontSize:13, color:'rgba(203,213,225,0.9)' }}>{msg.content}</span>
                   : msg.loading && !msg.content
-                    ? <div style={{ display:'flex', gap:4, alignItems:'center', padding:'2px 0' }}>
-                        {[0,1,2].map(d => <div key={d} style={{ width:6, height:6, borderRadius:'50%', background:'rgba(99,102,241,0.5)', animation:'pulse 1.2s ease-in-out infinite', animationDelay:`${d*0.2}s` }} />)}
-                        <span style={{ fontSize:11, color:'rgba(148,163,184,0.4)', marginLeft:4 }}>Pulling live data...</span>
+                    ? <div style={{ display:'flex', gap:6, alignItems:'center', padding:'2px 0' }}>
+                        <span style={{ fontSize:13, color:'rgba(99,102,241,0.6)' }}>⏳</span>
+                        <span style={{ fontSize:11, color:'rgba(148,163,184,0.4)' }}>Pulling live data...</span>
                       </div>
                     : renderMcd(msg.content)
                 }
@@ -3239,7 +3239,6 @@ function McdChatView() {
         </div>
       </div>
 
-      <style>{`@keyframes pulse { 0%,100%{opacity:0.3} 50%{opacity:1} }`}</style>
     </div>
   )
 }
