@@ -94,11 +94,11 @@ const GHL_OPENAI_TOOLS: OpenAI.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
-      name: 'ghl_get_calendars',
+      name: 'ghl_get_location',
       description:
-        'List all GHL calendars. Returns calendar IDs and names. ' +
-        'ALWAYS call this first before ghl_get_calendar_events — you need a calendarId. ' +
-        'Look for calendars named "Discovery Call", "DC", "In-Home", or similar to get the right ID.',
+        'Get GHL location/sub-account details including the list of users (team members) and their IDs. ' +
+        'Call this first when you need a userId to pass to ghl_get_calendar_events. ' +
+        'Also useful for: location name, timezone, address, team member list.',
       parameters: {
         type: 'object',
         properties: {},
@@ -111,7 +111,8 @@ const GHL_OPENAI_TOOLS: OpenAI.ChatCompletionTool[] = [
       name: 'ghl_get_calendar_events',
       description:
         'Fetch GHL calendar events (Discovery Calls, in-home appointments, site visits). ' +
-        'Requires a calendarId — call ghl_get_calendars first to get it. ' +
+        'IMPORTANT: Requires at least one of: userId, calendarId, or groupId. ' +
+        'If you do not have these IDs, call ghl_get_location first to get userId from the team member list. ' +
         'Use startTime/endTime as epoch milliseconds from the system prompt. ' +
         'Use for: Discovery Call counts, show rate, appointment data, booked/completed calls.',
       parameters: {
@@ -125,12 +126,36 @@ const GHL_OPENAI_TOOLS: OpenAI.ChatCompletionTool[] = [
             type: 'number',
             description: 'End epoch milliseconds from the system prompt.',
           },
+          userId: {
+            type: 'string',
+            description: 'GHL user ID — get from ghl_get_location if unknown.',
+          },
           calendarId: {
             type: 'string',
-            description: 'Calendar ID from ghl_get_calendars. Required.',
+            description: 'Specific calendar ID (optional if userId is provided).',
+          },
+          groupId: {
+            type: 'string',
+            description: 'Calendar group ID (optional alternative to userId/calendarId).',
           },
         },
-        required: ['startTime', 'endTime', 'calendarId'],
+        required: ['startTime', 'endTime'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ghl_list_transactions',
+      description:
+        'List GHL payment transactions. Use for: revenue, payments received, transaction history. ' +
+        'Supports filtering and pagination.',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: { type: 'number', description: 'Number of results (default 20).' },
+          offset: { type: 'number', description: 'Pagination offset.' },
+        },
       },
     },
   },
@@ -204,13 +229,20 @@ const GHL_TOOL_DISPATCH: Record<string, (args: Record<string, unknown>) => {
     mcpTool: 'contacts_get-contacts',
     mcpArgs: { limit: a.limit ?? 100, ...(a.query ? { query: a.query } : {}) },
   }),
-  ghl_get_calendars: (_) => ({
-    mcpTool: 'calendars_get-calendars',
+  ghl_get_location: (_) => ({
+    mcpTool: 'locations_get-location',
     mcpArgs: {},
   }),
   ghl_get_calendar_events: (a) => ({
     mcpTool: 'calendars_get-calendar-events',
-    mcpArgs: { startTime: a.startTime, endTime: a.endTime, calendarId: a.calendarId },
+    mcpArgs: Object.fromEntries(
+      Object.entries({ startTime: a.startTime, endTime: a.endTime, userId: a.userId, calendarId: a.calendarId, groupId: a.groupId })
+        .filter(([, v]) => v !== undefined)
+    ),
+  }),
+  ghl_list_transactions: (a) => ({
+    mcpTool: 'payments_list-transactions',
+    mcpArgs: Object.fromEntries(Object.entries(a).filter(([, v]) => v !== undefined)),
   }),
   ghl_get_pipelines: (_) => ({
     mcpTool: 'opportunities_get-pipelines',
