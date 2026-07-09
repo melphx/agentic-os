@@ -60,7 +60,8 @@ async function mcpPost(
   const text = await res.text()
   const ct   = res.headers.get('Content-Type') ?? ''
 
-  let parsed: { result?: unknown; error?: { message?: string } } | null = null
+  type MCPFrame = { result?: unknown; error?: { message?: string } }
+  let parsed: MCPFrame | null = null
 
   if (ct.includes('text/event-stream')) {
     // Extract data: lines from SSE stream
@@ -69,13 +70,13 @@ async function mcpPost(
         const raw = line.slice(6).trim()
         if (!raw || raw === '[DONE]') continue
         try {
-          parsed = JSON.parse(raw) as typeof parsed
-          if (parsed && (parsed.result !== undefined || parsed.error)) break
+          const frame = JSON.parse(raw) as MCPFrame
+          if (frame && (frame.result !== undefined || frame.error)) { parsed = frame; break }
         } catch { /* skip non-JSON lines */ }
       }
     }
   } else {
-    try { parsed = JSON.parse(text) as typeof parsed } catch { /* ignore */ }
+    try { parsed = JSON.parse(text) as MCPFrame } catch { /* ignore */ }
   }
 
   if (!parsed) throw new Error(`GHL MCP: empty response for ${method}`)
