@@ -135,7 +135,27 @@ export async function callGHLMcp(
     .map(c => c.text)
     .join('\n')
 
-  return text.slice(0, 4000) // cap per tool call
+  // Compact contacts responses — full records are 1-3KB each and blow the cap.
+  // Extract only the fields needed for lead counting and source analysis.
+  try {
+    const parsed = JSON.parse(text)
+    if (parsed.contacts && Array.isArray(parsed.contacts)) {
+      type RawContact = {
+        contactName?: string; firstName?: string; lastName?: string
+        type?: string; dateAdded?: string; tags?: string[]; source?: string
+      }
+      const compact = parsed.contacts.map((c: RawContact) => ({
+        name:      c.contactName || [c.firstName, c.lastName].filter(Boolean).join(' '),
+        type:      c.type,
+        dateAdded: c.dateAdded?.slice(0, 10),
+        tags:      c.tags ?? [],
+        source:    c.source,
+      }))
+      return JSON.stringify({ contacts: compact, total: parsed.total ?? compact.length })
+    }
+  } catch { /* not a contacts response — fall through */ }
+
+  return text.slice(0, 8000) // increased cap for non-contacts responses
 }
 
 /**
