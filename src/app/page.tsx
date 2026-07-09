@@ -217,7 +217,6 @@ const NAV = [
   { id: 'hermes',    icon: <span style={{fontSize:16}}>⚡</span>, label: 'Hermes'    },
   { id: 'email-health', icon: <span style={{fontSize:14}}>📧</span>, label: 'Email Health' },
   { id: 'mcd-reports', icon: <span style={{fontSize:14}}>📊</span>, label: 'MCD Reports' },
-  { id: 'mcd-chat',   icon: <span style={{fontSize:14}}>💬</span>, label: 'Ask MCD'     },
   { id: 'settings',   icon: <Settings size={18} />,        label: 'Settings'   },
 ]
 
@@ -4686,7 +4685,6 @@ export default function Page() {
       case 'schedules':  return <SchedulesView agents={agents} />
       case 'analytics':  return <AnalyticsView />
       case 'email-health': return <EmailHealthReportView />
-      case 'mcd-chat':     return <McdChatView />
       case 'mcd-reports':  return <McdReportsView />
       case 'hermes':     return <HermesView messages={messages} onSend={handleSend} loading={chatLoading} />
       case 'projects':   return <ProjectsView agents={agents} onSelectAgent={a => { setSelectedAgent(a); setView('agents') }} />
@@ -4719,7 +4717,9 @@ export default function Page() {
         </AnimatePresence>
       </div>
 
-      <ChatPanel messages={messages} onSend={handleSend} loading={chatLoading} />
+      {view === 'mcd-reports'
+        ? <div style={{ width: 320, flexShrink: 0, background: 'rgba(8,12,20,0.95)', borderLeft: '1px solid rgba(99,102,241,0.12)', display: 'flex', flexDirection: 'column' }}><McdChatView /></div>
+        : <ChatPanel messages={messages} onSend={handleSend} loading={chatLoading} />}
 
       <AnimatePresence>
         {runAgent && <RunTaskModal agent={runAgent} onClose={() => setRunAgent(null)} onSubmit={handleRunTask} />}
