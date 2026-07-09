@@ -1383,7 +1383,7 @@ function ChatPanel({ messages, onSend, loading }: { messages: Message[]; onSend:
         <div style={{ width: 28, height: 28, borderRadius: 8, background: 'linear-gradient(135deg,#6366f1,#a855f7)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, boxShadow: '0 0 12px rgba(99,102,241,0.4)' }}>⬡</div>
         <div>
           <div style={{ color: 'white', fontWeight: 600, fontSize: 13 }}>Hermes</div>
-          <div style={{ color: 'rgba(148,163,184,0.5)', fontSize: 11 }}>OpenAI · gpt-4o-mini</div>
+          <div style={{ color: 'rgba(148,163,184,0.5)', fontSize: 11 }}>OpenAI · gpt-5.4-mini</div>
         </div>
         {loading && <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }} style={{ marginLeft: 'auto' }}><RefreshCw size={14} color="#6366f1" /></motion.div>}
       </div>
@@ -3235,7 +3235,7 @@ function McdChatView() {
           </button>
         </div>
         <div style={{ fontSize:10, color:'rgba(148,163,184,0.3)', marginTop:6, textAlign:'center' }}>
-          Fetches live data from GHL, GA4 &amp; GSC · Powered by GPT-4o in MCD voice
+          Fetches live data from GHL, GA4 &amp; GSC · Powered by GPT-5.4 mini in MCD voice
         </div>
       </div>
 
@@ -4044,12 +4044,16 @@ function DashboardView({ agents, metrics, activity, onSelectAgent }: { agents: A
   const activeCount = metrics?.active_agents || 0
   const tasksDone   = metrics?.tasks_completed || 0
   const tasksPending = metrics?.tasks_pending || 0
+  const [dateStr, setDateStr] = useState('')
+  useEffect(() => {
+    setDateStr(new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }))
+  }, [])
 
   return (
     <div style={{ padding: 24, height: '100%', overflowY: 'auto' }}>
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ color: 'white', fontWeight: 700, fontSize: 22, margin: 0 }}>Mission Control</h1>
-        <p suppressHydrationWarning style={{ color: 'rgba(148,163,184,0.5)', fontSize: 13, margin: '4px 0 0' }}>Production · Hermes AI · {new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' })}</p>
+        <p style={{ color: 'rgba(148,163,184,0.5)', fontSize: 13, margin: '4px 0 0' }}>Production · Hermes AI{dateStr ? ` · ${dateStr}` : ''}</p>
       </div>
 
       {/* Stat cards */}
