@@ -4576,6 +4576,7 @@ export default function Page() {
   const [chatLoading, setChatLoading] = useState(false)
   const [toasts, setToasts]           = useState<Toast[]>([])
   const [showSearch, setShowSearch]   = useState(false)
+  const [isMounted, setIsMounted]     = useState(false)
   const toastId = useRef(0)
 
   function addToast(message: string, type: Toast['type'] = 'info') {
@@ -4595,6 +4596,8 @@ export default function Page() {
     if (tkRes.ok) setTasks(await tkRes.json())
     if (meRes.ok) { const d = await meRes.json(); setMetrics(d.totals); setActivity(d.recentActivity) }
   }, [])
+
+  useEffect(() => { setIsMounted(true) }, [])
 
   useEffect(() => {
     fetchAll()
@@ -4717,7 +4720,7 @@ export default function Page() {
       </div>
 
       {view === 'mcd-reports'
-        ? <div style={{ width: 320, flexShrink: 0, background: 'rgba(8,12,20,0.95)', borderLeft: '1px solid rgba(99,102,241,0.12)', display: 'flex', flexDirection: 'column' }}><McdChatView /></div>
+        ? <div suppressHydrationWarning style={{ width: 320, flexShrink: 0, background: 'rgba(8,12,20,0.95)', borderLeft: '1px solid rgba(99,102,241,0.12)', display: 'flex', flexDirection: 'column' }}>{isMounted && <McdChatView />}</div>
         : <ChatPanel messages={messages} onSend={handleSend} loading={chatLoading} />}
 
       <AnimatePresence>
