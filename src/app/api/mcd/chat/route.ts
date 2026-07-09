@@ -425,7 +425,7 @@ export async function POST(req: NextRequest) {
     async start(controller) {
       // Emit source badges first
       controller.enqueue(encoder.encode(
-        `data: ${JSON.stringify({ type: 'sources', sources: [...sourcesHit] })}\n\n`
+        `data: ${JSON.stringify({ type: 'sources', sources: Array.from(sourcesHit) })}\n\n`
       ))
 
       try {
