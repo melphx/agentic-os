@@ -217,6 +217,7 @@ const NAV = [
   { id: 'hermes',    icon: <span style={{fontSize:16}}>⚡</span>, label: 'Hermes'    },
   { id: 'email-health', icon: <span style={{fontSize:14}}>📧</span>, label: 'Email Health' },
   { id: 'mcd-reports', icon: <span style={{fontSize:14}}>📊</span>, label: 'MCD Reports' },
+  { id: 'mcd-chat',   icon: <span style={{fontSize:14}}>💬</span>, label: 'Ask MCD'     },
   { id: 'settings',   icon: <Settings size={18} />,        label: 'Settings'   },
 ]
 
@@ -2998,6 +2999,251 @@ interface McdReport {
   created_at: string
 }
 
+// ── MCD Chat View ─────────────────────────────────────────────────────────
+
+interface McdChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+  sources?: string[]
+  loading?: boolean
+}
+
+const MCD_QUICK_PROMPTS = [
+  "How many leads did we get this week?",
+  "What's our Discovery Call conversion rate?",
+  "What should I focus on today?",
+  "Show me pipeline status",
+  "How's our organic traffic trending?",
+  "What are the top performing lead sources?",
+]
+
+function McdChatView() {
+  const [messages, setMessages]     = useState<McdChatMessage[]>([])
+  const [input, setInput]           = useState('')
+  const [loading, setLoading]       = useState(false)
+  const bottomRef                   = useRef<HTMLDivElement>(null)
+  const inputRef                    = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  function renderMcd(text: string) {
+    return text.split('\n').map((line, i) => {
+      if (line.startsWith('## '))  return <div key={i} style={{ fontSize:13, fontWeight:700, color:'#a5b4fc', marginTop:14, marginBottom:5, borderBottom:'1px solid rgba(99,102,241,0.15)', paddingBottom:3 }}>{line.slice(3)}</div>
+      if (line.startsWith('### ')) return <div key={i} style={{ fontSize:12, fontWeight:600, color:'#94a3b8', marginTop:10, marginBottom:3 }}>{line.slice(4)}</div>
+      if (line.startsWith('- ') || line.startsWith('* ')) return <div key={i} style={{ fontSize:13, color:'rgba(203,213,225,0.9)', lineHeight:1.7, paddingLeft:12, position:'relative' }}><span style={{position:'absolute',left:0,color:'#6366f1'}}>•</span>{line.slice(2)}</div>
+      if (line.trim() === '') return <div key={i} style={{ height:6 }} />
+      const parts = line.split(/(\*\*[^*]+\*\*)/g)
+      return (
+        <div key={i} style={{ fontSize:13, color:'rgba(203,213,225,0.9)', lineHeight:1.8 }}>
+          {parts.map((p,j) => p.startsWith('**') && p.endsWith('**')
+            ? <strong key={j} style={{ color:'white', fontWeight:600 }}>{p.slice(2,-2)}</strong>
+            : p)}
+        </div>
+      )
+    })
+  }
+
+  async function send(msg?: string) {
+    const text = (msg ?? input).trim()
+    if (!text || loading) return
+    setInput('')
+
+    const userMsg: McdChatMessage = { role: 'user', content: text }
+    const history = messages.filter(m => !m.loading).map(m => ({ role: m.role, content: m.content }))
+    const placeholder: McdChatMessage = { role: 'assistant', content: '', loading: true, sources: [] }
+
+    setMessages(prev => [...prev, userMsg, placeholder])
+    setLoading(true)
+
+    try {
+      const res = await fetch('/api/mcd/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text, history }),
+      })
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      if (!res.body) throw new Error('No response body')
+
+      const reader  = res.body.getReader()
+      const decoder = new TextDecoder()
+      let   buffer  = ''
+      let   sources: string[] = []
+      let   full    = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const raw = line.slice(6).trim()
+          if (raw === '[DONE]') break
+          try {
+            const ev = JSON.parse(raw)
+            if (ev.type === 'sources') { sources = ev.sources || [] }
+            if (ev.type === 'delta')   {
+              full += ev.content
+              setMessages(prev => {
+                const next = [...prev]
+                const last = next[next.length - 1]
+                if (last?.loading) next[next.length - 1] = { ...last, content: full, sources, loading: true }
+                return next
+              })
+            }
+          } catch {}
+        }
+      }
+
+      setMessages(prev => {
+        const next = [...prev]
+        const last = next[next.length - 1]
+        if (last?.loading) next[next.length - 1] = { role: 'assistant', content: full || '(no response)', sources }
+        return next
+      })
+    } catch (e: any) {
+      setMessages(prev => {
+        const next = [...prev]
+        const last = next[next.length - 1]
+        if (last?.loading) next[next.length - 1] = { role: 'assistant', content: `Error: ${e.message}`, sources: [] }
+        return next
+      })
+    } finally {
+      setLoading(false)
+      setTimeout(() => inputRef.current?.focus(), 50)
+    }
+  }
+
+  function handleKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
+  }
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', height:'100%', background:'#080c14' }}>
+      {/* Header */}
+      <div style={{ padding:'12px 22px', borderBottom:'1px solid rgba(99,102,241,0.1)', background:'rgba(15,20,35,0.97)', flexShrink:0 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+          <span style={{ fontSize:18 }}>💬</span>
+          <div>
+            <div style={{ color:'white', fontWeight:700, fontSize:15 }}>Ask MCD</div>
+            <div style={{ color:'rgba(148,163,184,0.5)', fontSize:11 }}>Live data from GHL, GA4, GSC · Responds in MCD&apos;s voice</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div style={{ flex:1, overflowY:'auto', padding:'20px 22px', display:'flex', flexDirection:'column', gap:16 }}>
+        {messages.length === 0 && (
+          <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:24, paddingBottom:40 }}>
+            <div style={{ textAlign:'center' }}>
+              <div style={{ fontSize:36, marginBottom:8 }}>📊</div>
+              <div style={{ color:'white', fontWeight:700, fontSize:17, marginBottom:4 }}>Marketing Director, at your service</div>
+              <div style={{ color:'rgba(148,163,184,0.5)', fontSize:13 }}>Ask me anything about leads, traffic, conversions, or what to focus on.</div>
+            </div>
+            <div style={{ display:'flex', flexWrap:'wrap', gap:8, justifyContent:'center', maxWidth:560 }}>
+              {MCD_QUICK_PROMPTS.map((p, i) => (
+                <button key={i} onClick={() => send(p)}
+                  style={{ padding:'7px 13px', background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:20, color:'rgba(165,180,252,0.85)', fontSize:12, cursor:'pointer', transition:'all 0.1s' }}
+                  onMouseEnter={e => { (e.target as HTMLElement).style.background='rgba(99,102,241,0.2)' }}
+                  onMouseLeave={e => { (e.target as HTMLElement).style.background='rgba(99,102,241,0.1)' }}>
+                  {p}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {messages.map((msg, i) => (
+          <div key={i} style={{ display:'flex', gap:12, flexDirection: msg.role === 'user' ? 'row-reverse' : 'row', alignItems:'flex-start' }}>
+            {/* Avatar */}
+            <div style={{ width:30, height:30, borderRadius:'50%', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, fontWeight:700,
+              background: msg.role === 'user' ? 'rgba(99,102,241,0.25)' : 'rgba(59,130,246,0.2)',
+              color:       msg.role === 'user' ? '#a5b4fc'               : '#93c5fd',
+              border:      msg.role === 'user' ? '1px solid rgba(99,102,241,0.3)' : '1px solid rgba(59,130,246,0.25)',
+            }}>
+              {msg.role === 'user' ? 'J' : 'M'}
+            </div>
+
+            <div style={{ maxWidth:'75%', display:'flex', flexDirection:'column', gap:4 }}>
+              {/* Sources badge */}
+              {msg.sources && msg.sources.length > 0 && (
+                <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
+                  {msg.sources.map((s,j) => (
+                    <span key={j} style={{ fontSize:9, fontWeight:700, padding:'1px 6px', borderRadius:4, background:'rgba(16,185,129,0.1)', color:'#34d399', border:'1px solid rgba(16,185,129,0.2)' }}>
+                      {s}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Bubble */}
+              <div style={{
+                padding:'10px 14px', borderRadius: msg.role === 'user' ? '12px 4px 12px 12px' : '4px 12px 12px 12px',
+                background: msg.role === 'user' ? 'rgba(99,102,241,0.15)' : 'rgba(15,23,42,0.8)',
+                border:     msg.role === 'user' ? '1px solid rgba(99,102,241,0.25)' : '1px solid rgba(99,102,241,0.1)',
+                lineHeight: 1.6,
+              }}>
+                {msg.role === 'user'
+                  ? <span style={{ fontSize:13, color:'rgba(203,213,225,0.9)' }}>{msg.content}</span>
+                  : msg.loading && !msg.content
+                    ? <div style={{ display:'flex', gap:4, alignItems:'center', padding:'2px 0' }}>
+                        {[0,1,2].map(d => <div key={d} style={{ width:6, height:6, borderRadius:'50%', background:'rgba(99,102,241,0.5)', animation:'pulse 1.2s ease-in-out infinite', animationDelay:`${d*0.2}s` }} />)}
+                        <span style={{ fontSize:11, color:'rgba(148,163,184,0.4)', marginLeft:4 }}>Pulling live data...</span>
+                      </div>
+                    : renderMcd(msg.content)
+                }
+              </div>
+            </div>
+          </div>
+        ))}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Input */}
+      <div style={{ padding:'12px 22px 16px', borderTop:'1px solid rgba(99,102,241,0.1)', background:'rgba(10,15,28,0.95)', flexShrink:0 }}>
+        {messages.length > 0 && (
+          <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:10 }}>
+            {MCD_QUICK_PROMPTS.slice(0,3).map((p,i) => (
+              <button key={i} onClick={() => send(p)} disabled={loading}
+                style={{ padding:'4px 10px', background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.15)', borderRadius:14, color:'rgba(148,163,184,0.6)', fontSize:11, cursor:loading?'not-allowed':'pointer' }}>
+                {p}
+              </button>
+            ))}
+          </div>
+        )}
+        <div style={{ display:'flex', gap:10, alignItems:'flex-end' }}>
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={handleKey}
+            disabled={loading}
+            placeholder="Ask MCD anything... (Enter to send, Shift+Enter for new line)"
+            rows={1}
+            style={{ flex:1, background:'rgba(15,20,35,0.8)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:10, color:'white', fontSize:13, padding:'10px 14px', resize:'none', outline:'none', fontFamily:'inherit', minHeight:42, maxHeight:120, overflowY:'auto', lineHeight:1.5 }}
+          />
+          <button
+            onClick={() => send()}
+            disabled={loading || !input.trim()}
+            style={{ padding:'10px 18px', background: loading || !input.trim() ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.85)', border:'1px solid rgba(99,102,241,0.4)', borderRadius:10, color: loading || !input.trim() ? 'rgba(165,180,252,0.4)' : 'white', fontSize:13, fontWeight:600, cursor: loading || !input.trim() ? 'not-allowed' : 'pointer', flexShrink:0, height:42 }}>
+            {loading ? '⏳' : '↑ Send'}
+          </button>
+        </div>
+        <div style={{ fontSize:10, color:'rgba(148,163,184,0.3)', marginTop:6, textAlign:'center' }}>
+          Fetches live data from GHL, GA4 &amp; GSC · Powered by GPT-4o in MCD voice
+        </div>
+      </div>
+
+      <style>{`@keyframes pulse { 0%,100%{opacity:0.3} 50%{opacity:1} }`}</style>
+    </div>
+  )
+}
+
 function McdReportsView() {
   const [reports, setReports]       = useState<McdReport[]>([])
   const [selected, setSelected]     = useState<McdReport | null>(null)
@@ -3005,6 +3251,8 @@ function McdReportsView() {
   const [running, setRunning]       = useState(false)
   const [runMsg, setRunMsg]         = useState('')
   const [pollTimer, setPollTimer]   = useState<ReturnType<typeof setInterval> | null>(null)
+  const [sendingEmail, setSendingEmail] = useState(false)
+  const [emailMsg, setEmailMsg]     = useState('')
 
   const fetchReports = async () => {
     try {
@@ -3024,6 +3272,33 @@ function McdReportsView() {
     fetchReports()
     return () => { if (pollTimer) clearInterval(pollTimer) }
   }, [])
+
+  async function handleSendEmail() {
+    if (!selected) return
+    setSendingEmail(true)
+    setEmailMsg('Sending email...')
+    try {
+      const r = await fetch('/api/mcd/email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ report_id: selected.id }),
+      })
+      const d = await r.json()
+      if (d.ok) {
+        setEmailMsg(`✓ Sent: ${d.subject || 'Email delivered'}`)
+        // Update the selected report's email_sent flag locally
+        setSelected(prev => prev ? { ...prev, email_sent: 1 } : prev)
+        setReports(prev => prev.map(rpt => rpt.id === selected.id ? { ...rpt, email_sent: 1 } : rpt))
+      } else {
+        setEmailMsg(`✗ ${d.error || 'Failed to send email'}`)
+      }
+    } catch (e: any) {
+      setEmailMsg('✗ Error: ' + e.message)
+    } finally {
+      setSendingEmail(false)
+      setTimeout(() => setEmailMsg(''), 8000)
+    }
+  }
 
   async function handleRunNow() {
     setRunning(true)
@@ -3081,17 +3356,31 @@ function McdReportsView() {
           <span style={{ color: 'white', fontWeight: 700, fontSize: 15 }}>MCD Reports</span>
           <span style={{ fontSize: 10, color: 'rgba(148,163,184,0.5)', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.15)', padding: '1px 7px', borderRadius: 10 }}>Marketing &amp; Conversions Director</span>
         </div>
-        <button
-          onClick={handleRunNow}
-          disabled={running}
-          style={{ padding: '6px 14px', background: running ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 8, color: running ? 'rgba(165,180,252,0.5)' : '#a5b4fc', fontSize: 12, fontWeight: 600, cursor: running ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
-          {running ? '⏳ Running...' : '▶ Run Now'}
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={handleSendEmail}
+            disabled={sendingEmail || !selected}
+            title={selected ? `Send report #${selected.id} via email` : 'Select a report first'}
+            style={{ padding: '6px 14px', background: sendingEmail ? 'rgba(16,185,129,0.08)' : 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.25)', borderRadius: 8, color: (sendingEmail || !selected) ? 'rgba(52,211,153,0.4)' : '#34d399', fontSize: 12, fontWeight: 600, cursor: (sendingEmail || !selected) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+            {sendingEmail ? '⏳ Sending...' : '✉ Send Email'}
+          </button>
+          <button
+            onClick={handleRunNow}
+            disabled={running}
+            style={{ padding: '6px 14px', background: running ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 8, color: running ? 'rgba(165,180,252,0.5)' : '#a5b4fc', fontSize: 12, fontWeight: 600, cursor: running ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+            {running ? '⏳ Running...' : '▶ Run Now'}
+          </button>
+        </div>
       </div>
 
       {runMsg && (
         <div style={{ margin: '10px 22px', padding: '8px 14px', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, fontSize: 12, color: '#a5b4fc' }}>
           {runMsg}
+        </div>
+      )}
+      {emailMsg && (
+        <div style={{ margin: emailMsg && runMsg ? '0 22px 10px' : '10px 22px', padding: '8px 14px', background: emailMsg.startsWith('✓') ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)', border: `1px solid ${emailMsg.startsWith('✓') ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'}`, borderRadius: 8, fontSize: 12, color: emailMsg.startsWith('✓') ? '#34d399' : '#f87171' }}>
+          {emailMsg}
         </div>
       )}
 
@@ -3108,11 +3397,12 @@ function McdReportsView() {
           {reports.map(r => (
             <div key={r.id} onClick={() => setSelected(r)}
               style={{ padding: '10px 14px', cursor: 'pointer', borderLeft: selected?.id === r.id ? '2px solid #6366f1' : '2px solid transparent', background: selected?.id === r.id ? 'rgba(99,102,241,0.08)' : 'transparent', transition: 'all 0.1s' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3, flexWrap: 'wrap' as const }}>
                 <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: `${typeColor[r.report_type] || '#6366f1'}22`, color: typeColor[r.report_type] || '#6366f1', textTransform: 'uppercase' as const }}>
                   {r.report_type}
                 </span>
                 {r.delivered_gchat ? <span title="Delivered to Google Chat" style={{ fontSize: 9, color: '#10b981' }}>✓ Chat</span> : null}
+                {r.email_sent ? <span title="Sent via email" style={{ fontSize: 9, color: '#34d399' }}>✉ Email</span> : null}
               </div>
               <div style={{ fontSize: 12, color: 'rgba(203,213,225,0.8)', fontWeight: 500 }}>{fmtDate(r.period_start)}</div>
               <div style={{ fontSize: 10, color: 'rgba(148,163,184,0.4)' }}>through {fmtDate(r.period_end)}</div>
@@ -3138,8 +3428,11 @@ function McdReportsView() {
                   {fmtDate(selected.period_start)} &rarr; {fmtDate(selected.period_end)}
                 </span>
                 {selected.delivered_gchat
-                  ? <span style={{ fontSize: 10, color: '#10b981', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)', padding: '1px 7px', borderRadius: 10 }}>Delivered to Google Chat</span>
-                  : <span style={{ fontSize: 10, color: 'rgba(148,163,184,0.4)', background: 'rgba(148,163,184,0.05)', border: '1px solid rgba(148,163,184,0.1)', padding: '1px 7px', borderRadius: 10 }}>Not yet delivered</span>}
+                  ? <span style={{ fontSize: 10, color: '#10b981', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)', padding: '1px 7px', borderRadius: 10 }}>✓ Google Chat</span>
+                  : <span style={{ fontSize: 10, color: 'rgba(148,163,184,0.4)', background: 'rgba(148,163,184,0.05)', border: '1px solid rgba(148,163,184,0.1)', padding: '1px 7px', borderRadius: 10 }}>Not delivered</span>}
+                {selected.email_sent
+                  ? <span style={{ fontSize: 10, color: '#34d399', background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)', padding: '1px 7px', borderRadius: 10 }}>✉ Email sent</span>
+                  : null}
               </div>
               <div style={{ background: 'rgba(15,20,35,0.6)', border: '1px solid rgba(99,102,241,0.12)', borderRadius: 12, padding: '20px 24px', lineHeight: 1.75 }}>
                 {renderReport(selected.content)}
@@ -4392,6 +4685,7 @@ export default function Page() {
       case 'schedules':  return <SchedulesView agents={agents} />
       case 'analytics':  return <AnalyticsView />
       case 'email-health': return <EmailHealthReportView />
+      case 'mcd-chat':     return <McdChatView />
       case 'mcd-reports':  return <McdReportsView />
       case 'hermes':     return <HermesView messages={messages} onSend={handleSend} loading={chatLoading} />
       case 'projects':   return <ProjectsView agents={agents} onSelectAgent={a => { setSelectedAgent(a); setView('agents') }} />
@@ -4437,8 +4731,4 @@ export default function Page() {
         {showSemanticSearch && <SemanticSearchModal onClose={() => setShowSemanticSearch(false)} onNavigate={(agentId) => { const ag = agents.find(a => a.id === agentId); if(ag) setSelectedAgent(ag) }} />}
       </AnimatePresence>
       <AnimatePresence>
-        {showApprovals && <ApprovalsModal onClose={() => setShowApprovals(false)} />}
-      </AnimatePresence>
-    </div>
-  )
-}
+        {showApprovals && <Approval

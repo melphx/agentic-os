@@ -173,6 +173,7 @@ function initSchema(db: Database.Database) {
       period_end TEXT NOT NULL,
       content TEXT NOT NULL,
       delivered_gchat INTEGER DEFAULT 0,
+      email_sent INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -216,6 +217,11 @@ function initSchema(db: Database.Database) {
   } catch (e) {
     // Migration already applied or not needed
   }
+
+  // Add email_sent to mcd_reports if missing (safe no-op on fresh DBs)
+  try {
+    db.prepare('ALTER TABLE mcd_reports ADD COLUMN email_sent INTEGER DEFAULT 0').run()
+  } catch { /* column already exists */ }
 }
 
 // ── Typed helpers ──────────────────────────────────────────────────────────
@@ -1244,6 +1250,7 @@ export interface McdReport {
   period_end: string
   content: string
   delivered_gchat: number
+  email_sent: number
   created_at: string
 }
 
@@ -1275,4 +1282,8 @@ export function getLatestMcdReport(type?: McdReport['report_type']): McdReport |
 
 export function markMcdReportDelivered(id: number) {
   getDb().prepare('UPDATE mcd_reports SET delivered_gchat=1 WHERE id=?').run(id)
+}
+
+export function markMcdReportEmailed(id: number) {
+  getDb().prepare('UPDATE mcd_reports SET email_sent=1 WHERE id=?').run(id)
 }

@@ -1,4 +1,5 @@
 import { getSchedules, updateSchedule, saveMcdReport, markMcdReportDelivered } from '@/lib/db'
+import { sendMcdEmail } from '@/lib/mcd-email'
 import { spawn } from 'child_process'
 import { writeFileSync } from 'fs'
 import pathModule from 'path'
@@ -375,13 +376,29 @@ Length: skimmable in ~1 minute.`
   // Deliver to Google Chat
   if (!process.env.MCD_GCHAT_WEBHOOK) {
     console.warn('[mcd-cron] MCD_GCHAT_WEBHOOK not set — skipping GChat delivery')
-    return
+  } else {
+    try {
+      await deliverToGChat(report)
+      markMcdReportDelivered(saved.id)
+      console.log(`[mcd-cron] Report #${saved.id} delivered to Google Chat`)
+    } catch (e: any) {
+      console.error(`[mcd-cron] GChat delivery FAILED for report #${saved.id}:`, e.message)
+    }
   }
-  try {
-    await deliverToGChat(report)
-    markMcdReportDelivered(saved.id)
-    console.log(`[mcd-cron] Report #${saved.id} delivered to Google Chat`)
-  } catch (e: any) {
-    console.error(`[mcd-cron] GChat delivery FAILED for report #${saved.id}:`, e.message)
+
+  // Deliver via email (N8N webhook)
+  if (!process.env.MCD_N8N_EMAIL_WEBHOOK) {
+    console.warn('[mcd-cron] MCD_N8N_EMAIL_WEBHOOK not set — skipping email delivery')
+  } else {
+    try {
+      const emailResult = await sendMcdEmail(saved.id)
+      if (emailResult.ok) {
+        console.log(`[mcd-cron] Report #${saved.id} sent via email: ${emailResult.subject}`)
+      } else {
+        console.error(`[mcd-cron] Email delivery FAILED for report #${saved.id}:`, emailResult.error)
+      }
+    } catch (e: any) {
+      console.error(`[mcd-cron] Email delivery FAILED for report #${saved.id}:`, e.message)
+    }
   }
 }
