@@ -3252,6 +3252,7 @@ function McdReportsView() {
   const [pollTimer, setPollTimer]   = useState<ReturnType<typeof setInterval> | null>(null)
   const [sendingEmail, setSendingEmail] = useState(false)
   const [emailMsg, setEmailMsg]     = useState('')
+  const [activeTab, setActiveTab]   = useState<'reports' | 'chat'>('reports')
 
   const fetchReports = async () => {
     try {
@@ -3356,6 +3357,17 @@ function McdReportsView() {
           <span style={{ fontSize: 10, color: 'rgba(148,163,184,0.5)', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.15)', padding: '1px 7px', borderRadius: 10 }}>Marketing &amp; Conversions Director</span>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          {/* Tab toggle */}
+          <div style={{ display: 'flex', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.15)', borderRadius: 8, padding: 2, marginRight: 4 }}>
+            <button onClick={() => setActiveTab('reports')}
+              style={{ padding: '4px 12px', borderRadius: 6, border: 'none', background: activeTab === 'reports' ? 'rgba(99,102,241,0.25)' : 'transparent', color: activeTab === 'reports' ? '#a5b4fc' : 'rgba(148,163,184,0.5)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+              📊 Reports
+            </button>
+            <button onClick={() => setActiveTab('chat')}
+              style={{ padding: '4px 12px', borderRadius: 6, border: 'none', background: activeTab === 'chat' ? 'rgba(99,102,241,0.25)' : 'transparent', color: activeTab === 'chat' ? '#a5b4fc' : 'rgba(148,163,184,0.5)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+              💬 Ask MCD
+            </button>
+          </div>
           <button
             onClick={handleSendEmail}
             disabled={sendingEmail || !selected}
@@ -3383,6 +3395,11 @@ function McdReportsView() {
         </div>
       )}
 
+      {activeTab === 'chat' ? (
+        <div style={{ flex: 1, height: 'calc(100% - 56px)', display: 'flex', flexDirection: 'column' }}>
+          <McdChatView />
+        </div>
+      ) : (
       <div style={{ display: 'flex', gap: 0, height: 'calc(100% - 56px)' }}>
         {/* Left: report list */}
         <div style={{ width: 240, flexShrink: 0, borderRight: '1px solid rgba(99,102,241,0.1)', overflowY: 'auto', padding: '12px 0' }}>
@@ -3440,6 +3457,7 @@ function McdReportsView() {
           )}
         </div>
       </div>
+      )}
     </div>
   )
 }
@@ -4031,7 +4049,7 @@ function DashboardView({ agents, metrics, activity, onSelectAgent }: { agents: A
     <div style={{ padding: 24, height: '100%', overflowY: 'auto' }}>
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ color: 'white', fontWeight: 700, fontSize: 22, margin: 0 }}>Mission Control</h1>
-        <p style={{ color: 'rgba(148,163,184,0.5)', fontSize: 13, margin: '4px 0 0' }}>Production · Hermes AI · {new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' })}</p>
+        <p suppressHydrationWarning style={{ color: 'rgba(148,163,184,0.5)', fontSize: 13, margin: '4px 0 0' }}>Production · Hermes AI · {new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' })}</p>
       </div>
 
       {/* Stat cards */}
@@ -4576,7 +4594,6 @@ export default function Page() {
   const [chatLoading, setChatLoading] = useState(false)
   const [toasts, setToasts]           = useState<Toast[]>([])
   const [showSearch, setShowSearch]   = useState(false)
-  const [isMounted, setIsMounted]     = useState(false)
   const toastId = useRef(0)
 
   function addToast(message: string, type: Toast['type'] = 'info') {
@@ -4596,8 +4613,6 @@ export default function Page() {
     if (tkRes.ok) setTasks(await tkRes.json())
     if (meRes.ok) { const d = await meRes.json(); setMetrics(d.totals); setActivity(d.recentActivity) }
   }, [])
-
-  useEffect(() => { setIsMounted(true) }, [])
 
   useEffect(() => {
     fetchAll()
@@ -4719,9 +4734,7 @@ export default function Page() {
         </AnimatePresence>
       </div>
 
-      {view === 'mcd-reports'
-        ? <div suppressHydrationWarning style={{ width: 320, flexShrink: 0, background: 'rgba(8,12,20,0.95)', borderLeft: '1px solid rgba(99,102,241,0.12)', display: 'flex', flexDirection: 'column' }}>{isMounted && <McdChatView />}</div>
-        : <ChatPanel messages={messages} onSend={handleSend} loading={chatLoading} />}
+      <ChatPanel messages={messages} onSend={handleSend} loading={chatLoading} />
 
       <AnimatePresence>
         {runAgent && <RunTaskModal agent={runAgent} onClose={() => setRunAgent(null)} onSubmit={handleRunTask} />}

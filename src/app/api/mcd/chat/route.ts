@@ -102,9 +102,9 @@ function planConnectors(message: string): ConnectorPlan {
   const mondayStr = monday.toISOString().slice(0,10)
   const todayStr  = today.toISOString().slice(0,10)
 
-  if (want.ga4)  args.ga4  = ['channels', mondayStr, todayStr]
-  if (want.gsc)  args.gsc  = ['wow']
-  if (want.ghl)  args.ghl  = ['leads', mondayStr, todayStr]
+  if (want.ga4)  args.ga4  = ['channels', '--from', mondayStr, '--to', todayStr]
+  if (want.gsc)  args.gsc  = ['wow', '--week-ending', todayStr]
+  if (want.ghl)  args.ghl  = ['leads', '--from', mondayStr, '--to', todayStr]
 
   return { connectors, args, reason: connectors.join(', ') }
 }
