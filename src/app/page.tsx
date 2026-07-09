@@ -2996,6 +2996,7 @@ interface McdReport {
   period_end: string
   content: string
   delivered_gchat: number
+  email_sent: number
   created_at: string
 }
 
