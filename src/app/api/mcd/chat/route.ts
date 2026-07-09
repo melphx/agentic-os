@@ -73,19 +73,32 @@ const GHL_OPENAI_TOOLS: OpenAI.ChatCompletionTool[] = [
     function: {
       name: 'ghl_get_contacts',
       description:
-        'Fetch GHL contacts (leads). Returns the most recent contacts. ' +
-        'No server-side date filter; use limit=100 for broad coverage and filter by dateAdded in your response. ' +
+        'Fetch GHL contacts (leads). Supports server-side date range and tag filtering. ' +
+        'For lead count questions ALWAYS pass startDate/endDate (epoch ms from system prompt) and tags=["prospect tags - new lead - all leads from everywhere - qualified and unqualified"]. ' +
         'Use for: how many leads, new contacts, lead count, source breakdown.',
       parameters: {
         type: 'object',
         properties: {
           limit: {
             type: 'number',
-            description: 'Max contacts to return (default 20, max 100). Use 100 for weekly summaries.',
+            description: 'Max contacts to return (default 100, max 100).',
           },
           query: {
             type: 'string',
             description: 'Optional: search by name, email, or phone.',
+          },
+          startDate: {
+            type: 'number',
+            description: 'Filter contacts added on or after this epoch ms. Use mondayEpoch for this week, lastMondayEpoch for last week.',
+          },
+          endDate: {
+            type: 'number',
+            description: 'Filter contacts added on or before this epoch ms. Use todayEpoch for current end, lastSundayEpoch for last week end.',
+          },
+          tags: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Filter by tags. For PHR leads use: ["prospect tags - new lead - all leads from everywhere - qualified and unqualified"]',
           },
         },
       },
@@ -110,36 +123,34 @@ const GHL_OPENAI_TOOLS: OpenAI.ChatCompletionTool[] = [
     function: {
       name: 'ghl_get_calendar_events',
       description:
-        'Fetch GHL calendar events (Discovery Calls, in-home appointments, site visits). ' +
-        'IMPORTANT: Requires at least one of: userId, calendarId, or groupId. ' +
-        'If you do not have these IDs, call ghl_get_location first to get userId from the team member list. ' +
-        'Use startTime/endTime as epoch milliseconds from the system prompt. ' +
-        'Use for: Discovery Call counts, show rate, appointment data, booked/completed calls.',
+        'Fetch GHL calendar events. Use groupId from the system prompt — do NOT call ghl_get_location first. ' +
+        'Discovery Calls groupId = "Lw5fSwnOXd0Kn814J1De". In-Home groupId = "B0UmNJYhaUFH6JgOSHvw". ' +
+        'Use startTime/endTime epoch ms from the system prompt date context.',
       parameters: {
         type: 'object',
         properties: {
           startTime: {
             type: 'number',
-            description: 'Start epoch milliseconds from the system prompt.',
+            description: 'Start epoch ms — use mondayEpoch or lastMondayEpoch from system prompt.',
           },
           endTime: {
             type: 'number',
-            description: 'End epoch milliseconds from the system prompt.',
-          },
-          userId: {
-            type: 'string',
-            description: 'GHL user ID — get from ghl_get_location if unknown.',
-          },
-          calendarId: {
-            type: 'string',
-            description: 'Specific calendar ID (optional if userId is provided).',
+            description: 'End epoch ms — use todayEpoch or lastSundayEpoch from system prompt.',
           },
           groupId: {
             type: 'string',
-            description: 'Calendar group ID (optional alternative to userId/calendarId).',
+            description: 'Use "Lw5fSwnOXd0Kn814J1De" for Discovery Calls, "B0UmNJYhaUFH6JgOSHvw" for In-Home appointments.',
+          },
+          calendarId: {
+            type: 'string',
+            description: 'Specific calendar ID — only use if filtering to one calendar source.',
+          },
+          userId: {
+            type: 'string',
+            description: 'Specific user ID — only use if filtering to one team member.',
           },
         },
-        required: ['startTime', 'endTime'],
+        required: ['startTime', 'endTime', 'groupId'],
       },
     },
   },
@@ -227,7 +238,13 @@ const GHL_TOOL_DISPATCH: Record<string, (args: Record<string, unknown>) => {
 }> = {
   ghl_get_contacts: (a) => ({
     mcpTool: 'contacts_get-contacts',
-    mcpArgs: { limit: a.limit ?? 100, ...(a.query ? { query: a.query } : {}) },
+    mcpArgs: Object.fromEntries(Object.entries({
+      limit: a.limit ?? 100,
+      query: a.query,
+      startDate: a.startDate,
+      endDate: a.endDate,
+      tags: a.tags,
+    }).filter(([, v]) => v !== undefined)),
   }),
   ghl_get_location: (_) => ({
     mcpTool: 'locations_get-location',
@@ -359,12 +376,125 @@ CHAT RULES:
 - Write "Discovery Call" (not "DC" or "discovery call").
 - Conversion rate = qualified leads → Discovery Calls booked. Show rate = completed / booked.
 - Pipeline data = CURRENT open counts per stage. Lead/appointment data = date window specified.
-- If the tool returns a lot of contact data, count contacts with dateAdded in the relevant date range.
-- When calling ghl_get_contacts for weekly leads, use limit=100 and filter results by dateAdded.
+
+════════════════════════════════════════
+GHL SETUP — PHOENIX HOME REMODELING
+════════════════════════════════════════
 
 COMPANY: Phoenix Home Remodeling — remodeling contractor, Phoenix AZ.
-FUNNEL: Qualified Lead → Discovery Call booked → Discovery Call completed → In-Home appointment → Won deal.
-KEY METRICS: qualified leads, Discovery Calls booked/completed, show rate, In-Home appointments, pipeline by stage.`
+
+FULL SALES FUNNEL:
+Qualified Lead → Discovery Call booked → Discovery Call completed (1cc) → In-Home Evaluation scheduled → In-Home completed → Proposal sent → Design & Planning Agreement signed → Construction Agreement signed → Construction complete
+
+CRITICAL TERMINOLOGY (GHL uses different names internally):
+- "Discovery Call" = called "Phone Consultation" inside GHL. When you see "phone consultation" in data, that IS the Discovery Call.
+- "1cc" = First Call Consultation = what happens during/after a Discovery Call
+- "DIW" = Design Initial Walkthrough = site visit by designer
+- "In-Home" = In-Home Evaluation = sales appointment at the client's home
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+LEAD FILTER (use this EXACTLY for all lead count questions):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Tag: "prospect tags - new lead - all leads from everywhere - qualified and unqualified"
+Contact type NONE OF: Vendor, Bogus Lead, Job applicant, solicitor
+
+When calling ghl_get_contacts for lead counts, ALWAYS pass:
+  startDate = mondayEpoch (this week) or lastMondayEpoch (last week)
+  endDate = todayEpoch (this week) or lastSundayEpoch (last week)
+  tags = ["prospect tags - new lead - all leads from everywhere - qualified and unqualified"]
+  limit = 100
+Then exclude contacts whose type is Vendor, Bogus Lead, Job applicant, or solicitor.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CALENDAR GROUPS (use groupId for calendar event queries):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Discovery Calls groupId: Lw5fSwnOXd0Kn814J1De
+  — covers all 20+ Discovery Call calendars (inbound, outbound, PPC, LSA, website, chatbot, AI, etc.)
+  — ALWAYS use this groupId when asked about Discovery Calls booked or completed
+
+In-Home Evaluations groupId: B0UmNJYhaUFH6JgOSHvw
+  — covers all In-Home calendars (from Justin, from email, from texting, 2hr, manual, etc.)
+  — ALWAYS use this groupId when asked about In-Home appointments
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PIPELINES (12 total — key ones for MCD):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#01 Inbound Caller Disposition (id: JvgkifSKMnS7tzI65pqK)
+  Tracks: what happened with each inbound call. Key stages:
+  - "New Lead - from AI Remodel Coach Bot" — bot-originated lead
+  - "Scheduled phone consultation from Inbound" — booked a Discovery Call
+  - "Didn't schedule phone consultation" — didn't book
+  - "Solicitation" — solicitor, not a real lead
+
+#02 New Leads & Outbound Campaign (id: V2dwMtKIiCz6f7saVAhS)
+  Tracks: outbound calling sequence for new leads. Key stages:
+  - "New Lead" → "Call 1" through "Call 6 (Day 9)" — follow-up cadence
+  - "Phone consultation Scheduled from Outbound AI Call" — Discovery Call booked via outbound
+  - "Not Interested" / "Not interested right now but ok to Nurture"
+  - "Lead Unresponsive - Never got a hold of lead"
+
+#03 Phone Consultation Scheduled to 1CC Outcomes (id: Pa6iq2YQCwBlUCmUwBQ9) ← KEY PIPELINE
+  Tracks: every Discovery Call and its outcome. KEY STAGES:
+  - "*Phone Consultation Scheduled" — Discovery Call BOOKED ✓
+  - "*Phone Consultation No Show" — no-show
+  - "*Phone Consultation Cancelled" — cancelled
+  - "* 1cc - Too Expensive" — completed but price objection
+  - "* 1cc - Referred to Travek - Out of scope/area" — not a fit, referred out
+  - "* 1cc - Lead Not Sure About DB" — completed, lead undecided
+  - "*1cc - Can't Wait to Start Their Project" — hot lead
+  - "*1cc - Need to Schedule In-Home" — Discovery Call completed, In-Home needed ✓
+  - "1cc - Project Under $15k" — below minimum project size
+  - "1cc - Sent to Jeremy" — escalated to owner
+  - "Prospect no longer interested after phone consultation" — lost post-call
+
+#04 In-Home Scheduled to Design Agreement Signed (id: TVvpPHfZ23RIjYkVBvPd)
+  Tracks: in-home visit through proposal. KEY STAGES:
+  - "*In-Home Evaluation Scheduled" — In-Home BOOKED ✓
+  - "*In-home Cancelled" / "In-Home Missed"
+  - "Sent SOW To Estimators For Pricing"
+  - "Check Pricing & Make Proposal"
+  - "*Proposal Reviewed and Sent, Need to Follow Up"
+  - "Hot - Close to Moving Forward"
+  - "Design & Planning Agreement Signed" — WON (design phase) ✓
+
+#05 Planning & Design Phase (id: R89SFM9SElTlPFM9I4v4)
+  Tracks: active design clients through design completion.
+  Key: DIW = Design Initial Walkthrough (designer site visit)
+
+#06 Design Complete to Signed Construction Agreement (id: jMw6TNIqczubSuR4tZLC)
+  Tracks: design-complete clients through construction agreement signing.
+  - "Construction Agreement Signed" — fully committed client ✓
+
+#07 New Construction Client to Project Complete (id: 8qxLSNDiFrRAYeVzZILu)
+  Tracks: active construction projects.
+  - "Construction in Progress" / "Construction Project Complete"
+
+#08 Nurture and Lost Opp Stages (id: 8QNPRh5CialN3HH8JKEr)
+  Tracks: lost and long-term nurture contacts. Loss reasons:
+  - "Lost - Bogus Lead Info" / "Lost - New lead - No Contact" / "Lost - New Lead - Not a Fit"
+  - "Lost - Proposal Too High" / "Lost - Competitor (not cost)"
+  - "Lost - During Design Phase" / "Lost - After Design Phase"
+  - "Nurture" / "Long Term Nurture"
+
+#09 Referred to Another Company (id: 63BKeQ4A4JWjOftpQTiT)
+  Partner companies: Travek & Hoffman, RM Flooring, 1st Class Finishing, ITSA Contracting, Homework Remodels
+
+#11 Realtors & Brokers (id: RxsnkHiQ4RGZZ0pf1cWI)
+  Tracks realtor partnership outreach and referral relationships.
+
+#12 Interior Designers For Referrals (id: AeecRgr8SNTujCVby9Ks)
+  Tracks designer partnership calls and qualified/interested designers.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+KEY METRICS DEFINITIONS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Qualified leads = contacts with the prospect tag (not Vendor/Bogus/Job applicant/solicitor)
+- Discovery Calls booked = calendar events in Discovery Call group (Lw5fSwnOXd0Kn814J1De) OR stage "*Phone Consultation Scheduled" in Pipeline #03
+- Discovery Call show rate = completed calls / booked calls (Pipeline #03 non-cancelled, non-no-show outcomes vs total booked)
+- In-Home booked = calendar events in In-Home group (B0UmNJYhaUFH6JgOSHvw) OR stage "*In-Home Evaluation Scheduled" in Pipeline #04
+- Conversion rate = leads → Discovery Calls booked
+- Won = "Design & Planning Agreement Signed" (Pipeline #04) or "Construction Agreement Signed" (Pipeline #06)
+- Minimum project size = $15k (leads under this are not a fit)`
 
   const nonGHL = nonGHLContext.trim()
     ? `\n\nPRE-FETCHED DATA (use directly — do not say you don't have it):\n${nonGHLContext}`
@@ -420,7 +550,7 @@ export async function POST(req: NextRequest) {
     let response: OpenAI.Chat.ChatCompletion
     try {
       response = await openai.chat.completions.create({
-        model:                 process.env.OPENAI_MODEL || 'gpt-4o',
+        model:                 process.env.OPENAI_MODEL || 'gpt-5.4-mini',
         messages:              roundMessages,
         tools:                 GHL_OPENAI_TOOLS,
         tool_choice:           isLastRound ? 'none' : 'auto',
@@ -482,7 +612,7 @@ export async function POST(req: NextRequest) {
       try {
         // Final streaming call — tools disabled so we always get prose
         const streamCompletion = await openai.chat.completions.create({
-          model:                 process.env.OPENAI_MODEL || 'gpt-4o',
+          model:                 process.env.OPENAI_MODEL || 'gpt-5.4-mini',
           messages:              roundMessages,
           stream:                true,
           max_completion_tokens: 900,
