@@ -4731,4 +4731,8 @@ export default function Page() {
         {showSemanticSearch && <SemanticSearchModal onClose={() => setShowSemanticSearch(false)} onNavigate={(agentId) => { const ag = agents.find(a => a.id === agentId); if(ag) setSelectedAgent(ag) }} />}
       </AnimatePresence>
       <AnimatePresence>
-        {showApprovals && <Approval
+        {showApprovals && <ApprovalsModal onClose={() => setShowApprovals(false)} />}
+      </AnimatePresence>
+    </div>
+  )
+}
