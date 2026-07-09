@@ -94,28 +94,43 @@ const GHL_OPENAI_TOOLS: OpenAI.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'ghl_get_calendars',
+      description:
+        'List all GHL calendars. Returns calendar IDs and names. ' +
+        'ALWAYS call this first before ghl_get_calendar_events — you need a calendarId. ' +
+        'Look for calendars named "Discovery Call", "DC", "In-Home", or similar to get the right ID.',
+      parameters: {
+        type: 'object',
+        properties: {},
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'ghl_get_calendar_events',
       description:
         'Fetch GHL calendar events (Discovery Calls, in-home appointments, site visits). ' +
-        'Use startTime/endTime as epoch milliseconds. ' +
+        'Requires a calendarId — call ghl_get_calendars first to get it. ' +
+        'Use startTime/endTime as epoch milliseconds from the system prompt. ' +
         'Use for: Discovery Call counts, show rate, appointment data, booked/completed calls.',
       parameters: {
         type: 'object',
         properties: {
           startTime: {
             type: 'number',
-            description: 'Start epoch milliseconds. Use the epoch values from the system prompt for date ranges.',
+            description: 'Start epoch milliseconds from the system prompt.',
           },
           endTime: {
             type: 'number',
-            description: 'End epoch milliseconds. Use the epoch values from the system prompt.',
+            description: 'End epoch milliseconds from the system prompt.',
           },
           calendarId: {
             type: 'string',
-            description: 'Optional: specific calendar ID to filter events.',
+            description: 'Calendar ID from ghl_get_calendars. Required.',
           },
         },
-        required: ['startTime', 'endTime'],
+        required: ['startTime', 'endTime', 'calendarId'],
       },
     },
   },
@@ -189,9 +204,13 @@ const GHL_TOOL_DISPATCH: Record<string, (args: Record<string, unknown>) => {
     mcpTool: 'contacts_get-contacts',
     mcpArgs: { limit: a.limit ?? 100, ...(a.query ? { query: a.query } : {}) },
   }),
+  ghl_get_calendars: (_) => ({
+    mcpTool: 'calendars_get-calendars',
+    mcpArgs: {},
+  }),
   ghl_get_calendar_events: (a) => ({
     mcpTool: 'calendars_get-calendar-events',
-    mcpArgs: { startTime: a.startTime, endTime: a.endTime, ...(a.calendarId ? { calendarId: a.calendarId } : {}) },
+    mcpArgs: { startTime: a.startTime, endTime: a.endTime, calendarId: a.calendarId },
   }),
   ghl_get_pipelines: (_) => ({
     mcpTool: 'opportunities_get-pipelines',
