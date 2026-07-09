@@ -73,9 +73,10 @@ const GHL_OPENAI_TOOLS: OpenAI.ChatCompletionTool[] = [
     function: {
       name: 'ghl_get_contacts',
       description:
-        'Fetch GHL contacts (leads). Supports server-side date range and tag filtering. ' +
-        'For lead count questions ALWAYS pass startDate/endDate (epoch ms from system prompt) and tags=["prospect tags - new lead - all leads from everywhere - qualified and unqualified"]. ' +
-        'Use for: how many leads, new contacts, lead count, source breakdown.',
+        'Fetch GHL contacts. Use startDate/endDate to filter by date created. ' +
+        'Do NOT pass tags — tag filtering is done client-side from the returned contacts. ' +
+        'Each returned contact includes a full tags array and type field for client-side filtering. ' +
+        'Use for: lead counts, new contacts this week, source breakdown.',
       parameters: {
         type: 'object',
         properties: {
@@ -89,16 +90,11 @@ const GHL_OPENAI_TOOLS: OpenAI.ChatCompletionTool[] = [
           },
           startDate: {
             type: 'number',
-            description: 'Filter contacts added on or after this epoch ms. Use mondayEpoch for this week, lastMondayEpoch for last week.',
+            description: 'Filter contacts created on or after this epoch ms. Use mondayEpoch for this week, lastMondayEpoch for last week.',
           },
           endDate: {
             type: 'number',
-            description: 'Filter contacts added on or before this epoch ms. Use todayEpoch for current end, lastSundayEpoch for last week end.',
-          },
-          tags: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Filter by tags. For PHR leads use: ["prospect tags - new lead - all leads from everywhere - qualified and unqualified"]',
+            description: 'Filter contacts created on or before this epoch ms. Use todayEpoch for this week end, lastSundayEpoch for last week end.',
           },
         },
       },
@@ -188,11 +184,20 @@ const GHL_OPENAI_TOOLS: OpenAI.ChatCompletionTool[] = [
     function: {
       name: 'ghl_search_opportunities',
       description:
-        'Search GHL opportunities (deals) by status and date range. ' +
-        'Use for: won deals, lost deals, close rate, conversion rate, revenue, deals in a date range.',
+        'Search GHL opportunities by pipeline, status, and date range. ' +
+        'For lead counts use pipelineId JvgkifSKMnS7tzI65pqK (Pipeline #01 Inbound) AND V2dwMtKIiCz6f7saVAhS (Pipeline #02 Outbound). ' +
+        'Use for: lead counts (fallback), won deals, lost deals, conversion rate, deals in a date range.',
       parameters: {
         type: 'object',
         properties: {
+          pipelineId: {
+            type: 'string',
+            description: 'Filter by pipeline. Pipeline #01 (Inbound): JvgkifSKMnS7tzI65pqK. Pipeline #02 (Outbound): V2dwMtKIiCz6f7saVAhS. Pipeline #03 (Discovery Call outcomes): Pa6iq2YQCwBlUCmUwBQ9. Pipeline #04 (In-Home): TVvpPHfZ23RIjYkVBvPd.',
+          },
+          pipelineStageId: {
+            type: 'string',
+            description: 'Filter by specific stage ID within the pipeline.',
+          },
           status: {
             type: 'string',
             enum: ['open', 'won', 'lost', 'abandoned'],
@@ -243,7 +248,6 @@ const GHL_TOOL_DISPATCH: Record<string, (args: Record<string, unknown>) => {
       query: a.query,
       startDate: a.startDate,
       endDate: a.endDate,
-      tags: a.tags,
     }).filter(([, v]) => v !== undefined)),
   }),
   ghl_get_location: (_) => ({
@@ -393,17 +397,22 @@ CRITICAL TERMINOLOGY (GHL uses different names internally):
 - "In-Home" = In-Home Evaluation = sales appointment at the client's home
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-LEAD FILTER (use this EXACTLY for all lead count questions):
+LEAD FILTER (use this EXACTLY — matches the GHL custom dashboard widget):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Tag: "prospect tags - new lead - all leads from everywhere - qualified and unqualified"
-Contact type NONE OF: Vendor, Bogus Lead, Job applicant, solicitor
+Metric: Count of Contact
+Date property: Created on (= dateAdded)
+Tag IS: "prospect tags - new lead - all leads from everywhere - qualified and unqualified"
+Contact type IS NONE OF: Bogus Lead, Job applicant, Solicitor, Vendor, Employee
 
-When calling ghl_get_contacts for lead counts, ALWAYS pass:
-  startDate = mondayEpoch (this week) or lastMondayEpoch (last week)
-  endDate = todayEpoch (this week) or lastSundayEpoch (last week)
-  tags = ["prospect tags - new lead - all leads from everywhere - qualified and unqualified"]
-  limit = 100
-Then exclude contacts whose type is Vendor, Bogus Lead, Job applicant, or solicitor.
+When calling ghl_get_contacts for lead counts:
+  - Pass startDate and endDate ONLY (do NOT pass tags — the API rejects tag filters)
+  - startDate = mondayEpoch (this week) or lastMondayEpoch (last week)
+  - endDate = todayEpoch (this week) or lastSundayEpoch (last week)
+  - limit = 100
+  - Every contact record returned includes a full "tags" array — use it to filter client-side
+  - INCLUDE only contacts whose tags array CONTAINS "prospect tags - new lead - all leads from everywhere - qualified and unqualified"
+  - EXCLUDE contacts whose type is any of: Bogus Lead, Job applicant, Solicitor, Vendor, Employee
+  - Count what remains — this matches the GHL dashboard number
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 CALENDAR GROUPS (use groupId for calendar event queries):
@@ -494,7 +503,20 @@ KEY METRICS DEFINITIONS:
 - In-Home booked = calendar events in In-Home group (B0UmNJYhaUFH6JgOSHvw) OR stage "*In-Home Evaluation Scheduled" in Pipeline #04
 - Conversion rate = leads → Discovery Calls booked
 - Won = "Design & Planning Agreement Signed" (Pipeline #04) or "Construction Agreement Signed" (Pipeline #06)
-- Minimum project size = $15k (leads under this are not a fit)`
+- Minimum project size = $15k (leads under this are not a fit)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+LEAD COUNT — TWO METHODS (use Method 1 first, fall back to Method 2):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Method 1 — Contact tag filter (preferred):
+  Call ghl_get_contacts with startDate, endDate, tags="prospect tags - new lead - all leads from everywhere - qualified and unqualified", limit=100.
+  Exclude type: Bogus Lead, Job applicant, Solicitor, Vendor, Employee. Count what's left.
+
+Method 2 — Pipeline opportunity count (fallback if tag filter fails or returns suspect data):
+  Call ghl_search_opportunities for Pipeline #01 (JvgkifSKMnS7tzI65pqK) AND Pipeline #02 (V2dwMtKIiCz6f7saVAhS).
+  Filter by date range (date/endDate in MM-DD-YYYY format). Count total open opportunities created that week across both pipelines.
+  This is reliable because every new lead gets an opportunity created in one of these two pipelines.
+  Do NOT count Pipeline #03+ opportunities — those are downstream of the initial lead entry.`
 
   const nonGHL = nonGHLContext.trim()
     ? `\n\nPRE-FETCHED DATA (use directly — do not say you don't have it):\n${nonGHLContext}`
