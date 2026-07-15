@@ -1501,16 +1501,44 @@ function MCDPanel() {
     window.addEventListener('mouseup',   onUp)
   }
 
-  async function send(text?: string) {
-    const t = (text ?? input).trim()
-    if (!t || loading) return
-    setInput('')
+  // Detect mid-task narration — MCD saying it will continue but hasn't delivered yet
+  function isMidTask(text: string): boolean {
+    const t = text.toLowerCase()
+    return (
+      /i['']ll (report back|keep going|continue|narrow|search|try|look|find|pull|check)/.test(t) ||
+      /still (locating|searching|looking|working|finding|checking)/.test(t) ||
+      /(next (move|step|query|pass)|narrowing|give me a moment|one more (pass|step|query))/.test(t) ||
+      /once i have the/.test(t) ||
+      // ends without actual data — only bullets of "what I'll do", no numbers/results
+      (/next (move|step):/i.test(t) && !/^\|/m.test(text) && !/\*\*\d/.test(text))
+    )
+  }
 
-    const history = msgs.filter(m => !m.loading).map(m => ({ role: m.role, content: m.content }))
-    const userMsg: McdChatMessage = { role: 'user', content: t }
-    const placeholder: McdChatMessage = { role: 'assistant', content: '', loading: true, sources: [] }
-    setMsgs(prev => [...prev, userMsg, placeholder])
+  const autoRetries = useRef(0)
+  // Signals "a continuation is scheduled — keep loading spinner alive in finally"
+  const continueScheduled = useRef(false)
+
+  async function send(text?: string, _isAuto = false) {
+    const t = (text ?? input).trim()
+    // Auto-continuations bypass the loading guard (they fire while loading is still true)
+    if (!t || (loading && !_isAuto)) return
+    if (!_isAuto) { setInput(''); autoRetries.current = 0 }
+
+    // Snapshot history from current msgs BEFORE mutating state
+    const history = msgs
+      .filter(m => !m.loading)
+      .slice(-20)
+      .map(m => ({ role: m.role, content: m.content }))
+
+    // Update message list — no user bubble for auto-continuations
+    setMsgs(prev => {
+      const base = _isAuto
+        ? prev.filter(m => !m.loading)
+        : [...prev.filter(m => !m.loading), { role: 'user' as const, content: t }]
+      return [...base, { role: 'assistant' as const, content: '', loading: true, sources: [] }]
+    })
     setLoading(true)
+    continueScheduled.current = false
 
     try {
       const res = await fetch('/api/mcd/chat', {
@@ -1544,12 +1572,25 @@ function MCDPanel() {
           } catch {}
         }
       }
+
       setMsgs(prev => { const n = [...prev]; const l = n[n.length-1]; if (l?.loading) n[n.length-1] = { role:'assistant', content: full || '(no response)', sources }; return n })
+
+      // Auto-continue if MCD narrated mid-task without delivering results (max 4 retries)
+      if (isMidTask(full) && autoRetries.current < 4) {
+        autoRetries.current++
+        continueScheduled.current = true   // tell finally: don't clear loading yet
+        setTimeout(() => send('continue', true), 900)
+        return
+      }
+
     } catch (e: any) {
       setMsgs(prev => { const n = [...prev]; const l = n[n.length-1]; if (l?.loading) n[n.length-1] = { role:'assistant', content:`Error: ${e.message}`, sources:[] }; return n })
     } finally {
-      setLoading(false)
-      setTimeout(() => inputRef.current?.focus(), 50)
+      // Only clear loading when we're NOT about to fire another round
+      if (!continueScheduled.current) {
+        setLoading(false)
+        setTimeout(() => inputRef.current?.focus(), 50)
+      }
     }
   }
 
