@@ -1388,13 +1388,37 @@ function renderMcdText(text: string) {
 }
 
 function MCDPanel() {
-  const [msgs, setMsgs]   = useState<McdChatMessage[]>([])
-  const [input, setInput] = useState('')
+  const [msgs, setMsgs]     = useState<McdChatMessage[]>([])
+  const [input, setInput]   = useState('')
   const [loading, setLoading] = useState(false)
-  const endRef = useRef<HTMLDivElement>(null)
+  const [width, setWidth]   = useState(400)
+  const [dragging, setDragging] = useState(false)
+  const endRef   = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const startX   = useRef(0)
+  const startW   = useRef(0)
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [msgs])
+
+  // ── Resize drag ────────────────────────────────────────────────────────────
+  function onDragStart(e: React.MouseEvent) {
+    e.preventDefault()
+    startX.current = e.clientX
+    startW.current = width
+    setDragging(true)
+    const onMove = (ev: MouseEvent) => {
+      const delta = startX.current - ev.clientX          // drag left = wider
+      const next  = Math.min(700, Math.max(280, startW.current + delta))
+      setWidth(next)
+    }
+    const onUp = () => {
+      setDragging(false)
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup',  onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup',   onUp)
+  }
 
   async function send(text?: string) {
     const t = (text ?? input).trim()
@@ -1451,38 +1475,50 @@ function MCDPanel() {
   const QUICK = ['Leads this week?', 'Discovery Call rate?', 'Pipeline status?', 'Top GSC queries?']
 
   return (
-    <div style={{ width:320, flexShrink:0, background:'rgba(8,12,20,0.97)', borderLeft:'1px solid rgba(99,102,241,0.12)', display:'flex', flexDirection:'column' }}>
+    <div style={{ width, flexShrink:0, background:'rgba(8,12,20,0.97)', borderLeft:'1px solid rgba(99,102,241,0.12)', display:'flex', flexDirection:'column', overflow:'hidden', position:'relative', userSelect: dragging ? 'none' : 'auto' }}>
+      {/* Drag handle */}
+      <div
+        onMouseDown={onDragStart}
+        style={{
+          position:'absolute', left:0, top:0, bottom:0, width:5,
+          cursor:'col-resize', zIndex:10,
+          background: dragging ? 'rgba(14,165,233,0.35)' : 'transparent',
+          transition:'background 0.15s',
+        }}
+        onMouseEnter={e => { if (!dragging) (e.currentTarget as HTMLDivElement).style.background = 'rgba(14,165,233,0.18)' }}
+        onMouseLeave={e => { if (!dragging) (e.currentTarget as HTMLDivElement).style.background = 'transparent' }}
+      />
       {/* Header */}
-      <div style={{ padding:'12px 14px', borderBottom:'1px solid rgba(99,102,241,0.1)', flexShrink:0 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}>
-          <div style={{ width:28, height:28, borderRadius:8, background:'linear-gradient(135deg,#0ea5e9,#6366f1)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:14, boxShadow:'0 0 12px rgba(6,182,212,0.35)', flexShrink:0 }}>💬</div>
+      <div style={{ padding:'14px 16px', borderBottom:'1px solid rgba(99,102,241,0.1)', flexShrink:0 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10 }}>
+          <div style={{ width:30, height:30, borderRadius:8, background:'linear-gradient(135deg,#0ea5e9,#6366f1)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:15, boxShadow:'0 0 12px rgba(6,182,212,0.35)', flexShrink:0 }}>💬</div>
           <div style={{ minWidth:0, flex:1 }}>
-            <div style={{ color:'white', fontWeight:700, fontSize:11, lineHeight:1.3 }}>Marketing and Conversions Director</div>
+            <div style={{ color:'white', fontWeight:700, fontSize:12, lineHeight:1.3 }}>Marketing and Conversions Director</div>
           </div>
           {loading && <motion.div animate={{ rotate:360 }} transition={{ repeat:Infinity, duration:1, ease:'linear' }} style={{ flexShrink:0 }}><RefreshCw size={13} color="#0ea5e9" /></motion.div>}
         </div>
-        <div style={{ display:'flex', flexDirection:'column', gap:3, paddingLeft:38 }}>
-          <div style={{ display:'flex', flexWrap:'wrap', gap:'3px 8px' }}>
+        <div style={{ display:'flex', flexDirection:'column', gap:5, paddingLeft:40 }}>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:'4px 10px' }}>
             {['Leads','Discovery Calls','Pipeline','Call Quality','SEO Rankings','Traffic'].map(cap => (
-              <span key={cap} style={{ fontSize:9, color:'rgba(148,163,184,0.6)', fontWeight:500 }}>{cap}</span>
+              <span key={cap} style={{ fontSize:10, color:'rgba(148,163,184,0.65)', fontWeight:500 }}>{cap}</span>
             ))}
           </div>
-          <div style={{ display:'flex', flexWrap:'wrap', gap:'3px 6px' }}>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:'4px 6px' }}>
             {['GHL','GA4','GSC','SEO Utils','Calls Sheet','Initiatives'].map(src => (
-              <span key={src} style={{ fontSize:9, padding:'1px 5px', borderRadius:4, background:'rgba(14,165,233,0.08)', color:'rgba(14,165,233,0.6)', border:'1px solid rgba(14,165,233,0.12)' }}>{src}</span>
+              <span key={src} style={{ fontSize:10, padding:'2px 7px', borderRadius:5, background:'rgba(14,165,233,0.08)', color:'rgba(14,165,233,0.65)', border:'1px solid rgba(14,165,233,0.15)' }}>{src}</span>
             ))}
           </div>
         </div>
       </div>
 
       {/* Messages */}
-      <div style={{ flex:1, overflowY:'auto', padding:'12px 12px', display:'flex', flexDirection:'column', gap:10 }}>
+      <div style={{ flex:1, overflowY:'auto', overflowX:'hidden', padding:'14px 14px', display:'flex', flexDirection:'column', gap:12 }}>
         {msgs.length === 0 && (
-          <div style={{ marginTop:20, display:'flex', flexDirection:'column', gap:8 }}>
-            <div style={{ textAlign:'center', color:'rgba(148,163,184,0.3)', fontSize:11, marginBottom:4 }}>Ask anything about PHR</div>
+          <div style={{ marginTop:24, display:'flex', flexDirection:'column', gap:8 }}>
+            <div style={{ textAlign:'center', color:'rgba(148,163,184,0.3)', fontSize:12, marginBottom:4 }}>Ask anything about PHR</div>
             {QUICK.map((q,i) => (
               <button key={i} onClick={() => send(q)}
-                style={{ background:'rgba(14,165,233,0.06)', border:'1px solid rgba(14,165,233,0.15)', borderRadius:8, padding:'7px 10px', color:'rgba(148,163,184,0.7)', fontSize:11, cursor:'pointer', textAlign:'left', lineHeight:1.4 }}>
+                style={{ background:'rgba(14,165,233,0.06)', border:'1px solid rgba(14,165,233,0.15)', borderRadius:9, padding:'9px 12px', color:'rgba(148,163,184,0.75)', fontSize:12, cursor:'pointer', textAlign:'left', lineHeight:1.5 }}>
                 {q}
               </button>
             ))}
@@ -1490,27 +1526,27 @@ function MCDPanel() {
         )}
 
         {msgs.map((m, i) => (
-          <div key={i} style={{ display:'flex', flexDirection:'column', alignItems: m.role==='user' ? 'flex-end' : 'flex-start', gap:4 }}>
+          <div key={i} style={{ display:'flex', flexDirection:'column', alignItems: m.role==='user' ? 'flex-end' : 'flex-start', gap:5 }}>
             {/* Source badges */}
             {m.role==='assistant' && m.sources && m.sources.length > 0 && (
               <div style={{ display:'flex', gap:4, flexWrap:'wrap', paddingLeft:2 }}>
                 {m.sources.map(s => {
                   const c = SOURCE_COLORS[s] || { bg:'rgba(99,102,241,0.1)', color:'#a5b4fc', border:'rgba(99,102,241,0.25)' }
-                  return <span key={s} style={{ fontSize:9, padding:'1px 6px', borderRadius:6, background:c.bg, color:c.color, border:`1px solid ${c.border}`, fontWeight:600, letterSpacing:0.3 }}>{s}</span>
+                  return <span key={s} style={{ fontSize:10, padding:'2px 7px', borderRadius:6, background:c.bg, color:c.color, border:`1px solid ${c.border}`, fontWeight:600, letterSpacing:0.3 }}>{s}</span>
                 })}
               </div>
             )}
             <div style={{
-              maxWidth:'92%', padding: m.role==='user' ? '7px 11px' : '9px 12px',
-              borderRadius: m.role==='user' ? '12px 12px 3px 12px' : '12px 12px 12px 3px',
+              maxWidth:'88%', padding: m.role==='user' ? '9px 13px' : '10px 14px',
+              borderRadius: m.role==='user' ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
               background: m.role==='user' ? 'linear-gradient(135deg,#0369a1,#0ea5e9)' : 'rgba(15,20,35,0.9)',
               border: m.role==='assistant' ? '1px solid rgba(14,165,233,0.12)' : 'none',
-              color:'white', fontSize:12, lineHeight:1.5, wordBreak:'break-word',
+              color:'white', fontSize:13, lineHeight:1.6, wordBreak:'break-word', minWidth:0,
             }}>
               {m.role==='assistant' ? (
                 m.loading && !m.content ? (
-                  <div style={{ display:'flex', gap:3, padding:'2px 0' }}>
-                    {[0,1,2].map(j => <motion.div key={j} animate={{ opacity:[0.3,1,0.3] }} transition={{ repeat:Infinity, duration:1.2, delay:j*0.2 }} style={{ width:5, height:5, borderRadius:'50%', background:'#0ea5e9' }} />)}
+                  <div style={{ display:'flex', gap:4, padding:'3px 0' }}>
+                    {[0,1,2].map(j => <motion.div key={j} animate={{ opacity:[0.3,1,0.3] }} transition={{ repeat:Infinity, duration:1.2, delay:j*0.2 }} style={{ width:6, height:6, borderRadius:'50%', background:'#0ea5e9' }} />)}
                   </div>
                 ) : renderMcdText(m.content)
               ) : m.content}
@@ -1521,7 +1557,7 @@ function MCDPanel() {
       </div>
 
       {/* Input */}
-      <div style={{ padding:'10px 10px 14px', borderTop:'1px solid rgba(99,102,241,0.1)', display:'flex', gap:7, flexShrink:0 }}>
+      <div style={{ padding:'12px 12px 16px', borderTop:'1px solid rgba(99,102,241,0.1)', display:'flex', gap:8, flexShrink:0 }}>
         <input
           ref={inputRef}
           value={input}
@@ -1529,11 +1565,11 @@ function MCDPanel() {
           onKeyDown={e => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
           placeholder="Ask MCD…"
           disabled={loading}
-          style={{ flex:1, background:'rgba(14,165,233,0.07)', border:'1px solid rgba(14,165,233,0.18)', borderRadius:9, padding:'7px 11px', color:'white', fontSize:12, outline:'none', opacity: loading ? 0.6 : 1 }}
+          style={{ flex:1, background:'rgba(14,165,233,0.07)', border:'1px solid rgba(14,165,233,0.18)', borderRadius:10, padding:'9px 13px', color:'white', fontSize:13, outline:'none', opacity: loading ? 0.6 : 1, minWidth:0 }}
         />
         <motion.button whileTap={{ scale:0.9 }} onClick={() => send()} disabled={loading}
-          style={{ width:32, height:32, borderRadius:9, background:'linear-gradient(135deg,#0369a1,#0ea5e9)', border:'none', color:'white', cursor: loading ? 'not-allowed' : 'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, opacity: loading ? 0.5 : 1 }}>
-          <Send size={13} />
+          style={{ width:36, height:36, borderRadius:10, background:'linear-gradient(135deg,#0369a1,#0ea5e9)', border:'none', color:'white', cursor: loading ? 'not-allowed' : 'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, opacity: loading ? 0.5 : 1 }}>
+          <Send size={14} />
         </motion.button>
       </div>
     </div>
