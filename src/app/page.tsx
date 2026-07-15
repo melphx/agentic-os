@@ -1375,16 +1375,97 @@ const SOURCE_COLORS: Record<string, { bg: string; color: string; border: string 
   INITIATIVES: { bg: 'rgba(236,72,153,0.1)',  color: '#f472b6', border: 'rgba(236,72,153,0.25)' },
 }
 
-function renderMcdText(text: string) {
-  return text.split('\n').map((line, i) => {
-    if (line.startsWith('## '))  return <div key={i} style={{ fontSize:12, fontWeight:700, color:'#a5b4fc', marginTop:10, marginBottom:3, borderBottom:'1px solid rgba(99,102,241,0.15)', paddingBottom:2 }}>{line.slice(3)}</div>
-    if (line.startsWith('### ')) return <div key={i} style={{ fontSize:11, fontWeight:600, color:'#94a3b8', marginTop:8, marginBottom:2 }}>{line.slice(4)}</div>
-    if (line.startsWith('- ') || line.startsWith('* ')) return <div key={i} style={{ fontSize:12, color:'rgba(203,213,225,0.9)', lineHeight:1.7, paddingLeft:10, position:'relative' }}><span style={{position:'absolute',left:0,color:'#6366f1'}}>•</span>{line.slice(2)}</div>
-    if (line.match(/^\|/) ) return <div key={i} style={{ fontSize:11, color:'rgba(203,213,225,0.8)', fontFamily:'monospace', lineHeight:1.6, whiteSpace:'pre' }}>{line}</div>
-    if (line.trim() === '') return <div key={i} style={{ height:4 }} />
-    const parts = line.split(/(\*\*[^*]+\*\*)/g)
-    return <div key={i} style={{ fontSize:12, color:'rgba(203,213,225,0.9)', lineHeight:1.8 }}>{parts.map((p,j) => p.startsWith('**') && p.endsWith('**') ? <strong key={j} style={{ color:'white', fontWeight:600 }}>{p.slice(2,-2)}</strong> : p)}</div>
+// Inline bold/code renderer used in table cells and paragraph text
+function inlineMcd(s: string): React.ReactNode {
+  const parts = s.split(/(`[^`]+`|\*\*[^*]+\*\*)/g)
+  return parts.map((p, i) => {
+    if (p.startsWith('**') && p.endsWith('**')) return <strong key={i} style={{ color:'white', fontWeight:600 }}>{p.slice(2,-2)}</strong>
+    if (p.startsWith('`')  && p.endsWith('`'))  return <code key={i} style={{ background:'rgba(99,102,241,0.18)', borderRadius:3, padding:'1px 4px', fontSize:'0.9em', color:'#a5b4fc', fontFamily:'monospace' }}>{p.slice(1,-1)}</code>
+    return p
   })
+}
+
+function renderMcdText(text: string): React.ReactNode[] {
+  const lines   = text.split('\n')
+  const out: React.ReactNode[] = []
+  let i = 0
+
+  while (i < lines.length) {
+    const line = lines[i]
+
+    // ── Markdown table block ────────────────────────────────────────────────
+    if (line.trimStart().startsWith('|')) {
+      const tableLines: string[] = []
+      while (i < lines.length && lines[i].trimStart().startsWith('|')) {
+        tableLines.push(lines[i]); i++
+      }
+      // Split each row into cells; skip separator rows (---|--- pattern)
+      const isSep = (l: string) => /^\|[\s\-:|]+\|$/.test(l.trim())
+      const parsed = tableLines
+        .filter(l => !isSep(l))
+        .map(l => l.replace(/^\||\|$/g, '').split('|').map(c => c.trim()))
+      if (parsed.length > 0) {
+        const [head, ...body] = parsed
+        out.push(
+          <div key={`tbl-${i}`} style={{ overflowX:'auto', margin:'8px 0', borderRadius:8, border:'1px solid rgba(99,102,241,0.15)' }}>
+            <table style={{ borderCollapse:'collapse', width:'100%', fontSize:12 }}>
+              <thead>
+                <tr>
+                  {head.map((cell, j) => (
+                    <th key={j} style={{ padding:'7px 12px', background:'rgba(99,102,241,0.15)', color:'#a5b4fc', fontWeight:600, textAlign:'left', borderBottom:'1px solid rgba(99,102,241,0.2)', whiteSpace:'nowrap' }}>
+                      {inlineMcd(cell)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {body.map((row, ri) => (
+                  <tr key={ri} style={{ background: ri%2===0 ? 'transparent' : 'rgba(255,255,255,0.02)' }}>
+                    {row.map((cell, ci) => (
+                      <td key={ci} style={{ padding:'6px 12px', color:'rgba(203,213,225,0.9)', borderBottom:'1px solid rgba(99,102,241,0.07)', whiteSpace:'nowrap' }}>
+                        {inlineMcd(cell)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      }
+      continue
+    }
+
+    // ── Headings ────────────────────────────────────────────────────────────
+    if (line.startsWith('## ')) {
+      out.push(<div key={i} style={{ fontSize:12, fontWeight:700, color:'#a5b4fc', marginTop:10, marginBottom:3, borderBottom:'1px solid rgba(99,102,241,0.15)', paddingBottom:2 }}>{line.slice(3)}</div>)
+    } else if (line.startsWith('### ')) {
+      out.push(<div key={i} style={{ fontSize:11, fontWeight:600, color:'#94a3b8', marginTop:8, marginBottom:2 }}>{line.slice(4)}</div>)
+
+    // ── Bullet ──────────────────────────────────────────────────────────────
+    } else if (line.startsWith('- ') || line.startsWith('* ')) {
+      out.push(
+        <div key={i} style={{ fontSize:12, color:'rgba(203,213,225,0.9)', lineHeight:1.7, paddingLeft:14, position:'relative' }}>
+          <span style={{ position:'absolute', left:0, color:'#6366f1' }}>•</span>
+          {inlineMcd(line.slice(2))}
+        </div>
+      )
+
+    // ── Blank line ──────────────────────────────────────────────────────────
+    } else if (line.trim() === '') {
+      out.push(<div key={i} style={{ height:5 }} />)
+
+    // ── Paragraph ───────────────────────────────────────────────────────────
+    } else {
+      out.push(
+        <div key={i} style={{ fontSize:12, color:'rgba(203,213,225,0.9)', lineHeight:1.8 }}>
+          {inlineMcd(line)}
+        </div>
+      )
+    }
+    i++
+  }
+  return out
 }
 
 function MCDPanel() {
@@ -1537,11 +1618,14 @@ function MCDPanel() {
               </div>
             )}
             <div style={{
-              maxWidth:'88%', padding: m.role==='user' ? '9px 13px' : '10px 14px',
+              maxWidth: m.role==='user' ? '88%' : '100%',
+              width:    m.role==='assistant' ? '100%' : undefined,
+              padding: m.role==='user' ? '9px 13px' : '10px 14px',
               borderRadius: m.role==='user' ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
               background: m.role==='user' ? 'linear-gradient(135deg,#0369a1,#0ea5e9)' : 'rgba(15,20,35,0.9)',
               border: m.role==='assistant' ? '1px solid rgba(14,165,233,0.12)' : 'none',
               color:'white', fontSize:13, lineHeight:1.6, wordBreak:'break-word', minWidth:0,
+              overflowX: m.role==='assistant' ? 'hidden' : undefined,
             }}>
               {m.role==='assistant' ? (
                 m.loading && !m.content ? (
