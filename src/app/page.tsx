@@ -1363,6 +1363,183 @@ function RunTaskModal({ agent, onClose, onSubmit, prefill }: { agent: Agent; onC
   )
 }
 
+// ── MCD Panel (right sidebar — always visible) ────────────────────────────
+// Self-contained: own state, SSE streaming to /api/mcd/chat, source badges.
+
+const SOURCE_COLORS: Record<string, { bg: string; color: string; border: string }> = {
+  GHL:         { bg: 'rgba(16,185,129,0.1)',  color: '#10b981', border: 'rgba(16,185,129,0.25)' },
+  GA4:         { bg: 'rgba(251,191,36,0.1)',  color: '#fbbf24', border: 'rgba(251,191,36,0.25)' },
+  GSC:         { bg: 'rgba(59,130,246,0.1)',  color: '#60a5fa', border: 'rgba(59,130,246,0.25)' },
+  SEO:         { bg: 'rgba(168,85,247,0.1)',  color: '#c084fc', border: 'rgba(168,85,247,0.25)' },
+  CALLS:       { bg: 'rgba(249,115,22,0.1)',  color: '#fb923c', border: 'rgba(249,115,22,0.25)' },
+  INITIATIVES: { bg: 'rgba(236,72,153,0.1)',  color: '#f472b6', border: 'rgba(236,72,153,0.25)' },
+}
+
+function renderMcdText(text: string) {
+  return text.split('\n').map((line, i) => {
+    if (line.startsWith('## '))  return <div key={i} style={{ fontSize:12, fontWeight:700, color:'#a5b4fc', marginTop:10, marginBottom:3, borderBottom:'1px solid rgba(99,102,241,0.15)', paddingBottom:2 }}>{line.slice(3)}</div>
+    if (line.startsWith('### ')) return <div key={i} style={{ fontSize:11, fontWeight:600, color:'#94a3b8', marginTop:8, marginBottom:2 }}>{line.slice(4)}</div>
+    if (line.startsWith('- ') || line.startsWith('* ')) return <div key={i} style={{ fontSize:12, color:'rgba(203,213,225,0.9)', lineHeight:1.7, paddingLeft:10, position:'relative' }}><span style={{position:'absolute',left:0,color:'#6366f1'}}>•</span>{line.slice(2)}</div>
+    if (line.match(/^\|/) ) return <div key={i} style={{ fontSize:11, color:'rgba(203,213,225,0.8)', fontFamily:'monospace', lineHeight:1.6, whiteSpace:'pre' }}>{line}</div>
+    if (line.trim() === '') return <div key={i} style={{ height:4 }} />
+    const parts = line.split(/(\*\*[^*]+\*\*)/g)
+    return <div key={i} style={{ fontSize:12, color:'rgba(203,213,225,0.9)', lineHeight:1.8 }}>{parts.map((p,j) => p.startsWith('**') && p.endsWith('**') ? <strong key={j} style={{ color:'white', fontWeight:600 }}>{p.slice(2,-2)}</strong> : p)}</div>
+  })
+}
+
+function MCDPanel() {
+  const [msgs, setMsgs]   = useState<McdChatMessage[]>([])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
+  const endRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [msgs])
+
+  async function send(text?: string) {
+    const t = (text ?? input).trim()
+    if (!t || loading) return
+    setInput('')
+
+    const history = msgs.filter(m => !m.loading).map(m => ({ role: m.role, content: m.content }))
+    const userMsg: McdChatMessage = { role: 'user', content: t }
+    const placeholder: McdChatMessage = { role: 'assistant', content: '', loading: true, sources: [] }
+    setMsgs(prev => [...prev, userMsg, placeholder])
+    setLoading(true)
+
+    try {
+      const res = await fetch('/api/mcd/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: t, history }),
+      })
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
+
+      const reader = res.body.getReader()
+      const dec    = new TextDecoder()
+      let buf = '', full = '', sources: string[] = []
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += dec.decode(value, { stream: true })
+        const lines = buf.split('\n')
+        buf = lines.pop() || ''
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const raw = line.slice(6).trim()
+          if (raw === '[DONE]') break
+          try {
+            const ev = JSON.parse(raw)
+            if (ev.type === 'sources') { sources = ev.sources || [] }
+            if (ev.type === 'delta') {
+              full += ev.content
+              setMsgs(prev => { const n = [...prev]; const l = n[n.length-1]; if (l?.loading) n[n.length-1] = { ...l, content: full, sources, loading: true }; return n })
+            }
+          } catch {}
+        }
+      }
+      setMsgs(prev => { const n = [...prev]; const l = n[n.length-1]; if (l?.loading) n[n.length-1] = { role:'assistant', content: full || '(no response)', sources }; return n })
+    } catch (e: any) {
+      setMsgs(prev => { const n = [...prev]; const l = n[n.length-1]; if (l?.loading) n[n.length-1] = { role:'assistant', content:`Error: ${e.message}`, sources:[] }; return n })
+    } finally {
+      setLoading(false)
+      setTimeout(() => inputRef.current?.focus(), 50)
+    }
+  }
+
+  const QUICK = ['Leads this week?', 'Discovery Call rate?', 'Pipeline status?', 'Top GSC queries?']
+
+  return (
+    <div style={{ width:320, flexShrink:0, background:'rgba(8,12,20,0.97)', borderLeft:'1px solid rgba(99,102,241,0.12)', display:'flex', flexDirection:'column' }}>
+      {/* Header */}
+      <div style={{ padding:'12px 14px', borderBottom:'1px solid rgba(99,102,241,0.1)', flexShrink:0 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}>
+          <div style={{ width:28, height:28, borderRadius:8, background:'linear-gradient(135deg,#0ea5e9,#6366f1)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:14, boxShadow:'0 0 12px rgba(6,182,212,0.35)', flexShrink:0 }}>💬</div>
+          <div style={{ minWidth:0, flex:1 }}>
+            <div style={{ color:'white', fontWeight:700, fontSize:11, lineHeight:1.3 }}>Marketing and Conversions Director</div>
+          </div>
+          {loading && <motion.div animate={{ rotate:360 }} transition={{ repeat:Infinity, duration:1, ease:'linear' }} style={{ flexShrink:0 }}><RefreshCw size={13} color="#0ea5e9" /></motion.div>}
+        </div>
+        <div style={{ display:'flex', flexDirection:'column', gap:3, paddingLeft:38 }}>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:'3px 8px' }}>
+            {['Leads','Discovery Calls','Pipeline','Call Quality','SEO Rankings','Traffic'].map(cap => (
+              <span key={cap} style={{ fontSize:9, color:'rgba(148,163,184,0.6)', fontWeight:500 }}>{cap}</span>
+            ))}
+          </div>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:'3px 6px' }}>
+            {['GHL','GA4','GSC','SEO Utils','Calls Sheet','Initiatives'].map(src => (
+              <span key={src} style={{ fontSize:9, padding:'1px 5px', borderRadius:4, background:'rgba(14,165,233,0.08)', color:'rgba(14,165,233,0.6)', border:'1px solid rgba(14,165,233,0.12)' }}>{src}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div style={{ flex:1, overflowY:'auto', padding:'12px 12px', display:'flex', flexDirection:'column', gap:10 }}>
+        {msgs.length === 0 && (
+          <div style={{ marginTop:20, display:'flex', flexDirection:'column', gap:8 }}>
+            <div style={{ textAlign:'center', color:'rgba(148,163,184,0.3)', fontSize:11, marginBottom:4 }}>Ask anything about PHR</div>
+            {QUICK.map((q,i) => (
+              <button key={i} onClick={() => send(q)}
+                style={{ background:'rgba(14,165,233,0.06)', border:'1px solid rgba(14,165,233,0.15)', borderRadius:8, padding:'7px 10px', color:'rgba(148,163,184,0.7)', fontSize:11, cursor:'pointer', textAlign:'left', lineHeight:1.4 }}>
+                {q}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {msgs.map((m, i) => (
+          <div key={i} style={{ display:'flex', flexDirection:'column', alignItems: m.role==='user' ? 'flex-end' : 'flex-start', gap:4 }}>
+            {/* Source badges */}
+            {m.role==='assistant' && m.sources && m.sources.length > 0 && (
+              <div style={{ display:'flex', gap:4, flexWrap:'wrap', paddingLeft:2 }}>
+                {m.sources.map(s => {
+                  const c = SOURCE_COLORS[s] || { bg:'rgba(99,102,241,0.1)', color:'#a5b4fc', border:'rgba(99,102,241,0.25)' }
+                  return <span key={s} style={{ fontSize:9, padding:'1px 6px', borderRadius:6, background:c.bg, color:c.color, border:`1px solid ${c.border}`, fontWeight:600, letterSpacing:0.3 }}>{s}</span>
+                })}
+              </div>
+            )}
+            <div style={{
+              maxWidth:'92%', padding: m.role==='user' ? '7px 11px' : '9px 12px',
+              borderRadius: m.role==='user' ? '12px 12px 3px 12px' : '12px 12px 12px 3px',
+              background: m.role==='user' ? 'linear-gradient(135deg,#0369a1,#0ea5e9)' : 'rgba(15,20,35,0.9)',
+              border: m.role==='assistant' ? '1px solid rgba(14,165,233,0.12)' : 'none',
+              color:'white', fontSize:12, lineHeight:1.5, wordBreak:'break-word',
+            }}>
+              {m.role==='assistant' ? (
+                m.loading && !m.content ? (
+                  <div style={{ display:'flex', gap:3, padding:'2px 0' }}>
+                    {[0,1,2].map(j => <motion.div key={j} animate={{ opacity:[0.3,1,0.3] }} transition={{ repeat:Infinity, duration:1.2, delay:j*0.2 }} style={{ width:5, height:5, borderRadius:'50%', background:'#0ea5e9' }} />)}
+                  </div>
+                ) : renderMcdText(m.content)
+              ) : m.content}
+            </div>
+          </div>
+        ))}
+        <div ref={endRef} />
+      </div>
+
+      {/* Input */}
+      <div style={{ padding:'10px 10px 14px', borderTop:'1px solid rgba(99,102,241,0.1)', display:'flex', gap:7, flexShrink:0 }}>
+        <input
+          ref={inputRef}
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
+          placeholder="Ask MCD…"
+          disabled={loading}
+          style={{ flex:1, background:'rgba(14,165,233,0.07)', border:'1px solid rgba(14,165,233,0.18)', borderRadius:9, padding:'7px 11px', color:'white', fontSize:12, outline:'none', opacity: loading ? 0.6 : 1 }}
+        />
+        <motion.button whileTap={{ scale:0.9 }} onClick={() => send()} disabled={loading}
+          style={{ width:32, height:32, borderRadius:9, background:'linear-gradient(135deg,#0369a1,#0ea5e9)', border:'none', color:'white', cursor: loading ? 'not-allowed' : 'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, opacity: loading ? 0.5 : 1 }}>
+          <Send size={13} />
+        </motion.button>
+      </div>
+    </div>
+  )
+}
+
 // ── Chat Panel ─────────────────────────────────────────────────────────────
 
 function ChatPanel({ messages, onSend, loading }: { messages: Message[]; onSend: (m: string) => void; loading: boolean }) {
@@ -4738,7 +4915,7 @@ export default function Page() {
         </AnimatePresence>
       </div>
 
-      <ChatPanel messages={messages} onSend={handleSend} loading={chatLoading} />
+      <MCDPanel />
 
       <AnimatePresence>
         {runAgent && <RunTaskModal agent={runAgent} onClose={() => setRunAgent(null)} onSubmit={handleRunTask} />}
