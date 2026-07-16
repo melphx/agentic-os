@@ -218,6 +218,22 @@ function initSchema(db: Database.Database) {
     // Migration already applied or not needed
   }
 
+  // ── MCD Memory (extracted facts from conversations) ───────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS mcd_memory (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      key              TEXT    NOT NULL UNIQUE,   -- stable identifier, used for upsert
+      value            TEXT    NOT NULL,          -- the actual fact / learned item
+      category         TEXT    NOT NULL DEFAULT 'context',
+        -- preference | metric | person | decision | initiative | context | constraint
+      importance       INTEGER NOT NULL DEFAULT 2 CHECK(importance IN (1,2,3)),
+        -- 1=nice to know  2=useful  3=critical
+      source_conv_id   INTEGER REFERENCES mcd_conversations(id) ON DELETE SET NULL,
+      created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+      updated_at       TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+  `)
+
   // ── MCD Conversations + Messages ──────────────────────────────────────────
   db.exec(`
     CREATE TABLE IF NOT EXISTS mcd_conversations (
@@ -245,6 +261,11 @@ function initSchema(db: Database.Database) {
   // Add email_sent to mcd_reports if missing (safe no-op on fresh DBs)
   try {
     db.prepare('ALTER TABLE mcd_reports ADD COLUMN email_sent INTEGER DEFAULT 0').run()
+  } catch { /* column already exists */ }
+
+  // Add embedding column to mcd_memory if missing (migration for existing DBs)
+  try {
+    db.prepare('ALTER TABLE mcd_memory ADD COLUMN embedding TEXT DEFAULT NULL').run()
   } catch { /* column already exists */ }
 }
 
@@ -1389,32 +1410,76 @@ export function deleteMcdConversation(id: number) {
   getDb().prepare('DELETE FROM mcd_conversations WHERE id=?').run(id)
 }
 
-/** Return the last N conversations with their most recent exchange (for memory injection). */
-export function getMcdConversationMemory(limit = 3): Array<{
-  title: string
-  summary: string
-  first_user: string
-  last_exchange: string
-}> {
-  const db = getDb()
-  const convs = db.prepare(
-    `SELECT id, title, summary FROM mcd_conversations
-     WHERE message_count > 0 ORDER BY updated_at DESC LIMIT ?`
-  ).all(limit) as Array<{ id: number; title: string; summary: string }>
+// ── MCD Memory ────────────────────────────────────────────────────────────
 
-  return convs.map(c => {
-    const msgs = db.prepare(
-      `SELECT role, content FROM mcd_messages WHERE conversation_id=? ORDER BY id ASC`
-    ).all(c.id) as Array<{ role: string; content: string }>
+export interface McdMemory {
+  id:             number
+  key:            string
+  value:          string
+  category:       string
+  importance:     number
+  embedding:      string | null   // JSON-serialised number[] from text-embedding-3-small
+  source_conv_id: number | null
+  created_at:     string
+  updated_at:     string
+}
 
-    const firstUser = msgs.find(m => m.role === 'user')?.content.slice(0, 200) ?? ''
-    // Last assistant + user pair
-    const lastAsst = [...msgs].reverse().find(m => m.role === 'assistant')?.content.slice(0, 400) ?? ''
-    const lastUser = [...msgs].reverse().find(m => m.role === 'user')?.content.slice(0, 150) ?? ''
-    const lastExchange = lastUser && lastAsst
-      ? `User: ${lastUser}\nMCD: ${lastAsst}`
-      : lastAsst || firstUser
+/** Upsert a memory fact. Embedding is stored as JSON string. */
+export function upsertMcdMemory(
+  key: string,
+  value: string,
+  category: string,
+  importance: 1 | 2 | 3,
+  sourceConvId?: number,
+  embedding?: string | null,
+): void {
+  getDb().prepare(`
+    INSERT INTO mcd_memory (key, value, category, importance, source_conv_id, embedding)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET
+      value          = excluded.value,
+      category       = excluded.category,
+      importance     = excluded.importance,
+      source_conv_id = excluded.source_conv_id,
+      embedding      = COALESCE(excluded.embedding, mcd_memory.embedding),
+      updated_at     = datetime('now')
+  `).run(key, value, category, importance, sourceConvId ?? null, embedding ?? null)
+}
 
-    return { title: c.title, summary: c.summary, first_user: firstUser, last_exchange: lastExchange }
-  })
+/** Return all memories (with embeddings) for vector retrieval. */
+export function getMcdMemoriesForRetrieval(): McdMemory[] {
+  return getDb().prepare(
+    `SELECT * FROM mcd_memory ORDER BY importance DESC, updated_at DESC`
+  ).all() as McdMemory[]
+}
+
+/** Static fallback: return all memories formatted as a block (used when embeddings not yet available). */
+export function getMcdMemoryBlock(): string {
+  const mems = getMcdMemoriesForRetrieval()
+  if (mems.length === 0) return ''
+  return formatMemoryBlock(mems)
+}
+
+export function formatMemoryBlock(mems: McdMemory[]): string {
+  const byCategory: Record<string, string[]> = {}
+  for (const m of mems) {
+    const cat = m.category.charAt(0).toUpperCase() + m.category.slice(1)
+    if (!byCategory[cat]) byCategory[cat] = []
+    byCategory[cat].push(m.importance === 3 ? `⚑ ${m.value}` : m.value)
+  }
+  const lines = Object.entries(byCategory)
+    .map(([cat, facts]) => `${cat}:\n${facts.map(f => `  - ${f}`).join('\n')}`)
+    .join('\n')
+  return `\n\nLEARNED CONTEXT (relevant facts from memory — use as background knowledge):\n${lines}`
+}
+
+/** Return recent raw messages for a conversation (for extraction input). */
+export function getMcdRecentMessages(
+  conversationId: number,
+  limit = 20,
+): Array<{ role: string; content: string }> {
+  return getDb().prepare(
+    `SELECT role, content FROM mcd_messages
+     WHERE conversation_id=? ORDER BY id DESC LIMIT ?`
+  ).all(conversationId, limit).reverse() as Array<{ role: string; content: string }>
 }

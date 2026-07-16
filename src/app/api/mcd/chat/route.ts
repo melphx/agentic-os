@@ -21,11 +21,13 @@ import { callGHLMcp }                from '@/lib/ghl-mcp'
 import { callSEOUtilsMcp }           from '@/lib/seoutils-mcp'
 import {
   addMcdMessage,
-  getMcdConversationMemory,
+  getMcdMemoryBlock,
   updateMcdConversationTitle,
   getMcdConversation,
   createMcdConversation,
 } from '@/lib/db'
+// getMcdMemoryBlock is used as fallback in getRelevantMemoriesBlock — keep import
+import { extractAndStoreMemory, getRelevantMemoriesBlock } from '@/lib/mcd-memory'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! })
 
@@ -1187,20 +1189,14 @@ export async function POST(req: NextRequest) {
 
   const dc = buildDateContext()
 
-  // ── Inject recent conversation memory ──────────────────────────────────────
-  let memoryBlock = ''
-  try {
-    const memories = getMcdConversationMemory(3)
-    if (memories.length > 0) {
-      const memLines = memories.map((m, i) =>
-        `[Session ${i + 1}] "${m.title}"\n${m.summary ? `Summary: ${m.summary}\n` : ''}Last exchange:\n${m.last_exchange}`
-      ).join('\n\n')
-      memoryBlock = `\n\nPAST CONVERSATION MEMORY (use for context — do not repeat back unless relevant):\n${memLines}`
-    }
-  } catch { /* memory injection is best-effort */ }
-
-  // Run non-GHL connectors in parallel (keyword-gated)
-  const nonGHLChunks = await fetchNonGHLData(message, dc)
+  // ── Run memory retrieval + non-GHL connectors in parallel ─────────────────
+  // getRelevantMemoriesBlock embeds the query and does cosine similarity retrieval.
+  // Falls back to static dump if no embeddings exist yet, '' if memory is empty.
+  // Run memory retrieval + non-GHL connectors in parallel (saves ~200ms)
+  const [memoryBlock, nonGHLChunks] = await Promise.all([
+    getRelevantMemoriesBlock(message, 15).catch(() => { try { return getMcdMemoryBlock() } catch { return '' } }),
+    fetchNonGHLData(message, dc),
+  ])
   const nonGHLContext = nonGHLChunks.join('\n\n---\n\n')
 
   const systemPrompt = buildSystemPrompt(dc, nonGHLContext) + memoryBlock
@@ -1348,7 +1344,11 @@ export async function POST(req: NextRequest) {
 
       // Persist the assistant response
       if (fullResponse && finalConvId) {
-        try { addMcdMessage(finalConvId, 'assistant', fullResponse, sources) } catch { /* non-fatal */ }
+        try {
+          addMcdMessage(finalConvId, 'assistant', fullResponse, sources)
+          // Fire-and-forget memory extraction — runs after response is delivered
+          extractAndStoreMemory(finalConvId).catch(() => {})
+        } catch { /* non-fatal */ }
       }
 
       controller.enqueue(encoder.encode('data: [DONE]\n\n'))
