@@ -1468,18 +1468,83 @@ function renderMcdText(text: string): React.ReactNode[] {
   return out
 }
 
+interface McdConv { id: number; title: string; message_count: number; updated_at: string }
+
+function relDate(iso: string): string {
+  const d    = new Date(iso + (iso.includes('T') ? '' : 'Z'))
+  const now  = new Date()
+  const days = Math.floor((now.getTime() - d.getTime()) / 86_400_000)
+  if (days === 0) return 'Today'
+  if (days === 1) return 'Yesterday'
+  if (days < 7)  return `${days}d ago`
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
 function MCDPanel() {
-  const [msgs, setMsgs]     = useState<McdChatMessage[]>([])
-  const [input, setInput]   = useState('')
-  const [loading, setLoading] = useState(false)
-  const [width, setWidth]   = useState(400)
+  const [msgs, setMsgs]         = useState<McdChatMessage[]>([])
+  const [input, setInput]       = useState('')
+  const [loading, setLoading]   = useState(false)
+  const [width, setWidth]       = useState(400)
   const [dragging, setDragging] = useState(false)
+
+  // Conversation history
+  const [convId, setConvId]         = useState<number | null>(null)
+  const [convs, setConvs]           = useState<McdConv[]>([])
+  const [showHistory, setShowHistory] = useState(false)
+  const [histLoad, setHistLoad]     = useState(false)
+
   const endRef   = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const startX   = useRef(0)
   const startW   = useRef(0)
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [msgs])
+
+  // Load conversation list on mount
+  useEffect(() => {
+    fetch('/api/mcd/conversations')
+      .then(r => r.json())
+      .then(d => setConvs(d.conversations ?? []))
+      .catch(() => {})
+  }, [])
+
+  // Helper: refresh conv list
+  async function refreshConvs() {
+    const d = await fetch('/api/mcd/conversations').then(r => r.json()).catch(() => ({}))
+    setConvs(d.conversations ?? [])
+  }
+
+  // Load a specific conversation's messages
+  async function loadConv(id: number) {
+    setHistLoad(true)
+    try {
+      const d = await fetch(`/api/mcd/conversations/${id}`).then(r => r.json())
+      const loaded: McdChatMessage[] = (d.messages ?? []).map((m: { role: 'user'|'assistant'; content: string; sources: string }) => ({
+        role:    m.role,
+        content: m.content,
+        sources: (() => { try { return JSON.parse(m.sources) } catch { return [] } })(),
+      }))
+      setMsgs(loaded)
+      setConvId(id)
+      setShowHistory(false)
+    } finally { setHistLoad(false) }
+  }
+
+  // Start a brand-new chat (client side — server will create the DB row on first send)
+  function newChat() {
+    setMsgs([])
+    setConvId(null)
+    setShowHistory(false)
+    setTimeout(() => inputRef.current?.focus(), 60)
+  }
+
+  // Delete a conversation
+  async function deleteConv(id: number, e: React.MouseEvent) {
+    e.stopPropagation()
+    await fetch(`/api/mcd/conversations/${id}`, { method: 'DELETE' })
+    if (convId === id) newChat()
+    setConvs(prev => prev.filter(c => c.id !== id))
+  }
 
   // ── Resize drag ────────────────────────────────────────────────────────────
   function onDragStart(e: React.MouseEvent) {
@@ -1544,7 +1609,7 @@ function MCDPanel() {
       const res = await fetch('/api/mcd/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: t, history }),
+        body: JSON.stringify({ message: t, history, conversation_id: convId }),
       })
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
 
@@ -1564,7 +1629,11 @@ function MCDPanel() {
           if (raw === '[DONE]') break
           try {
             const ev = JSON.parse(raw)
-            if (ev.type === 'sources') { sources = ev.sources || [] }
+            if (ev.type === 'sources') {
+              sources = ev.sources || []
+              // Capture server-assigned conversation_id (set on first message)
+              if (ev.conversation_id && !convId) setConvId(ev.conversation_id)
+            }
             if (ev.type === 'delta') {
               full += ev.content
               setMsgs(prev => { const n = [...prev]; const l = n[n.length-1]; if (l?.loading) n[n.length-1] = { ...l, content: full, sources, loading: true }; return n })
@@ -1574,6 +1643,9 @@ function MCDPanel() {
       }
 
       setMsgs(prev => { const n = [...prev]; const l = n[n.length-1]; if (l?.loading) n[n.length-1] = { role:'assistant', content: full || '(no response)', sources }; return n })
+
+      // Refresh conversation list after each completed exchange
+      if (!isMidTask(full)) refreshConvs().catch(() => {})
 
       // Auto-continue if MCD narrated mid-task without delivering results (max 4 retries)
       if (isMidTask(full) && autoRetries.current < 4) {
@@ -1611,27 +1683,81 @@ function MCDPanel() {
         onMouseLeave={e => { if (!dragging) (e.currentTarget as HTMLDivElement).style.background = 'transparent' }}
       />
       {/* Header */}
-      <div style={{ padding:'14px 16px', borderBottom:'1px solid rgba(99,102,241,0.1)', flexShrink:0 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10 }}>
-          <div style={{ width:30, height:30, borderRadius:8, background:'linear-gradient(135deg,#0ea5e9,#6366f1)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:15, boxShadow:'0 0 12px rgba(6,182,212,0.35)', flexShrink:0 }}>💬</div>
+      <div style={{ padding:'12px 14px 10px', borderBottom:'1px solid rgba(99,102,241,0.1)', flexShrink:0 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+          <div style={{ width:28, height:28, borderRadius:7, background:'linear-gradient(135deg,#0ea5e9,#6366f1)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:14, boxShadow:'0 0 10px rgba(6,182,212,0.3)', flexShrink:0 }}>💬</div>
           <div style={{ minWidth:0, flex:1 }}>
-            <div style={{ color:'white', fontWeight:700, fontSize:12, lineHeight:1.3 }}>Marketing and Conversions Director</div>
+            <div style={{ color:'white', fontWeight:700, fontSize:11, lineHeight:1.3 }}>Marketing and Conversions Director</div>
           </div>
-          {loading && <motion.div animate={{ rotate:360 }} transition={{ repeat:Infinity, duration:1, ease:'linear' }} style={{ flexShrink:0 }}><RefreshCw size={13} color="#0ea5e9" /></motion.div>}
+          <div style={{ display:'flex', gap:4, flexShrink:0, alignItems:'center' }}>
+            {loading && <motion.div animate={{ rotate:360 }} transition={{ repeat:Infinity, duration:1, ease:'linear' }}><RefreshCw size={12} color="#0ea5e9" /></motion.div>}
+            {/* History toggle */}
+            <button onClick={() => setShowHistory(h => !h)} title={showHistory ? 'Back to chat' : 'Chat history'}
+              style={{ background: showHistory ? 'rgba(14,165,233,0.15)' : 'none', border: showHistory ? '1px solid rgba(14,165,233,0.3)' : '1px solid transparent', borderRadius:6, padding:'3px 6px', cursor:'pointer', color: showHistory ? '#0ea5e9' : 'rgba(148,163,184,0.5)', fontSize:10, fontWeight:600, display:'flex', alignItems:'center', gap:3 }}>
+              {showHistory ? '← Chat' : '⏱ History'}
+            </button>
+            {/* New chat */}
+            <button onClick={newChat} title="New chat"
+              style={{ background:'none', border:'1px solid transparent', borderRadius:6, padding:'3px 6px', cursor:'pointer', color:'rgba(148,163,184,0.5)', fontSize:10, fontWeight:600 }}>
+              + New
+            </button>
+          </div>
         </div>
-        <div style={{ display:'flex', flexDirection:'column', gap:5, paddingLeft:40 }}>
-          <div style={{ display:'flex', flexWrap:'wrap', gap:'4px 10px' }}>
-            {['Leads','Discovery Calls','Pipeline','Call Quality','SEO Rankings','Traffic'].map(cap => (
-              <span key={cap} style={{ fontSize:10, color:'rgba(148,163,184,0.65)', fontWeight:500 }}>{cap}</span>
-            ))}
+        {!showHistory && (
+          <div style={{ display:'flex', flexDirection:'column', gap:4, paddingLeft:36 }}>
+            <div style={{ display:'flex', flexWrap:'wrap', gap:'3px 8px' }}>
+              {['Leads','Discovery Calls','Pipeline','Call Quality','SEO Rankings','Traffic'].map(cap => (
+                <span key={cap} style={{ fontSize:10, color:'rgba(148,163,184,0.55)', fontWeight:500 }}>{cap}</span>
+              ))}
+            </div>
+            <div style={{ display:'flex', flexWrap:'wrap', gap:'3px 5px' }}>
+              {['GHL','GA4','GSC','SEO Utils','Calls','Initiatives'].map(src => (
+                <span key={src} style={{ fontSize:9, padding:'1px 6px', borderRadius:4, background:'rgba(14,165,233,0.07)', color:'rgba(14,165,233,0.6)', border:'1px solid rgba(14,165,233,0.13)' }}>{src}</span>
+              ))}
+            </div>
           </div>
-          <div style={{ display:'flex', flexWrap:'wrap', gap:'4px 6px' }}>
-            {['GHL','GA4','GSC','SEO Utils','Calls Sheet','Initiatives'].map(src => (
-              <span key={src} style={{ fontSize:10, padding:'2px 7px', borderRadius:5, background:'rgba(14,165,233,0.08)', color:'rgba(14,165,233,0.65)', border:'1px solid rgba(14,165,233,0.15)' }}>{src}</span>
-            ))}
+        )}
+        {showHistory && convId && (
+          <div style={{ paddingLeft:36, fontSize:10, color:'rgba(14,165,233,0.7)', fontWeight:500 }}>
+            {convs.find(c => c.id === convId)?.title ?? 'Current chat'}
           </div>
-        </div>
+        )}
       </div>
+
+      {/* History panel (slides over the chat area) */}
+      {showHistory && (
+        <div style={{ position:'absolute', inset:0, top:88, background:'rgba(8,12,20,0.98)', zIndex:20, display:'flex', flexDirection:'column', overflowY:'auto' }}>
+          <div style={{ padding:'10px 12px', borderBottom:'1px solid rgba(99,102,241,0.08)' }}>
+            <button onClick={newChat}
+              style={{ width:'100%', background:'rgba(14,165,233,0.1)', border:'1px solid rgba(14,165,233,0.25)', borderRadius:8, padding:'8px 12px', color:'#0ea5e9', fontSize:12, fontWeight:600, cursor:'pointer', textAlign:'left' }}>
+              + New Chat
+            </button>
+          </div>
+          {histLoad && (
+            <div style={{ padding:20, textAlign:'center', color:'rgba(148,163,184,0.3)', fontSize:12 }}>Loading…</div>
+          )}
+          {!histLoad && convs.length === 0 && (
+            <div style={{ padding:20, textAlign:'center', color:'rgba(148,163,184,0.25)', fontSize:12 }}>No previous chats yet</div>
+          )}
+          {!histLoad && convs.map(c => (
+            <div key={c.id} onClick={() => loadConv(c.id)}
+              style={{ padding:'10px 14px', borderBottom:'1px solid rgba(99,102,241,0.06)', cursor:'pointer', display:'flex', alignItems:'center', gap:8, background: c.id === convId ? 'rgba(14,165,233,0.08)' : 'transparent', transition:'background 0.1s' }}
+              onMouseEnter={e => { if (c.id !== convId) (e.currentTarget as HTMLDivElement).style.background = 'rgba(255,255,255,0.03)' }}
+              onMouseLeave={e => { if (c.id !== convId) (e.currentTarget as HTMLDivElement).style.background = 'transparent' }}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ color: c.id === convId ? '#0ea5e9' : 'rgba(255,255,255,0.85)', fontSize:12, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{c.title}</div>
+                <div style={{ color:'rgba(148,163,184,0.4)', fontSize:10, marginTop:2 }}>{relDate(c.updated_at)} · {c.message_count} msg{c.message_count !== 1 ? 's' : ''}</div>
+              </div>
+              <button onClick={e => deleteConv(c.id, e)} title="Delete"
+                style={{ flexShrink:0, background:'none', border:'none', color:'rgba(148,163,184,0.25)', cursor:'pointer', padding:'2px 4px', fontSize:14, lineHeight:1, borderRadius:4 }}
+                onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.color = '#f43f5e'}
+                onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.color = 'rgba(148,163,184,0.25)'}>
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Messages */}
       <div style={{ flex:1, overflowY:'auto', overflowX:'hidden', padding:'14px 14px', display:'flex', flexDirection:'column', gap:12 }}>

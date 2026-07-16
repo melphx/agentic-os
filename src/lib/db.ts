@@ -218,6 +218,30 @@ function initSchema(db: Database.Database) {
     // Migration already applied or not needed
   }
 
+  // ── MCD Conversations + Messages ──────────────────────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS mcd_conversations (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      title       TEXT    NOT NULL DEFAULT 'New Chat',
+      summary     TEXT    NOT NULL DEFAULT '',
+      pinned      INTEGER NOT NULL DEFAULT 0,
+      message_count INTEGER NOT NULL DEFAULT 0,
+      created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+      updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS mcd_messages (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      conversation_id INTEGER NOT NULL REFERENCES mcd_conversations(id) ON DELETE CASCADE,
+      role            TEXT    NOT NULL CHECK(role IN ('user','assistant')),
+      content         TEXT    NOT NULL,
+      sources         TEXT    NOT NULL DEFAULT '[]',
+      created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_mcd_messages_conv ON mcd_messages(conversation_id);
+  `)
+
   // Add email_sent to mcd_reports if missing (safe no-op on fresh DBs)
   try {
     db.prepare('ALTER TABLE mcd_reports ADD COLUMN email_sent INTEGER DEFAULT 0').run()
@@ -1286,4 +1310,111 @@ export function markMcdReportDelivered(id: number) {
 
 export function markMcdReportEmailed(id: number) {
   getDb().prepare('UPDATE mcd_reports SET email_sent=1 WHERE id=?').run(id)
+}
+
+// ── MCD Conversations ──────────────────────────────────────────────────────
+
+export interface McdConversation {
+  id:            number
+  title:         string
+  summary:       string
+  pinned:        number
+  message_count: number
+  created_at:    string
+  updated_at:    string
+}
+
+export interface McdMessage {
+  id:              number
+  conversation_id: number
+  role:            'user' | 'assistant'
+  content:         string
+  sources:         string   // JSON array string
+  created_at:      string
+}
+
+export function createMcdConversation(title = 'New Chat'): McdConversation {
+  const db = getDb()
+  const info = db.prepare(
+    `INSERT INTO mcd_conversations (title) VALUES (?)`
+  ).run(title)
+  return db.prepare('SELECT * FROM mcd_conversations WHERE id=?').get(info.lastInsertRowid) as McdConversation
+}
+
+export function getMcdConversations(limit = 50): McdConversation[] {
+  return getDb().prepare(
+    `SELECT * FROM mcd_conversations ORDER BY pinned DESC, updated_at DESC LIMIT ?`
+  ).all(limit) as McdConversation[]
+}
+
+export function getMcdConversation(id: number): McdConversation | null {
+  return (getDb().prepare('SELECT * FROM mcd_conversations WHERE id=?').get(id) as McdConversation) ?? null
+}
+
+export function getMcdMessages(conversationId: number): McdMessage[] {
+  return getDb().prepare(
+    `SELECT * FROM mcd_messages WHERE conversation_id=? ORDER BY id ASC`
+  ).all(conversationId) as McdMessage[]
+}
+
+export function addMcdMessage(
+  conversationId: number,
+  role: 'user' | 'assistant',
+  content: string,
+  sources: string[] = [],
+): McdMessage {
+  const db = getDb()
+  const info = db.prepare(
+    `INSERT INTO mcd_messages (conversation_id, role, content, sources) VALUES (?,?,?,?)`
+  ).run(conversationId, role, content, JSON.stringify(sources))
+  db.prepare(
+    `UPDATE mcd_conversations SET message_count=message_count+1, updated_at=datetime('now') WHERE id=?`
+  ).run(conversationId)
+  return db.prepare('SELECT * FROM mcd_messages WHERE id=?').get(info.lastInsertRowid) as McdMessage
+}
+
+export function updateMcdConversationTitle(id: number, title: string) {
+  getDb().prepare(
+    `UPDATE mcd_conversations SET title=?, updated_at=datetime('now') WHERE id=?`
+  ).run(title, id)
+}
+
+export function updateMcdConversationSummary(id: number, summary: string) {
+  getDb().prepare(
+    `UPDATE mcd_conversations SET summary=? WHERE id=?`
+  ).run(summary, id)
+}
+
+export function deleteMcdConversation(id: number) {
+  getDb().prepare('DELETE FROM mcd_conversations WHERE id=?').run(id)
+}
+
+/** Return the last N conversations with their most recent exchange (for memory injection). */
+export function getMcdConversationMemory(limit = 3): Array<{
+  title: string
+  summary: string
+  first_user: string
+  last_exchange: string
+}> {
+  const db = getDb()
+  const convs = db.prepare(
+    `SELECT id, title, summary FROM mcd_conversations
+     WHERE message_count > 0 ORDER BY updated_at DESC LIMIT ?`
+  ).all(limit) as Array<{ id: number; title: string; summary: string }>
+
+  return convs.map(c => {
+    const msgs = db.prepare(
+      `SELECT role, content FROM mcd_messages WHERE conversation_id=? ORDER BY id ASC`
+    ).all(c.id) as Array<{ role: string; content: string }>
+
+    const firstUser = msgs.find(m => m.role === 'user')?.content.slice(0, 200) ?? ''
+    // Last assistant + user pair
+    const lastAsst = [...msgs].reverse().find(m => m.role === 'assistant')?.content.slice(0, 400) ?? ''
+    const lastUser = [...msgs].reverse().find(m => m.role === 'user')?.content.slice(0, 150) ?? ''
+    const lastExchange = lastUser && lastAsst
+      ? `User: ${lastUser}\nMCD: ${lastAsst}`
+      : lastAsst || firstUser
+
+    return { title: c.title, summary: c.summary, first_user: firstUser, last_exchange: lastExchange }
+  })
 }

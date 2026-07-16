@@ -18,7 +18,14 @@ import { spawn }                     from 'child_process'
 import pathModule                    from 'path'
 import OpenAI                        from 'openai'
 import { callGHLMcp }                from '@/lib/ghl-mcp'
-import { callSEOUtilsMcp }          from '@/lib/seoutils-mcp'
+import { callSEOUtilsMcp }           from '@/lib/seoutils-mcp'
+import {
+  addMcdMessage,
+  getMcdConversationMemory,
+  updateMcdConversationTitle,
+  getMcdConversation,
+  createMcdConversation,
+} from '@/lib/db'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! })
 
@@ -1145,22 +1152,58 @@ Method 2 — Pipeline opportunity count (fallback if tag filter fails or returns
 // ── Route handler ─────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  const { message, history = [] } = await req.json() as {
+  const body = await req.json() as {
     message: string
     history: { role: 'user' | 'assistant'; content: string }[]
+    conversation_id?: number
   }
+  const { message, history = [], conversation_id } = body
 
   if (!message?.trim()) {
     return NextResponse.json({ error: 'message is required' }, { status: 400 })
   }
 
+  // ── Resolve / create conversation ─────────────────────────────────────────
+  let convId: number | null = conversation_id ?? null
+  if (convId) {
+    // Verify it actually exists (guard against stale IDs)
+    const existing = getMcdConversation(convId)
+    if (!existing) convId = null
+  }
+  if (!convId) {
+    const newConv = createMcdConversation('New Chat')
+    convId = newConv.id
+  }
+
+  // Save the user message immediately
+  addMcdMessage(convId, 'user', message.trim())
+
+  // Auto-title on first real message (if title is still "New Chat")
+  const conv = getMcdConversation(convId)
+  if (conv && (conv.title === 'New Chat' || conv.message_count <= 2)) {
+    const autoTitle = message.trim().slice(0, 60) + (message.trim().length > 60 ? '…' : '')
+    updateMcdConversationTitle(convId, autoTitle)
+  }
+
   const dc = buildDateContext()
+
+  // ── Inject recent conversation memory ──────────────────────────────────────
+  let memoryBlock = ''
+  try {
+    const memories = getMcdConversationMemory(3)
+    if (memories.length > 0) {
+      const memLines = memories.map((m, i) =>
+        `[Session ${i + 1}] "${m.title}"\n${m.summary ? `Summary: ${m.summary}\n` : ''}Last exchange:\n${m.last_exchange}`
+      ).join('\n\n')
+      memoryBlock = `\n\nPAST CONVERSATION MEMORY (use for context — do not repeat back unless relevant):\n${memLines}`
+    }
+  } catch { /* memory injection is best-effort */ }
 
   // Run non-GHL connectors in parallel (keyword-gated)
   const nonGHLChunks = await fetchNonGHLData(message, dc)
   const nonGHLContext = nonGHLChunks.join('\n\n---\n\n')
 
-  const systemPrompt = buildSystemPrompt(dc, nonGHLContext)
+  const systemPrompt = buildSystemPrompt(dc, nonGHLContext) + memoryBlock
 
   // Build initial messages
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
@@ -1267,13 +1310,18 @@ export async function POST(req: NextRequest) {
 
   const encoder = new TextEncoder()
 
+  const finalConvId = convId  // capture for closure
+
   const stream = new ReadableStream({
     async start(controller) {
+      const sources = Array.from(sourcesHit)
+
       // Emit source badges first
       controller.enqueue(encoder.encode(
-        `data: ${JSON.stringify({ type: 'sources', sources: Array.from(sourcesHit) })}\n\n`
+        `data: ${JSON.stringify({ type: 'sources', sources, conversation_id: finalConvId })}\n\n`
       ))
 
+      let fullResponse = ''
       try {
         // Final streaming call — tools disabled so we always get prose
         const streamCompletion = await openai.chat.completions.create({
@@ -1286,6 +1334,7 @@ export async function POST(req: NextRequest) {
         for await (const chunk of streamCompletion) {
           const delta = chunk.choices[0]?.delta?.content
           if (delta) {
+            fullResponse += delta
             controller.enqueue(encoder.encode(
               `data: ${JSON.stringify({ type: 'delta', content: delta })}\n\n`
             ))
@@ -1295,6 +1344,11 @@ export async function POST(req: NextRequest) {
         controller.enqueue(encoder.encode(
           `data: ${JSON.stringify({ type: 'error', error: (e as Error).message })}\n\n`
         ))
+      }
+
+      // Persist the assistant response
+      if (fullResponse && finalConvId) {
+        try { addMcdMessage(finalConvId, 'assistant', fullResponse, sources) } catch { /* non-fatal */ }
       }
 
       controller.enqueue(encoder.encode('data: [DONE]\n\n'))
