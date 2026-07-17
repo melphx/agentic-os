@@ -1470,6 +1470,12 @@ function renderMcdText(text: string): React.ReactNode[] {
 
 interface McdConv { id: number; title: string; message_count: number; updated_at: string }
 
+interface McdMemoryItem {
+  id: number; key: string; value: string; category: string
+  importance: 1 | 2 | 3; embedding: string | null
+  source_conv_id: number | null; updated_at: string
+}
+
 function relDate(iso: string): string {
   const d    = new Date(iso + (iso.includes('T') ? '' : 'Z'))
   const now  = new Date()
@@ -1492,6 +1498,14 @@ function MCDPanel() {
   const [convs, setConvs]           = useState<McdConv[]>([])
   const [showHistory, setShowHistory] = useState(false)
   const [histLoad, setHistLoad]     = useState(false)
+
+  // Memory viewer
+  const [showMemory, setShowMemory]   = useState(false)
+  const [memoryData, setMemoryData]   = useState<McdMemoryItem[]>([])
+  const [memLoad, setMemLoad]         = useState(false)
+  const [editingId, setEditingId]     = useState<number | null>(null)
+  const [editVal, setEditVal]         = useState('')
+  const [editImp, setEditImp]         = useState<1|2|3>(2)
 
   const endRef   = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -1544,6 +1558,34 @@ function MCDPanel() {
     await fetch(`/api/mcd/conversations/${id}`, { method: 'DELETE' })
     if (convId === id) newChat()
     setConvs(prev => prev.filter(c => c.id !== id))
+  }
+
+  // Memory viewer
+  async function openMemory() {
+    setShowMemory(m => !m)
+    setShowHistory(false)
+    if (!showMemory) {
+      setMemLoad(true)
+      try {
+        const d = await fetch('/api/mcd/memory').then(r => r.json())
+        setMemoryData(d.memories ?? [])
+      } finally { setMemLoad(false) }
+    }
+  }
+
+  async function saveMemory(id: number) {
+    await fetch(`/api/mcd/memory/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: editVal, importance: editImp }),
+    })
+    setMemoryData(prev => prev.map(m => m.id === id ? { ...m, value: editVal, importance: editImp } : m))
+    setEditingId(null)
+  }
+
+  async function deleteMemoryItem(id: number) {
+    await fetch(`/api/mcd/memory/${id}`, { method: 'DELETE' })
+    setMemoryData(prev => prev.filter(m => m.id !== id))
   }
 
   // ── Resize drag ────────────────────────────────────────────────────────────
@@ -1692,9 +1734,14 @@ function MCDPanel() {
           <div style={{ display:'flex', gap:4, flexShrink:0, alignItems:'center' }}>
             {loading && <motion.div animate={{ rotate:360 }} transition={{ repeat:Infinity, duration:1, ease:'linear' }}><RefreshCw size={12} color="#0ea5e9" /></motion.div>}
             {/* History toggle */}
-            <button onClick={() => setShowHistory(h => !h)} title={showHistory ? 'Back to chat' : 'Chat history'}
+            <button onClick={() => { setShowHistory(h => !h); setShowMemory(false) }} title={showHistory ? 'Back to chat' : 'Chat history'}
               style={{ background: showHistory ? 'rgba(14,165,233,0.15)' : 'none', border: showHistory ? '1px solid rgba(14,165,233,0.3)' : '1px solid transparent', borderRadius:6, padding:'3px 6px', cursor:'pointer', color: showHistory ? '#0ea5e9' : 'rgba(148,163,184,0.5)', fontSize:10, fontWeight:600, display:'flex', alignItems:'center', gap:3 }}>
               {showHistory ? '← Chat' : '⏱ History'}
+            </button>
+            {/* Memory viewer */}
+            <button onClick={openMemory} title={showMemory ? 'Back to chat' : 'Memory'}
+              style={{ background: showMemory ? 'rgba(139,92,246,0.15)' : 'none', border: showMemory ? '1px solid rgba(139,92,246,0.35)' : '1px solid transparent', borderRadius:6, padding:'3px 6px', cursor:'pointer', color: showMemory ? '#a78bfa' : 'rgba(148,163,184,0.5)', fontSize:13, lineHeight:1 }}>
+              🧠
             </button>
             {/* New chat */}
             <button onClick={newChat} title="New chat"
@@ -1756,6 +1803,117 @@ function MCDPanel() {
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Memory viewer panel */}
+      {showMemory && (
+        <div style={{ position:'absolute', inset:0, top:88, background:'rgba(8,12,20,0.98)', zIndex:20, display:'flex', flexDirection:'column', overflowY:'auto' }}>
+          {/* Panel header */}
+          <div style={{ padding:'10px 14px', borderBottom:'1px solid rgba(139,92,246,0.12)', display:'flex', alignItems:'center', gap:6 }}>
+            <span style={{ fontSize:14 }}>🧠</span>
+            <span style={{ color:'rgba(167,139,250,0.9)', fontSize:11, fontWeight:700, flex:1 }}>What MCD Remembers</span>
+            <span style={{ color:'rgba(148,163,184,0.35)', fontSize:10 }}>{memoryData.length} fact{memoryData.length !== 1 ? 's' : ''}</span>
+          </div>
+
+          {memLoad && (
+            <div style={{ padding:24, textAlign:'center', color:'rgba(148,163,184,0.3)', fontSize:12 }}>Loading memories…</div>
+          )}
+          {!memLoad && memoryData.length === 0 && (
+            <div style={{ padding:24, textAlign:'center', color:'rgba(148,163,184,0.25)', fontSize:12 }}>
+              No memories yet — they'll build up as you chat.
+            </div>
+          )}
+
+          {!memLoad && (() => {
+            // Group by category
+            const CAT_COLOR: Record<string, string> = {
+              preference: '#0ea5e9', metric: '#10b981', person: '#f59e0b',
+              decision: '#6366f1', initiative: '#8b5cf6', context: '#64748b', constraint: '#f43f5e',
+            }
+            const groups: Record<string, McdMemoryItem[]> = {}
+            for (const m of memoryData) {
+              if (!groups[m.category]) groups[m.category] = []
+              groups[m.category].push(m)
+            }
+            return Object.entries(groups).map(([cat, items]) => (
+              <div key={cat}>
+                {/* Category header */}
+                <div style={{ padding:'8px 14px 4px', display:'flex', alignItems:'center', gap:6 }}>
+                  <div style={{ width:6, height:6, borderRadius:'50%', background: CAT_COLOR[cat] ?? '#64748b', flexShrink:0 }} />
+                  <span style={{ color: CAT_COLOR[cat] ?? '#64748b', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:0.8 }}>{cat}</span>
+                </div>
+
+                {items.map(mem => {
+                  const isEditing = editingId === mem.id
+                  return (
+                    <div key={mem.id}
+                      style={{ margin:'0 10px 6px', padding:'9px 11px', borderRadius:8, background:'rgba(255,255,255,0.03)', border:'1px solid rgba(99,102,241,0.08)', position:'relative' }}>
+
+                      {/* Importance dots + flag */}
+                      <div style={{ display:'flex', alignItems:'center', gap:4, marginBottom:5 }}>
+                        {[1,2,3].map(n => (
+                          <div key={n} style={{ width:6, height:6, borderRadius:'50%', background: n <= mem.importance ? (CAT_COLOR[mem.category] ?? '#6366f1') : 'rgba(99,102,241,0.12)' }} />
+                        ))}
+                        {mem.importance === 3 && <span style={{ fontSize:10, color:'#fbbf24', marginLeft:2 }}>⚑</span>}
+                        <span style={{ flex:1 }} />
+                        <span style={{ color:'rgba(148,163,184,0.3)', fontSize:9 }}>
+                          {mem.updated_at ? new Date(mem.updated_at + (mem.updated_at.includes('T') ? '' : 'Z')).toLocaleDateString('en-US', { month:'short', day:'numeric' }) : ''}
+                        </span>
+                      </div>
+
+                      {/* Value — editable */}
+                      {isEditing ? (
+                        <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                          <textarea
+                            value={editVal}
+                            onChange={e => setEditVal(e.target.value)}
+                            rows={3}
+                            style={{ width:'100%', background:'rgba(0,0,0,0.3)', border:'1px solid rgba(139,92,246,0.4)', borderRadius:6, padding:'6px 8px', color:'white', fontSize:11, resize:'vertical', fontFamily:'inherit', boxSizing:'border-box' }}
+                          />
+                          {/* Importance selector */}
+                          <div style={{ display:'flex', gap:4, alignItems:'center' }}>
+                            <span style={{ color:'rgba(148,163,184,0.5)', fontSize:10 }}>Importance:</span>
+                            {([1,2,3] as const).map(n => (
+                              <button key={n} onClick={() => setEditImp(n)}
+                                style={{ width:22, height:22, borderRadius:5, border:'1px solid', borderColor: editImp === n ? (CAT_COLOR[mem.category] ?? '#6366f1') : 'rgba(99,102,241,0.2)', background: editImp === n ? `${CAT_COLOR[mem.category] ?? '#6366f1'}22` : 'transparent', color: editImp === n ? (CAT_COLOR[mem.category] ?? '#a5b4fc') : 'rgba(148,163,184,0.4)', fontSize:10, fontWeight:700, cursor:'pointer' }}>
+                                {n}
+                              </button>
+                            ))}
+                            <span style={{ flex:1 }} />
+                            <button onClick={() => saveMemory(mem.id)}
+                              style={{ padding:'2px 10px', borderRadius:5, border:'1px solid rgba(139,92,246,0.4)', background:'rgba(139,92,246,0.15)', color:'#a78bfa', fontSize:10, fontWeight:600, cursor:'pointer' }}>
+                              Save
+                            </button>
+                            <button onClick={() => setEditingId(null)}
+                              style={{ padding:'2px 8px', borderRadius:5, border:'1px solid rgba(99,102,241,0.15)', background:'transparent', color:'rgba(148,163,184,0.4)', fontSize:10, cursor:'pointer' }}>
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ display:'flex', gap:6, alignItems:'flex-start' }}>
+                          <p
+                            onClick={() => { setEditingId(mem.id); setEditVal(mem.value); setEditImp(mem.importance) }}
+                            title="Click to edit"
+                            style={{ flex:1, color:'rgba(226,232,240,0.85)', fontSize:11, lineHeight:1.6, margin:0, cursor:'text', wordBreak:'break-word' }}>
+                            {mem.value}
+                          </p>
+                          <button onClick={() => deleteMemoryItem(mem.id)} title="Delete fact"
+                            style={{ flexShrink:0, background:'none', border:'none', color:'rgba(148,163,184,0.2)', cursor:'pointer', padding:'0 2px', fontSize:14, lineHeight:1 }}
+                            onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.color = '#f43f5e'}
+                            onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.color = 'rgba(148,163,184,0.2)'}>
+                            ×
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            ))
+          })()}
+          <div style={{ height:16 }} />
         </div>
       )}
 

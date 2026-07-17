@@ -1473,6 +1473,25 @@ export function formatMemoryBlock(mems: McdMemory[]): string {
   return `\n\nLEARNED CONTEXT (relevant facts from memory — use as background knowledge):\n${lines}`
 }
 
+/** Update a memory fact's value and/or importance. Re-embedding handled separately. */
+export function updateMcdMemory(
+  id: number,
+  value: string,
+  importance: 1 | 2 | 3,
+): void {
+  getDb().prepare(
+    `UPDATE mcd_memory
+     SET value=?, importance=?, embedding=NULL, updated_at=datetime('now')
+     WHERE id=?`
+  ).run(value.slice(0, 500), importance, id)
+  // embedding set to NULL so it gets re-embedded on next retrieval pass
+}
+
+/** Delete a single memory fact. */
+export function deleteMcdMemory(id: number): void {
+  getDb().prepare('DELETE FROM mcd_memory WHERE id=?').run(id)
+}
+
 /** Return recent raw messages for a conversation (for extraction input). */
 export function getMcdRecentMessages(
   conversationId: number,
