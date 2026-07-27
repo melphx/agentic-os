@@ -4249,7 +4249,7 @@ function EmailHealthReportView() {
       )}
 
       {report && !report.in_progress && !report.no_baseline && (
-        <div style={{ maxWidth:1100, margin:'0 auto', padding:'20px 24px 60px' }}>
+        <div style={{ maxWidth:1400, margin:'0 auto', padding:'20px 24px 60px' }}>
 
           {/* ── 1. SCORE HERO ── */}
           <div style={{ background:`linear-gradient(135deg,${sc}18,rgba(15,20,35,0.95))`, border:`1px solid ${sc}30`, borderRadius:16, padding:'24px 28px', marginBottom:14, display:'flex', alignItems:'center', gap:24 }}>
@@ -4539,7 +4539,7 @@ function buildEmailReportHTML(report: any, pm: any): string {
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Email Health Report - ${report.month_label}</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:#080c14;color:#e2e8f0;font-family:Inter,system-ui,sans-serif;padding:32px;max-width:1100px;margin:0 auto}
+body{background:#080c14;color:#e2e8f0;font-family:Inter,system-ui,sans-serif;padding:32px;max-width:1400px;margin:0 auto}
 .card{background:rgba(15,20,35,.9);border:1px solid rgba(99,102,241,.15);border-radius:14px;padding:20px;margin:14px 0}
 .title{color:#a5b4fc;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:12px}
 p{color:rgba(148,163,184,.7);line-height:1.7;margin-bottom:8px}

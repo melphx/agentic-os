@@ -16,6 +16,58 @@ const GHL = (apiKey: string) => ({
   'Authorization': `Bearer ${apiKey}`,
   'Version': '2021-07-28',
 })
+const GHL23 = (apiKey: string) => ({
+  'Authorization': `Bearer ${apiKey}`,
+  'Version': '2023-02-21',
+})
+
+async function fetchWorkflowCampaigns(apiKey: string, locationId: string) {
+  try {
+    // Paginate through all workflow campaigns
+    let all: any[] = []
+    let offset = 0, total = Infinity
+    while (all.length < total) {
+      const res = await fetch(
+        `https://services.leadconnectorhq.com/emails/public/v2/locations/${locationId}/campaigns/workflows?limit=20&offset=${offset}`,
+        { headers: GHL23(apiKey), signal: AbortSignal.timeout(15000), cache: 'no-store' }
+      )
+      if (!res.ok) break
+      const d = await res.json() as Record<string, any>
+      if (typeof d.total === 'number') total = d.total
+      const batch: any[] = d.campaigns || []
+      if (!batch.length) break
+      all = all.concat(batch)
+      offset += batch.length
+    }
+    // Deduplicate
+    const seen = new Set<string>()
+    const campaigns = all.filter((c: any) => { const id = c.sourceId || c.id; if (seen.has(id)) return false; seen.add(id); return true })
+    // Fetch stats for each in parallel
+    const results = await Promise.all(campaigns.map(async (c: any) => {
+      try {
+        const sourceId = c.sourceId || c.id
+        const res = await fetch(
+          `https://services.leadconnectorhq.com/emails/public/v2/locations/${locationId}/campaigns/stats/workflow-campaigns/${sourceId}`,
+          { headers: GHL23(apiKey), signal: AbortSignal.timeout(10000), cache: 'no-store' }
+        )
+        if (!res.ok) return null
+        const d = await res.json() as Record<string, any>
+        const s = d.stats || {}
+        if (!s.sent || s.sent === 0) return null
+        return {
+          name:       c.name || sourceId,
+          sent:       s.sent        || 0,
+          opened:     s.opened      || 0,
+          clicked:    s.clicked     || 0,
+          bounced:    s.permanentFail || s.bounced || 0,
+          openRate:   s.sent > 0 ? parseFloat(((s.opened  || 0) / s.sent * 100).toFixed(1)) : 0,
+          clickRate:  s.sent > 0 ? parseFloat(((s.clicked || 0) / s.sent * 100).toFixed(1)) : 0,
+        }
+      } catch { return null }
+    }))
+    return results.filter(Boolean)
+  } catch { return [] }
+}
 
 // ── Tag count ──────────────────────────────────────────────────────────────
 async function countByTag(apiKey: string, locationId: string, tag: string): Promise<number> {
@@ -159,12 +211,13 @@ export async function POST(req: NextRequest) {
   const prevBaseline = getEmailHealthBaseline(prevMonth)
 
   try {
-    // ── Fetch live list data from GHL ───────────────────────────────────────
+    // ── Fetch live list data + workflow campaigns from GHL ──────────────────
     const [
       total,
       green, red, catchall, suspicious, freeEmail, notFound, bouncedTag, spamTag,
       neverEngaged, slipping, neverSent,
       google, microsoft, yahoo, otherProvider,
+      workflows,
     ] = await Promise.all([
       getTotalContacts(apiKey, locationId),
       countByTag(apiKey, locationId, 'hti status = green (send responsibly)'),
@@ -182,6 +235,7 @@ export async function POST(req: NextRequest) {
       countByTag(apiKey, locationId, 'hti email provider check = is microsoft'),
       countByTag(apiKey, locationId, 'hti email provider check = is yahoo'),
       countByTag(apiKey, locationId, 'hti email provider check = is other email provider'),
+      fetchWorkflowCampaigns(apiKey, locationId),
     ])
 
     // ── Scores ─────────────────────────────────────────────────────────────
@@ -282,18 +336,28 @@ Invalid/Not found: ${notFound.toLocaleString()} | Bounced: ${bouncedTag.toLocale
       messages: [
         {
           role: 'system',
-          content: `You are writing a monthly email health report for Phoenix Home Remodeling (home remodeling, Phoenix AZ). Match the exact tone and format of HitTheInbox reports — direct, business-focused, specific numbers, revenue-impact language. Return valid JSON only.`,
+          content: `You are writing a monthly email health report for Phoenix Home Remodeling (home remodeling, Phoenix AZ).
+
+TONE & FORMAT: Match HitTheInbox (HTI) exactly — direct, revenue-focused, confident, specific numbers. No fluff. Every sentence earns its place.
+
+CRITICAL RULES:
+- The ONLY contacts that matter for revenue analysis are the ones actually MAILED (existing_mailed + new_leads_mailed). Do NOT frame total database size, red/DND counts, never-engaged, or never-sent totals as revenue problems — those contacts are already suppressed and have zero effect on deliverability or revenue.
+- Problems must only come from mailed contacts: open rate, click rate, bounce rate, spam complaints, or deliverability signals for the actual sends that happened.
+- Never cite the total contact count or red/DND population as a problem. List hygiene metrics (never-engaged, red, never-sent) belong only in the List Health section, not in problems.
+
+Return valid JSON only.`,
         },
         {
           role: 'user',
-          content: `Generate the email health analysis. Return JSON with exactly these keys:
-- executive_summary: 3-4 sentence paragraph matching HTI style. Start with "Your Email Health Score is X/999...". Mention the relaxed score, score change vs prior month, and one key positive and one key concern.
-- good_news: array of 3-5 strings — positive findings (like domain not on blocklists, DMARC compliance, high relaxed score, etc.)
-- problems: array of objects {title, count, description} — specific issues with exact subscriber counts and business impact
-- actions_new_contacts: array of 3-4 specific action strings for new contacts who didn't engage
-- actions_existing_contacts: array of 4-5 specific action strings for existing contact segments (drive the click, re-engagement, opt-out)
-- actions_maintenance: array of 2-3 strings — ongoing best practices
-- analyst_note: 1-2 sentences of the single most important insight from this month's data
+          content: `Generate the email health analysis for ${monthLabel(month)}. Return JSON with exactly these keys:
+
+- executive_summary: 3-4 sentences. HTI style — lead with the score ("Your Email Health Score for ${monthLabel(month)} is ${strictScore}/999 (${scoreLabel(strictScore)})."), then mention score change vs prior month, the open rate and click rate from the ${existingMailed + newMailed} contacts mailed, and one forward-looking sentence. Be specific with numbers.
+- good_news: array of 3-4 strings — genuinely positive findings from the mailed contacts or list signals (strong open rate, low bounce, domain health, etc.)
+- problems: array of objects {title, description} — ONLY problems from the actual sends: low click rate, unopened contacts, re-engagement need. Max 3 items. No DND/red/never-sent framing.
+- actions_new_contacts: array of 3-4 action strings for the ${newMailed} new contacts who didn't click
+- actions_existing_contacts: array of 4-5 action strings for existing contact segments to drive clicks and re-engagement
+- actions_maintenance: array of 2-3 ongoing best practice strings
+- analyst_note: 1-2 sentences — the single most important insight from this month's actual sends
 
 Data:\n${dataCtx}`,
         },
@@ -373,6 +437,9 @@ Data:\n${dataCtx}`,
 
       // Providers (live snapshot)
       providers: { google, microsoft, yahoo, other: otherProvider, scanned },
+
+      // Workflow campaign details (live snapshot)
+      workflows,
 
       analysis,
     }
