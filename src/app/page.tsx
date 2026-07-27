@@ -4267,7 +4267,7 @@ function EmailHealthReportView() {
       )}
 
       {report && !report.in_progress && !report.no_baseline && (
-        <div style={{ maxWidth:1400, margin:'0 auto', padding:'20px 24px 60px' }}>
+        <div style={{ maxWidth:1700, margin:'0 auto', padding:'20px 32px 60px' }}>
 
           {/* ── 1. SCORE HERO ── */}
           <div style={{ background:`linear-gradient(135deg,${sc}18,rgba(15,20,35,0.95))`, border:`1px solid ${sc}30`, borderRadius:16, padding:'24px 28px', marginBottom:14, display:'flex', alignItems:'center', gap:24 }}>
@@ -4433,7 +4433,7 @@ function EmailHealthReportView() {
               { label:'Green — Safe to Send', sub:'Engaged within last 30 days', count:report.list.green, color:'#10b981' },
               { label:'Liabilities — Slipping', sub:'No engagement in 90-365 days', count:report.list.slipping, color:'#f59e0b' },
               { label:'Worst Liabilities', sub:'Never engaged or over 1 year', count:report.list.never_engaged, color:'#f43f5e' },
-              { label:'Never Sent', sub:'Have not received any email', count:report.list.never_sent, color:'rgba(148,163,184,0.3)' },
+              { label:'Never Sent', sub:'Have not received any email', count:report.list.never_sent, color:'#475569' },
             ].map(s=>(
               <div key={s.label} style={{ display:'flex', alignItems:'center', gap:10, padding:'7px 0', borderBottom:'1px solid rgba(99,102,241,0.06)' }}>
                 <div style={{ width:9, height:9, borderRadius:'50%', background:s.color, flexShrink:0 }}/>
@@ -4499,7 +4499,7 @@ function EmailHealthReportView() {
                 <div>
                   <div style={{ color:'rgba(148,163,184,0.4)', fontSize:10, marginBottom:6 }}>Domain Reputation</div>
                   <div style={{ fontSize:22, fontWeight:700, color: postmasterData?.domain_reputation==='HIGH'?'#10b981':'rgba(148,163,184,0.5)', marginBottom:10 }}>{postmasterData?.domain_reputation||'UNKNOWN'}</div>
-                  {[['Gmail Spam Rate', postmasterData?.spam_rate!=null?((postmasterData.spam_rate*100).toFixed(3)+'%'):null],['Inbox Rate', postmasterData?.inbox_placement_rate!=null?((postmasterData.inbox_placement_rate*100).toFixed(1)+'%'):null]].map(([l,v])=>(
+                  {[['Gmail Spam Rate', postmasterData?.spam_rate!=null?((postmasterData.spam_rate*100).toFixed(3)+'%'):null],['Inbox Rate', postmasterData?.inbox_placement_rate!=null?((postmasterData.inbox_placement_rate*100).toFixed(1)+'%'):null]].filter(([,v])=>v!==null).map(([l,v])=>(
                     <div key={l as string} style={{ display:'flex', justifyContent:'space-between', padding:'5px 0', borderBottom:'1px solid rgba(99,102,241,0.06)' }}>
                       <span style={{ color:'rgba(148,163,184,0.5)', fontSize:12 }}>{l as string}</span>
                       <span style={{ color: v?'#10b981':'rgba(148,163,184,0.4)', fontWeight:700, fontSize:12 }}>{(v as string)||'N/A'}</span>
@@ -4520,7 +4520,7 @@ function EmailHealthReportView() {
                   {report.workflows_are_monthly ? `📅 ${report.month_label}` : 'All-time cumulative'}
                 </span>
               </div>
-              {!report.workflows_are_monthly && <p style={{ color:'rgba(148,163,184,0.25)', fontSize:10, margin:'0 0 12px', lineHeight:1.5 }}>Save a workflow snapshot at the end of this month and the previous month to see monthly numbers.</p>}
+              {!report.workflows_are_monthly && <p style={{ color:'rgba(148,163,184,0.25)', fontSize:10, margin:'0 0 12px', lineHeight:1.5 }}>Upload the GHL Workflow CSV in Settings → Workflow Import to see monthly numbers.</p>}
               <div style={{ overflowX:'auto' as const }}>
                 <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
                   <thead>
@@ -4563,7 +4563,7 @@ function buildEmailReportHTML(report: any, pm: any): string {
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Email Health Report - ${report.month_label}</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:#080c14;color:#e2e8f0;font-family:Inter,system-ui,sans-serif;padding:32px;max-width:1400px;margin:0 auto}
+body{background:#080c14;color:#e2e8f0;font-family:Inter,system-ui,sans-serif;padding:32px;max-width:1700px;margin:0 auto}
 .card{background:rgba(15,20,35,.9);border:1px solid rgba(99,102,241,.15);border-radius:14px;padding:20px;margin:14px 0}
 .title{color:#a5b4fc;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:12px}
 p{color:rgba(148,163,184,.7);line-height:1.7;margin-bottom:8px}
@@ -5260,6 +5260,100 @@ function EmailHealthBaselinePanel() {
   )
 }
 
+// ── Workflow CSV Import Panel ──────────────────────────────────────────────
+
+function parseCSVLine(line: string): string[] {
+  const result: string[] = []; let cur = ''; let inQ = false
+  for (const ch of line) {
+    if (ch === '"') { inQ = !inQ }
+    else if (ch === ',' && !inQ) { result.push(cur); cur = '' }
+    else cur += ch
+  }
+  result.push(cur); return result
+}
+
+function WorkflowImportPanel() {
+  const now = new Date()
+  const defaultM = (() => { const d = new Date(now.getFullYear(), now.getMonth() - 1, 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` })()
+  const [month, setMonth] = useState(defaultM)
+  const [status, setStatus] = useState<string|null>(null)
+  const [loading, setLoading] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const monthOptions = Array.from({length:24},(_,i)=>{ const d=new Date(now.getFullYear(),now.getMonth()-1-i,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` })
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]; if (!file) return
+    setLoading(true); setStatus('Parsing CSV…')
+    try {
+      const text = await file.text()
+      const lines = text.trim().split('\n')
+      const headers = lines[0].split(',').map(h => h.replace(/"/g,'').trim())
+      const gi = (n: string) => headers.indexOf(n)
+      const idx = { date: gi('Execution Date'), id: gi('Campaign ID'), name: gi('Campaign Name'),
+        sent: gi('Sent'), opened: gi('Opened'), clicked: gi('Clicked'),
+        bounced: gi('Permanent Failures'), complained: gi('Complained'), unsubscribed: gi('Unsubscribed') }
+      if (idx.id < 0 || idx.sent < 0) { setStatus('Invalid CSV — expected GHL Workflow Campaign Stats export.'); setLoading(false); return }
+
+      const campaigns: Record<string,any> = {}
+      for (let i = 1; i < lines.length; i++) {
+        const cols = parseCSVLine(lines[i]); if (!cols.length) continue
+        const date = cols[idx.date]?.replace(/"/g,'').trim()
+        if (!date?.startsWith(month)) continue
+        const sid = cols[idx.id]?.replace(/"/g,'').trim(); if (!sid) continue
+        if (!campaigns[sid]) campaigns[sid] = { name: cols[idx.name]?.replace(/"/g,'').trim()||'', sent:0, opened:0, clicked:0, bounced:0, complained:0, unsubscribed:0 }
+        campaigns[sid].sent        += parseInt(cols[idx.sent]||'0')||0
+        campaigns[sid].opened      += parseInt(cols[idx.opened]||'0')||0
+        campaigns[sid].clicked     += parseInt(cols[idx.clicked]||'0')||0
+        campaigns[sid].bounced     += parseInt(cols[idx.bounced]||'0')||0
+        campaigns[sid].complained  += parseInt(cols[idx.complained]||'0')||0
+        campaigns[sid].unsubscribed+= parseInt(cols[idx.unsubscribed]||'0')||0
+      }
+
+      const manual_campaigns = Object.entries(campaigns).filter(([,v])=>(v as any).sent>0).map(([source_id,v])=>({source_id,...(v as any)}))
+      if (!manual_campaigns.length) { setStatus(`No data found for ${month} in this file.`); setLoading(false); return }
+
+      const [y,m2] = month.split('-').map(Number)
+      const endOfMonth = `${month}-${String(new Date(y,m2,0).getDate()).padStart(2,'0')}`
+      const prevM = new Date(y, m2-2, 1)
+      const prevEnd = `${prevM.getFullYear()}-${String(prevM.getMonth()+1).padStart(2,'0')}-${String(new Date(prevM.getFullYear(),prevM.getMonth()+1,0).getDate()).padStart(2,'0')}`
+      const zeros = manual_campaigns.map(c=>({...c,sent:0,opened:0,clicked:0,bounced:0,complained:0,unsubscribed:0}))
+
+      setStatus('Saving…')
+      await fetch('/api/reports/email-snapshot',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({snapshot_date:prevEnd,manual_campaigns:zeros})})
+      const r = await fetch('/api/reports/email-snapshot',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({snapshot_date:endOfMonth,manual_campaigns})})
+      const d = await r.json()
+      setStatus(d.ok ? `✓ Imported ${d.saved} workflows for ${month}. Regenerate the report to see monthly numbers.` : `Error: ${d.error}`)
+    } catch(e:any) { setStatus('Error: '+e.message) }
+    setLoading(false)
+    if (fileRef.current) fileRef.current.value = ''
+  }
+
+  const card = { background:'rgba(15,20,35,0.7)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:12, padding:'16px 18px', marginBottom:14 }
+  const inp  = { width:'100%', background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:8, padding:'8px 12px', color:'white', fontSize:13, outline:'none', fontFamily:'inherit' }
+  const lbl  = { display:'block' as const, fontSize:10, color:'rgba(148,163,184,0.5)', fontWeight:700, letterSpacing:'0.07em', textTransform:'uppercase' as const, marginBottom:5 }
+
+  return (
+    <div style={card}>
+      <div style={{ fontSize:11, color:'#a5b4fc', fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', marginBottom:8 }}>Workflow Campaign Import</div>
+      <p style={{ fontSize:12, color:'rgba(148,163,184,0.5)', marginBottom:14, lineHeight:1.6 }}>Upload the GHL Workflow Campaign Stats CSV. The report will show actual monthly numbers instead of all-time totals.</p>
+      <div style={{ marginBottom:12 }}>
+        <label style={lbl}>Month</label>
+        <select value={month} onChange={e=>setMonth(e.target.value)} style={inp}>
+          {monthOptions.map(m=><option key={m} value={m} style={{background:'#0f1423'}}>{new Date(m+'-15').toLocaleString('default',{month:'long',year:'numeric'})}</option>)}
+        </select>
+      </div>
+      <label style={{ display:'block', cursor: loading?'not-allowed':'pointer' }}>
+        <div style={{ width:'100%', padding:'9px 0', background:'linear-gradient(135deg,#4338ca,#6366f1)', borderRadius:9, color:'white', fontWeight:600, fontSize:13, textAlign:'center', opacity:loading?0.5:1 }}>
+          {loading ? 'Processing…' : '📂 Upload Workflow CSV'}
+        </div>
+        <input ref={fileRef} type="file" accept=".csv" onChange={handleFile} disabled={loading} style={{display:'none'}} />
+      </label>
+      {status && <p style={{ marginTop:10, fontSize:12, color: status.startsWith('✓')?'#10b981':status.startsWith('Error')?'#f43f5e':'rgba(148,163,184,0.7)', lineHeight:1.5 }}>{status}</p>}
+    </div>
+  )
+}
+
 // ── Settings View ─────────────────────────────────────────────────────────
 
 function SettingsView({ agents = [] }: { agents?: Agent[] }) {
@@ -5284,6 +5378,7 @@ function SettingsView({ agents = [] }: { agents?: Agent[] }) {
       <DriveSyncPanel agents={agents} />
       <ApiKeysPanel />
       <EmailHealthBaselinePanel />
+      <WorkflowImportPanel />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
         {[
           { label: 'OPENAI BASE URL', value: openaiUrl, set: setOpenaiUrl, placeholder: 'https://api.openai.com/v1' },

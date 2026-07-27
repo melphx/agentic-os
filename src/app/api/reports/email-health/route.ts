@@ -396,7 +396,10 @@ Data:\n${dataCtx}`,
       }
       return { ...w, is_monthly: false }
     }).filter(Boolean)
-    workflowsWithDeltas = workflowsComputed
+    // When monthly mode is active, drop campaigns without snapshot data (all-time fallbacks)
+    workflowsWithDeltas = workflowsAreMonthly
+      ? workflowsComputed.filter((w: any) => w.is_monthly)
+      : workflowsComputed
 
     const reportPayload = {
       generated_at: new Date().toISOString(),
