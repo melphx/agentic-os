@@ -4087,53 +4087,36 @@ function McdReportsView() {
 // ── Email Health Report View ───────────────────────────────────────────────
 
 function EmailHealthReportView() {
-  const todayStr = new Date().toISOString().slice(0,10)
-  const thisMonth = new Date().toISOString().slice(0,7)
-  const [selectedMonth, setSelectedMonth] = useState(thisMonth)
-  // Derived: full calendar month, clamped to today
-  const startDate = selectedMonth + '-01'
-  const lastDayRaw = new Date(parseInt(selectedMonth.slice(0,4)), parseInt(selectedMonth.slice(5,7)), 0).toISOString().slice(0,10)
-  const endDate = lastDayRaw > todayStr ? todayStr : lastDayRaw
+  // Default to last completed month (not current)
+  const currentMonth = new Date().toISOString().slice(0,7)
+  const lastCompletedDate = new Date(); lastCompletedDate.setDate(1); lastCompletedDate.setMonth(lastCompletedDate.getMonth()-1)
+  const lastCompletedMonth = lastCompletedDate.toISOString().slice(0,7)
+  const [selectedMonth, setSelectedMonth] = useState(lastCompletedMonth)
   const [loading, setLoading] = useState(false)
   const [report, setReport] = useState<any | null>(null)
   const [error, setError] = useState('')
   const [postmasterData, setPostmasterData] = useState<any | null>(null)
   const [postmasterConnected, setPostmasterConnected] = useState(false)
   const [backend, setBackend] = useState<{configured:boolean;domain:string}|null>(null)
-  const [snapshotInfo, setSnapshotInfo] = useState<{snapshot_dates:string[];total_records:number}|null>(null)
-  const [takingSnapshot, setTakingSnapshot] = useState(false)
-  const [showSnapshots, setShowSnapshots] = useState(false)
+  const isCurrentMonth = selectedMonth >= currentMonth
 
   useEffect(() => {
     fetch('/api/reports/email-health').then(r=>r.json()).then(d=>setBackend(d)).catch(()=>{})
     fetch('/api/postmaster/oauth?action=status').then(r=>r.json()).then(d=>setPostmasterConnected(d.connected)).catch(()=>{})
-    fetch('/api/reports/email-snapshot').then(r=>r.json()).then(d=>setSnapshotInfo(d)).catch(()=>{})
   }, [])
 
-  async function takeSnapshot() {
-    setTakingSnapshot(true)
-    try {
-      const r = await fetch('/api/reports/email-snapshot', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({}) })
-      const d = await r.json()
-      if (d.ok) {
-        setSnapshotInfo(prev => ({ snapshot_dates: [...(prev?.snapshot_dates||[]), d.snapshot_date].filter((v,i,a)=>a.indexOf(v)===i).sort(), total_records: (prev?.total_records||0)+d.saved }))
-        alert(`Snapshot saved for ${d.snapshot_date}: ${d.saved} campaigns captured. Select a date range starting from this date to see delta stats.`)
-      } else { alert('Snapshot failed: '+(d.error||'unknown')) }
-    } catch(e:any) { alert('Error: '+e.message) }
-    finally { setTakingSnapshot(false) }
-  }
-
   async function generate() {
+    if (isCurrentMonth) return
     setLoading(true); setError(''); setReport(null); setPostmasterData(null)
     try {
       const r = await fetch('/api/reports/email-health', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ startDate, endDate }),
+        body: JSON.stringify({ month: selectedMonth }),
       })
       const d = await r.json()
-      if (!r.ok) { setError(d.error || 'Failed'); return }
+      if (!r.ok && !d.in_progress && !d.no_baseline) { setError(d.error || 'Failed'); return }
       setReport(d)
-      if (postmasterConnected) {
+      if (postmasterConnected && !d.in_progress && !d.no_baseline) {
         fetch('/api/postmaster/data?domain=l.phxhomeremodeling.com')
           .then(r2=>r2.json()).then(pd=>{ if(!pd.error) setPostmasterData(pd) }).catch(()=>{})
       }
@@ -4141,8 +4124,7 @@ function EmailHealthReportView() {
     finally { setLoading(false) }
   }
 
-  const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
-  const sc = !report ? '#6366f1' : report.health_score >= 800 ? '#10b981' : report.health_score >= 650 ? '#06b6d4' : report.health_score >= 500 ? '#f59e0b' : report.health_score >= 300 ? '#f43f5e' : '#dc2626'
+  const sc = !report ? '#6366f1' : report.strict_score >= 800 ? '#10b981' : report.strict_score >= 650 ? '#06b6d4' : report.strict_score >= 500 ? '#f59e0b' : report.strict_score >= 300 ? '#f43f5e' : '#dc2626'
   const pct = (n: number, d: number) => d > 0 ? (n/d*100).toFixed(1)+'%' : '0%'
 
   const badge = (level: string) => {
@@ -4159,55 +4141,24 @@ function EmailHealthReportView() {
           {backend?.configured && <span style={{ fontSize:10, color:'#10b981', background:'rgba(16,185,129,0.1)', border:'1px solid rgba(16,185,129,0.2)', padding:'1px 7px', borderRadius:10 }}>Connected</span>}
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-          <select value={selectedMonth} onChange={e=>setSelectedMonth(e.target.value)}
+          <select value={selectedMonth} onChange={e=>{ setSelectedMonth(e.target.value); setReport(null) }}
             style={{ background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:7, padding:'5px 10px', color:'white', fontSize:12, outline:'none', fontFamily:'inherit', colorScheme:'dark', cursor:'pointer' }}>
-            {Array.from({length:13},(_,i)=>{
-              const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()-i);
+            {Array.from({length:24},(_,i)=>{
+              const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()-(i+1));
               const val = d.toISOString().slice(0,7);
               const label = d.toLocaleDateString('en-US',{month:'long',year:'numeric'});
               return <option key={val} value={val}>{label}</option>
             })}
           </select>
           {!postmasterConnected && <button onClick={()=>{window.location.href='/api/postmaster/oauth?action=start'}} style={{ padding:'5px 10px', background:'rgba(16,185,129,0.1)', border:'1px solid rgba(16,185,129,0.2)', borderRadius:7, color:'#10b981', fontSize:11, cursor:'pointer' }}>+ Postmaster</button>}
-          <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.98}} onClick={generate} disabled={loading}
-            style={{ padding:'7px 16px', background:'linear-gradient(135deg,#4338ca,#6366f1)', border:'none', borderRadius:8, color:'white', fontWeight:700, fontSize:12, cursor:'pointer', opacity:loading?0.6:1 }}>
+          <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.98}} onClick={generate} disabled={loading || isCurrentMonth}
+            style={{ padding:'7px 16px', background:'linear-gradient(135deg,#4338ca,#6366f1)', border:'none', borderRadius:8, color:'white', fontWeight:700, fontSize:12, cursor: isCurrentMonth ? 'not-allowed' : 'pointer', opacity: loading || isCurrentMonth ? 0.5 : 1 }}>
             {loading?'⏳ Generating…':'⚡ Generate'}
           </motion.button>
-          <div style={{ position:'relative' }}>
-            <button onClick={()=>setShowSnapshots(s=>!s)}
-              style={{ padding:'5px 10px', background: snapshotInfo?.snapshot_dates?.length ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)', border:`1px solid ${snapshotInfo?.snapshot_dates?.length ? 'rgba(16,185,129,0.2)' : 'rgba(245,158,11,0.2)'}`, borderRadius:7, color: snapshotInfo?.snapshot_dates?.length ? '#10b981' : '#f59e0b', fontSize:11, cursor:'pointer', flexShrink:0 }}>
-              {snapshotInfo?.snapshot_dates?.length ? `📸 ${snapshotInfo.snapshot_dates.length} snapshot${snapshotInfo.snapshot_dates.length>1?'s':''}` : '📸 Snapshots'} ▾
-            </button>
-            {showSnapshots && (
-              <div style={{ position:'absolute', top:'calc(100% + 6px)', right:0, zIndex:50, background:'rgba(12,16,28,0.98)', border:'1px solid rgba(99,102,241,0.25)', borderRadius:12, padding:14, minWidth:240, boxShadow:'0 16px 40px rgba(0,0,0,0.5)' }}>
-                <div style={{ color:'white', fontWeight:600, fontSize:12, marginBottom:10 }}>Snapshots</div>
-                <button onClick={async()=>{ await takeSnapshot(); setShowSnapshots(false) }} disabled={takingSnapshot}
-                  style={{ width:'100%', padding:'7px 0', background:'linear-gradient(135deg,#4338ca,#6366f1)', border:'none', borderRadius:7, color:'white', fontSize:11, fontWeight:600, cursor:'pointer', marginBottom:10 }}>
-                  {takingSnapshot ? '⏳ Taking…' : '📸 Take Snapshot Today'}
-                </button>
-                {snapshotInfo?.snapshot_dates?.length ? (
-                  <div style={{ maxHeight:200, overflowY:'auto' }}>
-                    {[...snapshotInfo.snapshot_dates].sort((a,b)=>b.localeCompare(a)).map(date=>(
-                      <div key={date} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'5px 0', borderBottom:'1px solid rgba(99,102,241,0.07)' }}>
-                        <span style={{ color:'rgba(148,163,184,0.8)', fontSize:12 }}>{date}</span>
-                        <button onClick={async()=>{
-                          if(!confirm(`Delete snapshot for ${date}?`)) return
-                          await fetch(`/api/reports/email-snapshot?date=${date}`, { method:'DELETE' })
-                          setSnapshotInfo(prev => prev ? { ...prev, snapshot_dates: prev.snapshot_dates.filter(d=>d!==date) } : prev)
-                        }} style={{ background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:5, color:'#f87171', fontSize:10, padding:'2px 7px', cursor:'pointer' }}>
-                          Delete
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : <p style={{ color:'rgba(148,163,184,0.4)', fontSize:11, margin:0 }}>No snapshots yet</p>}
-              </div>
-            )}
-          </div>
-          {report && <button onClick={()=>{
+          {report && !report.in_progress && !report.no_baseline && <button onClick={()=>{
             const html = buildEmailReportHTML(report, postmasterData)
             const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([html],{type:'text/html'}))
-            a.download = `email-health-${startDate}-to-${endDate}.html`; a.click()
+            a.download = `email-health-${selectedMonth}.html`; a.click()
           }} style={{ padding:'5px 10px', background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:7, color:'#a5b4fc', fontSize:11, cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}>
             <Download size={11}/> Export
           </button>}
@@ -4220,45 +4171,69 @@ function EmailHealthReportView() {
         <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', minHeight:'60vh', gap:14, padding:40, textAlign:'center' }}>
           <div style={{ fontSize:44 }}>📧</div>
           <h2 style={{ color:'white', fontWeight:700, fontSize:20, margin:0 }}>Email Health Report</h2>
-          <p style={{ color:'rgba(148,163,184,0.5)', fontSize:13, maxWidth:400 }}>Select a month and generate your full email deliverability report — powered by HitTheInbox data from GHL and Google Postmaster.</p>
+          <p style={{ color:'rgba(148,163,184,0.5)', fontSize:13, maxWidth:400 }}>Select a completed month and generate your monthly email deliverability report. Baseline numbers for each month are managed in Settings.</p>
         </div>
       )}
 
-      {report && (
-        <div style={{ maxWidth:900, margin:'0 auto', padding:'20px 24px 60px' }}>
+      {/* In-progress state */}
+      {report?.in_progress && (
+        <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', minHeight:'60vh', gap:12, padding:40, textAlign:'center' }}>
+          <div style={{ fontSize:44 }}>⏳</div>
+          <h2 style={{ color:'white', fontWeight:700, fontSize:18, margin:0 }}>Month In Progress</h2>
+          <p style={{ color:'rgba(148,163,184,0.5)', fontSize:13, maxWidth:400 }}>{report.message}</p>
+        </div>
+      )}
+
+      {/* No baseline state */}
+      {report?.no_baseline && (
+        <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', minHeight:'60vh', gap:12, padding:40, textAlign:'center' }}>
+          <div style={{ fontSize:44 }}>📋</div>
+          <h2 style={{ color:'white', fontWeight:700, fontSize:18, margin:0 }}>Baseline Required</h2>
+          <p style={{ color:'rgba(148,163,184,0.5)', fontSize:13, maxWidth:420 }}>{report.message}</p>
+        </div>
+      )}
+
+      {report && !report.in_progress && !report.no_baseline && (
+        <div style={{ maxWidth:1100, margin:'0 auto', padding:'20px 24px 60px' }}>
 
           {/* ── 1. SCORE HERO ── */}
           <div style={{ background:`linear-gradient(135deg,${sc}18,rgba(15,20,35,0.95))`, border:`1px solid ${sc}30`, borderRadius:16, padding:'24px 28px', marginBottom:14, display:'flex', alignItems:'center', gap:24 }}>
             <div style={{ flexShrink:0, textAlign:'center' }}>
-              <div style={{ fontSize:58, fontWeight:900, color:sc, lineHeight:1 }}>{report.health_score}</div>
+              <div style={{ fontSize:58, fontWeight:900, color:sc, lineHeight:1 }}>{report.strict_score}</div>
               <div style={{ color:'rgba(148,163,184,0.35)', fontSize:9, marginTop:3 }}>out of 999</div>
             </div>
             <div style={{ flex:1 }}>
               <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
                 <span style={{ color:sc, fontWeight:800, fontSize:22 }}>{report.score_label}</span>
                 <span style={{ padding:'1px 8px', background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.15)', borderRadius:20, color:'rgba(148,163,184,0.4)', fontSize:9 }}>Strict Email Health Score</span>
+                {report.score_delta !== null && <span style={{ padding:'1px 8px', borderRadius:20, fontSize:10, fontWeight:700, background: report.score_delta > 0 ? 'rgba(16,185,129,0.1)' : report.score_delta < 0 ? 'rgba(244,63,94,0.1)' : 'rgba(99,102,241,0.1)', color: report.score_delta > 0 ? '#10b981' : report.score_delta < 0 ? '#f43f5e' : '#a5b4fc', border: `1px solid ${report.score_delta > 0 ? 'rgba(16,185,129,0.2)' : report.score_delta < 0 ? 'rgba(244,63,94,0.2)' : 'rgba(99,102,241,0.2)'}` }}>
+                  {report.score_delta > 0 ? `▲ +${report.score_delta}` : report.score_delta < 0 ? `▼ ${report.score_delta}` : '— no change'} vs {report.prev_month}
+                </span>}
               </div>
-              <p style={{ color:'rgba(148,163,184,0.6)', fontSize:12, margin:'0 0 6px', lineHeight:1.5 }}>{report.analysis?.score_explanation_strict || 'Your Strict Email Health Score reflects how well subscribers who were emailed in the last month engaged.'}</p>
+              <p style={{ color:'rgba(148,163,184,0.6)', fontSize:12, margin:'0 0 6px', lineHeight:1.5 }}>{report.analysis?.executive_summary || 'Generating analysis…'}</p>
               <div style={{ display:'flex', gap:16 }}>
                 <div><span style={{ color:'rgba(148,163,184,0.4)', fontSize:10 }}>STRICT </span><span style={{ color:sc, fontWeight:700, fontSize:13 }}>{report.strict_score}</span></div>
                 <div><span style={{ color:'rgba(148,163,184,0.4)', fontSize:10 }}>RELAXED </span><span style={{ color:'#06b6d4', fontWeight:700, fontSize:13 }}>{report.relaxed_score}</span></div>
-                <div><span style={{ color:'rgba(148,163,184,0.35)', fontSize:10 }}>{report.month_label} via HighLevel</span></div>
+                <div><span style={{ color:'rgba(148,163,184,0.35)', fontSize:10 }}>{report.month_label}</span></div>
               </div>
             </div>
           </div>
 
-          {/* ── 2. ANALYST NOTES ── */}
+          {/* ── 2. ANALYST NOTE ── */}
+          {report.analysis?.analyst_note && (
           <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
-            <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:8 }}>Analyst Notes</div>
-            <p style={{ color:'rgba(148,163,184,0.8)', fontSize:13.5, margin:0, lineHeight:1.7 }}>{report.analysis?.analyst_notes || 'Generating analysis…'}</p>
+            <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:8 }}>Key Insight</div>
+            <p style={{ color:'rgba(148,163,184,0.8)', fontSize:13.5, margin:0, lineHeight:1.7 }}>{report.analysis.analyst_note}</p>
           </div>
+          )}
 
-          {/* ── 3. EXECUTIVE SUMMARY ── */}
-          <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
-            <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:12 }}>Executive Summary</div>
-            {Array.isArray(report.analysis?.executive_summary_bullets) && report.analysis.executive_summary_bullets.map((b:string,i:number)=>(
-              <div key={i} style={{ display:'flex', gap:10, padding:'7px 0', borderBottom:'1px solid rgba(99,102,241,0.06)' }}>
-                <span style={{ color:'#6366f1', flexShrink:0, fontSize:14 }}>•</span>
+          {/* ── 3. GOOD NEWS ── */}
+          {Array.isArray(report.analysis?.good_news) && report.analysis.good_news.length > 0 && (
+          <div style={{ background:'rgba(16,185,129,0.04)', border:'1px solid rgba(16,185,129,0.15)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
+            <div style={{ color:'#10b981', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:12 }}>✅ Good News</div>
+            {report.analysis.good_news.map((b:string,i:number)=>(
+              <div key={i} style={{ display:'flex', gap:10, padding:'6px 0', borderBottom:'1px solid rgba(16,185,129,0.07)' }}>
+                <span style={{ color:'#10b981', flexShrink:0, fontSize:14 }}>•</span>
                 <span style={{ color:'rgba(148,163,184,0.75)', fontSize:13 }}>{b}</span>
               </div>
             ))}
@@ -4279,27 +4254,57 @@ function EmailHealthReportView() {
             </div>
           )}
 
-          {/* ── 5. ACTIONS TO TAKE ── */}
+          {/* ── 5. ACTIONS — NEW CONTACTS ── */}
+          {Array.isArray(report.analysis?.actions_new_contacts) && report.analysis.actions_new_contacts.length > 0 && (
           <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
-            <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:12 }}>Actions to Take</div>
-            {[
-              { key:'actions_high', level:'high', items: report.analysis?.actions_high },
-              { key:'actions_medium', level:'medium', items: report.analysis?.actions_medium },
-              { key:'actions_low', level:'low', items: report.analysis?.actions_low },
-            ].map(({key, level, items})=> Array.isArray(items) && items.map((a:string,i:number)=>(
-              <div key={key+i} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid rgba(99,102,241,0.06)', alignItems:'flex-start' }}>
-                <span style={{ flexShrink:0, marginTop:1 }}>{badge(level)}</span>
+            <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:12 }}>Actions — New Contacts ({report.new_leads?.mailed?.toLocaleString()} mailed)</div>
+            {report.analysis.actions_new_contacts.map((a:string,i:number)=>(
+              <div key={i} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid rgba(99,102,241,0.06)', alignItems:'flex-start' }}>
+                <span style={{ flexShrink:0, marginTop:1 }}>{badge('medium')}</span>
                 <span style={{ color:'rgba(148,163,184,0.75)', fontSize:13, lineHeight:1.55 }}>{a}</span>
               </div>
-            )))}
+            ))}
           </div>
+          )}
+
+          {/* ── 5b. ACTIONS — EXISTING CONTACTS ── */}
+          {Array.isArray(report.analysis?.actions_existing_contacts) && report.analysis.actions_existing_contacts.length > 0 && (
+          <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
+            <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:12 }}>Actions — Existing Contacts ({report.existing?.mailed?.toLocaleString()} mailed)</div>
+            {report.analysis.actions_existing_contacts.map((a:string,i:number)=>(
+              <div key={i} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid rgba(99,102,241,0.06)', alignItems:'flex-start' }}>
+                <span style={{ flexShrink:0, marginTop:1 }}>{badge('high')}</span>
+                <span style={{ color:'rgba(148,163,184,0.75)', fontSize:13, lineHeight:1.55 }}>{a}</span>
+              </div>
+            ))}
+          </div>
+          )}
+
+          {/* ── 5c. MAINTENANCE ACTIONS ── */}
+          {Array.isArray(report.analysis?.actions_maintenance) && report.analysis.actions_maintenance.length > 0 && (
+          <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
+            <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:12 }}>Maintenance</div>
+            {report.analysis.actions_maintenance.map((a:string,i:number)=>(
+              <div key={i} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid rgba(99,102,241,0.06)', alignItems:'flex-start' }}>
+                <span style={{ flexShrink:0, marginTop:1 }}>{badge('low')}</span>
+                <span style={{ color:'rgba(148,163,184,0.75)', fontSize:13, lineHeight:1.55 }}>{a}</span>
+              </div>
+            ))}
+          </div>
+          )}
 
           {/* ── 6. EMAIL PERFORMANCE ── */}
-          {report.stats.campaigns_analyzed > 0 && (
+          {report.stats && (
             <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
-              <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:12 }}>📊 Email Performance — {report.stats.campaigns_analyzed} Workflow Campaigns</div>
+              <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:12 }}>📊 Email Performance — {report.month_label}</div>
               <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10, marginBottom:14 }}>
-                {[['Engagement Rate',report.stats.open_rate+'%',true],['Open Rate',report.stats.open_rate+'%',report.stats.open_rate>=25],['Click Rate',report.stats.click_rate+'%',report.stats.click_rate>=3],['Bounce Rate',report.stats.bounce_rate+'%',report.stats.bounce_rate<2],['Spam Rate',report.stats.spam_rate+'%',report.stats.spam_rate<0.1],['Total Sent',report.stats.total_sent.toLocaleString(),true]].map(([l,v,g])=>(
+                {[
+                  ['Open Rate', report.stats.open_rate+'%', report.stats.open_rate>=25],
+                  ['Click Rate', report.stats.click_rate+'%', report.stats.click_rate>=2],
+                  ['Bounce Rate', report.stats.bounce_rate+'%', report.stats.bounce_rate<2],
+                  ['Delivered', report.stats.delivered.toLocaleString(), true],
+                  ['Unsubscribed', report.stats.unsub.toLocaleString(), report.stats.unsub<10],
+                ].map(([l,v,g])=>(
                   <div key={l as string} style={{ background:'rgba(99,102,241,0.06)', borderRadius:9, padding:'10px 12px' }}>
                     <div style={{ fontSize:10, color:'rgba(148,163,184,0.4)', marginBottom:2, textTransform:'uppercase' as const }}>{l}</div>
                     <div style={{ fontSize:18, fontWeight:700, color:(g as boolean)?'#10b981':'#f43f5e' }}>{v}</div>
@@ -4307,65 +4312,64 @@ function EmailHealthReportView() {
                 ))}
               </div>
               {/* Engagement table */}
-              {report.engagement_table && (
-                <>
-                  <div style={{ color:'rgba(148,163,184,0.4)', fontSize:10, textTransform:'uppercase' as const, marginBottom:8, letterSpacing:'0.05em' }}>Engagement This Period</div>
-                  <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
-                    <thead>
-                      <tr style={{ borderBottom:'1px solid rgba(99,102,241,0.15)' }}>
-                        {['','# Mailed','% Opened','% Clicked'].map(h=>(
-                          <th key={h} style={{ padding:'5px 10px', textAlign:'left', color:'rgba(148,163,184,0.4)', fontWeight:600, fontSize:10, textTransform:'uppercase' as const }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr style={{ borderBottom:'1px solid rgba(99,102,241,0.05)' }}>
-                        <td style={{ padding:'7px 10px', color:'rgba(148,163,184,0.8)', fontSize:12 }}>Existing Subscribers</td>
-                        <td style={{ padding:'7px 10px', color:'white', fontWeight:600, fontSize:12 }}>{report.engagement_table.existing.mailed.toLocaleString()}</td>
-                        <td style={{ padding:'7px 10px', color:'#10b981', fontWeight:600, fontSize:12 }}>{report.engagement_table.existing.open_pct}%</td>
-                        <td style={{ padding:'7px 10px', color:'#10b981', fontWeight:600, fontSize:12 }}>{report.engagement_table.existing.click_pct}%</td>
-                      </tr>
-                      <tr>
-                        <td style={{ padding:'7px 10px', color:'rgba(148,163,184,0.8)', fontSize:12 }}>New Subscribers</td>
-                        <td style={{ padding:'7px 10px', color:'white', fontWeight:600, fontSize:12 }}>{report.engagement_table.new_subs.mailed.toLocaleString()}</td>
-                        <td style={{ padding:'7px 10px', color:'#10b981', fontWeight:600, fontSize:12 }}>{report.engagement_table.new_subs.open_pct}%</td>
-                        <td style={{ padding:'7px 10px', color:'#10b981', fontWeight:600, fontSize:12 }}>{report.engagement_table.new_subs.click_pct}%</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                  <p style={{ color:'rgba(148,163,184,0.3)', fontSize:10, margin:'8px 0 0' }}>* Campaign stats are all-time totals. Monthly filtering requires GHL email campaign API scope.</p>
-                </>
-              )}
+              <div style={{ color:'rgba(148,163,184,0.4)', fontSize:10, textTransform:'uppercase' as const, marginBottom:8, letterSpacing:'0.05em' }}>Engagement Breakdown</div>
+              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                <thead>
+                  <tr style={{ borderBottom:'1px solid rgba(99,102,241,0.15)' }}>
+                    {['','Mailed','Opened','Clicked','Open %','Click %'].map(h=>(
+                      <th key={h} style={{ padding:'5px 10px', textAlign:'left', color:'rgba(148,163,184,0.4)', fontWeight:600, fontSize:10, textTransform:'uppercase' as const }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr style={{ borderBottom:'1px solid rgba(99,102,241,0.05)' }}>
+                    <td style={{ padding:'7px 10px', color:'rgba(148,163,184,0.8)', fontSize:12 }}>Existing</td>
+                    <td style={{ padding:'7px 10px', color:'white', fontWeight:600, fontSize:12 }}>{report.existing?.mailed?.toLocaleString()}</td>
+                    <td style={{ padding:'7px 10px', color:'rgba(148,163,184,0.7)', fontSize:12 }}>{report.existing?.opened?.toLocaleString()}</td>
+                    <td style={{ padding:'7px 10px', color:'rgba(148,163,184,0.7)', fontSize:12 }}>{report.existing?.clicked?.toLocaleString()}</td>
+                    <td style={{ padding:'7px 10px', color:'#10b981', fontWeight:600, fontSize:12 }}>{report.existing?.open_pct}%</td>
+                    <td style={{ padding:'7px 10px', color:'#10b981', fontWeight:600, fontSize:12 }}>{report.existing?.click_pct}%</td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding:'7px 10px', color:'rgba(148,163,184,0.8)', fontSize:12 }}>New Leads</td>
+                    <td style={{ padding:'7px 10px', color:'white', fontWeight:600, fontSize:12 }}>{report.new_leads?.mailed?.toLocaleString()}</td>
+                    <td style={{ padding:'7px 10px', color:'rgba(148,163,184,0.7)', fontSize:12 }}>{report.new_leads?.opened?.toLocaleString()}</td>
+                    <td style={{ padding:'7px 10px', color:'rgba(148,163,184,0.7)', fontSize:12 }}>{report.new_leads?.clicked?.toLocaleString()}</td>
+                    <td style={{ padding:'7px 10px', color:'#10b981', fontWeight:600, fontSize:12 }}>{report.new_leads?.open_pct}%</td>
+                    <td style={{ padding:'7px 10px', color:'#10b981', fontWeight:600, fontSize:12 }}>{report.new_leads?.click_pct}%</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           )}
 
           {/* ── 7. AUDIENCE BREAKDOWN ── */}
+          {report.list && (
           <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
             <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:4 }}>List Health — Engagement Segments</div>
-            <p style={{ color:'rgba(148,163,184,0.35)', fontSize:11, margin:'0 0 14px' }}>Current list snapshot — lifetime engagement classification (not date-scoped)</p>
+            <p style={{ color:'rgba(148,163,184,0.35)', fontSize:11, margin:'0 0 14px' }}>Current list snapshot — lifetime engagement classification</p>
             <div style={{ display:'flex', height:10, borderRadius:8, overflow:'hidden', marginBottom:14 }}>
               {([
-                [report.segments.active,'#10b981'],[report.segments.warmingUp,'#06b6d4'],
-                [report.segments.cold,'#f59e0b'],[report.segments.dead,'#f43f5e'],
+                [report.list.green,'#10b981'],[report.list.slipping,'#f59e0b'],[report.list.never_engaged,'#f43f5e'],
               ] as [number,string][]).map(([n,c],i)=>(
-                <div key={i} style={{ width:`${report.segments.total>0?n/report.segments.total*100:0}%`, background:c, minWidth:n>0?3:0 }}/>
+                <div key={i} style={{ width:`${report.list.total>0?(n as number)/report.list.total*100:0}%`, background:c, minWidth:(n as number)>0?3:0 }}/>
               ))}
             </div>
             {[
-              { label:'Best Assets', sub:'Have opened something in the last 30 days', count:report.segments.active, color:'#10b981' },
-              { label:'Assets', sub:'Have opened something in the last 30-90 days', count:report.segments.warmingUp, color:'#06b6d4' },
-              { label:'Liabilities', sub:'Have only opened in the last 90-365 days', count:report.segments.cold, color:'#f59e0b' },
-              { label:'Worst Liabilities', sub:"Haven't opened in over a year, or have never opened", count:report.segments.dead, color:'#f43f5e' },
+              { label:'Green — Safe to Send', sub:'Engaged within last 30 days', count:report.list.green, color:'#10b981' },
+              { label:'Liabilities — Slipping', sub:'No engagement in 90-365 days', count:report.list.slipping, color:'#f59e0b' },
+              { label:'Worst Liabilities', sub:'Never engaged or over 1 year', count:report.list.never_engaged, color:'#f43f5e' },
+              { label:'Never Sent', sub:'Have not received any email', count:report.list.never_sent, color:'rgba(148,163,184,0.3)' },
             ].map(s=>(
               <div key={s.label} style={{ display:'flex', alignItems:'center', gap:10, padding:'7px 0', borderBottom:'1px solid rgba(99,102,241,0.06)' }}>
                 <div style={{ width:9, height:9, borderRadius:'50%', background:s.color, flexShrink:0 }}/>
                 <div style={{ flex:1 }}><span style={{ color:'white', fontSize:13, fontWeight:600 }}>{s.label} </span><span style={{ color:'rgba(148,163,184,0.4)', fontSize:11 }}>{s.sub}</span></div>
                 <span style={{ color:'white', fontWeight:700, fontSize:13 }}>{s.count.toLocaleString()}</span>
-                <span style={{ color:'rgba(148,163,184,0.3)', fontSize:11, width:44, textAlign:'right' as const }}>{pct(s.count, report.segments.total)}</span>
+                <span style={{ color:'rgba(148,163,184,0.3)', fontSize:11, width:44, textAlign:'right' as const }}>{report.list.total>0?(s.count/report.list.total*100).toFixed(1)+'%':'0%'}</span>
               </div>
             ))}
             <div style={{ display:'flex', gap:16, marginTop:12, padding:'10px 14px', background:'rgba(99,102,241,0.05)', borderRadius:9 }}>
-              {[['Contacts',report.segments.total,'#a5b4fc'],['Opted Out',report.segments.optedOut,'rgba(148,163,184,0.5)'],['Marketable',report.segments.marketable,'#10b981'],['New',report.segments.new,'#6366f1']].map(([l,v,c])=>(
+              {[['Total',report.list.total,'#a5b4fc'],['Red/DND',report.list.red,'#f43f5e'],['Marketable',report.list.marketable,'#10b981']].map(([l,v,c])=>(
                 <div key={l as string} style={{ flex:1, textAlign:'center' as const }}>
                   <div style={{ fontSize:18, fontWeight:700, color:c as string }}>{(v as number).toLocaleString()}</div>
                   <div style={{ fontSize:9, color:'rgba(148,163,184,0.4)', marginTop:2, textTransform:'uppercase' as const }}>{l}</div>
@@ -4373,13 +4377,15 @@ function EmailHealthReportView() {
               ))}
             </div>
           </div>
+          )}
 
           {/* ── 8. EMAIL QUALITY + PROVIDERS ── */}
+          {report.list && report.providers && (
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
             <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px' }}>
               <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:4 }}>Email Quality</div>
               <p style={{ color:'rgba(148,163,184,0.3)', fontSize:10, margin:'0 0 10px' }}>Current list snapshot</p>
-              {[['✅ Safe to send',report.quality.green,'#10b981'],['🚫 Do not send',report.quality.red,'#f43f5e'],['⚠️ Bounced',report.quality.bounced,'#f59e0b'],['🚨 Spam risk',report.quality.spam,'#dc2626'],['❓ Invalid',report.quality.notFound,'rgba(148,163,184,0.4)'],['🔀 Catchall',report.quality.catchall,'rgba(148,163,184,0.4)']].map(([l,c,col])=>(
+              {[['✅ Safe to send',report.list.green,'#10b981'],['🚫 Do not send',report.list.red,'#f43f5e'],['⚠️ Bounced',report.list.bounced_tag,'#f59e0b'],['🚨 Spam risk',report.list.spam_tag,'#dc2626'],['❓ Invalid',report.list.not_found,'rgba(148,163,184,0.4)'],['🔀 Catchall',report.list.catchall,'rgba(148,163,184,0.4)']].map(([l,c,col])=>(
                 <div key={l as string} style={{ display:'flex', justifyContent:'space-between', padding:'5px 0', borderBottom:'1px solid rgba(99,102,241,0.05)' }}>
                   <span style={{ color:'rgba(148,163,184,0.6)', fontSize:12 }}>{l as string}</span>
                   <span style={{ color:col as string, fontWeight:700, fontSize:12 }}>{(c as number).toLocaleString()}</span>
@@ -4398,6 +4404,7 @@ function EmailHealthReportView() {
               ))}
             </div>
           </div>
+          )}
 
           {/* ── 9. DMARC + GOOGLE SIGNALS ── always shown ── */}
           {report && (
@@ -4438,20 +4445,19 @@ function EmailHealthReportView() {
                 <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
                   <thead>
                     <tr style={{ borderBottom:'1px solid rgba(99,102,241,0.15)' }}>
-                      {['Workflow','Sent','Open %','Click %','Bounce %','Spam %'].map(h=>(
+                      {['Workflow','Sent','Open %','Click %','Bounce %'].map(h=>(
                         <th key={h} style={{ padding:'5px 8px', textAlign:'left' as const, color:'rgba(148,163,184,0.4)', fontWeight:600, fontSize:9, textTransform:'uppercase' as const }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {(report.workflows as any[]).map((w:any)=>(
+                    {[...(report.workflows as any[])].sort((a,b)=>b.sent-a.sent).map((w:any)=>(
                       <tr key={w.name} style={{ borderBottom:'1px solid rgba(99,102,241,0.05)' }}>
-                        <td style={{ padding:'6px 8px', color:'rgba(148,163,184,0.8)', maxWidth:200, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' as const }} title={w.name}>{w.name.length>35?w.name.slice(0,35)+'…':w.name}</td>
+                        <td style={{ padding:'6px 8px', color:'rgba(148,163,184,0.8)', maxWidth:340, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' as const }} title={w.name}>{w.name}</td>
                         <td style={{ padding:'6px 8px', color:'white', fontWeight:600 }}>{w.sent.toLocaleString()}</td>
                         <td style={{ padding:'6px 8px', color:w.openRate>=25?'#10b981':'#f59e0b', fontWeight:600 }}>{w.openRate.toFixed(1)}%</td>
                         <td style={{ padding:'6px 8px', color:w.clickRate>=3?'#10b981':'#f59e0b', fontWeight:600 }}>{w.clickRate.toFixed(1)}%</td>
                         <td style={{ padding:'6px 8px', color:w.bounced/w.sent*100<2?'#10b981':'#f43f5e', fontWeight:600 }}>{w.sent>0?(w.bounced/w.sent*100).toFixed(2):0}%</td>
-                        <td style={{ padding:'6px 8px', color:w.complaintRate<0.1?'#10b981':'#f43f5e', fontWeight:600 }}>{w.complaintRate.toFixed(3)}%</td>
                       </tr>
                     ))}
                   </tbody>
@@ -4468,15 +4474,16 @@ function EmailHealthReportView() {
 }
 
 function buildEmailReportHTML(report: any, pm: any): string {
-  const sc = report.health_score >= 800 ? '#10b981' : report.health_score >= 650 ? '#06b6d4' : report.health_score >= 500 ? '#f59e0b' : report.health_score >= 300 ? '#f43f5e' : '#dc2626'
+  const sc = report.strict_score >= 800 ? '#10b981' : report.strict_score >= 650 ? '#06b6d4' : report.strict_score >= 500 ? '#f59e0b' : report.strict_score >= 300 ? '#f43f5e' : '#dc2626'
   const pct = (n: number, d: number) => d > 0 ? (n/d*100).toFixed(1)+'%' : '0%'
-  const seg = report.segments || {}
-  const et = report.engagement_table
+  const lst = report.list || {}
+  const ex  = report.existing || {}
+  const nl  = report.new_leads || {}
 
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Email Health Report - ${report.month_label}</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:#080c14;color:#e2e8f0;font-family:Inter,system-ui,sans-serif;padding:32px;max-width:900px;margin:0 auto}
+body{background:#080c14;color:#e2e8f0;font-family:Inter,system-ui,sans-serif;padding:32px;max-width:1100px;margin:0 auto}
 .card{background:rgba(15,20,35,.9);border:1px solid rgba(99,102,241,.15);border-radius:14px;padding:20px;margin:14px 0}
 .title{color:#a5b4fc;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:12px}
 p{color:rgba(148,163,184,.7);line-height:1.7;margin-bottom:8px}
@@ -4495,7 +4502,7 @@ td{padding:8px 10px;border-bottom:1px solid rgba(99,102,241,.06);font-size:13px;
 <!-- HEADER -->
 <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px">
   <div>
-    <div style="font-size:64px;font-weight:900;color:${sc};line-height:1">${report.health_score}</div>
+    <div style="font-size:64px;font-weight:900;color:${sc};line-height:1">${report.strict_score}</div>
     <div style="font-size:22px;font-weight:800;color:${sc};margin-top:2px">${report.score_label}</div>
     <div style="color:rgba(148,163,184,.4);font-size:11px;margin-top:6px">Strict Email Health Score · ${report.month_label} · via HighLevel</div>
     <div style="margin-top:8px;font-size:13px">
@@ -4510,11 +4517,11 @@ td{padding:8px 10px;border-bottom:1px solid rgba(99,102,241,.06);font-size:13px;
 </div>
 
 <!-- ANALYST NOTES -->
-<div class="card"><div class="title">Analyst Notes</div><p>${report.analysis?.analyst_notes||''}</p></div>
+<div class="card"><div class="title">Analyst Notes</div><p>${report.analysis?.analyst_note||''}</p></div>
 
 <!-- EXECUTIVE SUMMARY -->
 <div class="card"><div class="title">Executive Summary</div>
-  ${Array.isArray(report.analysis?.executive_summary_bullets)?report.analysis.executive_summary_bullets.map((b:string)=>`<p>• ${b}</p>`).join(''):''}
+  <p>${report.analysis?.executive_summary||''}</p>
 </div>
 
 <!-- PROBLEMS -->
@@ -4529,15 +4536,23 @@ ${Array.isArray(report.analysis?.problems)&&report.analysis.problems.length?`
 </div>`:''}
 
 <!-- ACTIONS -->
-<div class="card"><div class="title">Actions to Take</div>
-  ${['high','medium','low'].map((level:string)=>{
-    const items:string[] = report.analysis?.[`actions_${level}`]||[]
-    return items.map((a:string)=>`
-      <div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid rgba(99,102,241,.06)">
-        <span class="badge-${level}" style="flex-shrink:0;margin-top:2px">${level}</span>
-        <span style="color:rgba(148,163,184,.8);font-size:13px">${a}</span>
-      </div>`).join('')
-  }).join('')}
+<div class="card"><div class="title">Actions — New Contacts</div>
+  ${(report.analysis?.actions_new_contacts||[]).map((a:string)=>`
+    <div style="padding:8px 0;border-bottom:1px solid rgba(99,102,241,.06)">
+      <span style="color:rgba(148,163,184,.8);font-size:13px">• ${a}</span>
+    </div>`).join('')}
+</div>
+<div class="card"><div class="title">Actions — Existing Contacts</div>
+  ${(report.analysis?.actions_existing_contacts||[]).map((a:string)=>`
+    <div style="padding:8px 0;border-bottom:1px solid rgba(99,102,241,.06)">
+      <span style="color:rgba(148,163,184,.8);font-size:13px">• ${a}</span>
+    </div>`).join('')}
+</div>
+<div class="card"><div class="title">Actions — Maintenance</div>
+  ${(report.analysis?.actions_maintenance||[]).map((a:string)=>`
+    <div style="padding:8px 0;border-bottom:1px solid rgba(99,102,241,.06)">
+      <span style="color:rgba(148,163,184,.8);font-size:13px">• ${a}</span>
+    </div>`).join('')}
 </div>
 
 <!-- EMAIL PERFORMANCE STATS -->
@@ -4545,46 +4560,46 @@ ${report.stats.campaigns_analyzed>0?`
 <div class="card">
   <div class="title">Email Performance — ${report.stats.campaigns_analyzed} Workflows</div>
   <div style="display:flex;margin-bottom:8px">
-    ${[['Engagement',report.stats.open_rate+'%'],['Open Rate',report.stats.open_rate+'%'],['Click Rate',report.stats.click_rate+'%'],['Bounce Rate',report.stats.bounce_rate+'%'],['Spam Rate',report.stats.spam_rate+'%'],['Total Sent',report.stats.total_sent.toLocaleString()]].map(([l,v])=>`
+    ${[['Open Rate',report.stats.open_rate+'%'],['Click Rate',report.stats.click_rate+'%'],['Bounce Rate',report.stats.bounce_rate+'%'],['Delivered',report.stats.delivered.toLocaleString()],['Unsubscribed',report.stats.unsub.toLocaleString()]].map(([l,v])=>`
     <div class="kpi"><div class="kpi-val">${v}</div><div class="kpi-lbl">${l}</div></div>`).join('')}
   </div>
 </div>`:''}
 
 <!-- ENGAGEMENT TABLE -->
-${et?`
+${(ex.mailed||nl.mailed)?`
 <div class="card">
   <div class="title">Engagement This Period</div>
   <table>
     <tr><th>Segment</th><th>Mailed</th><th>Open %</th><th>Click %</th></tr>
     <tr>
       <td style="color:white;font-weight:600">Existing Subscribers</td>
-      <td style="color:white;font-weight:600">${et.existing?.mailed?.toLocaleString()||'—'}</td>
-      <td style="color:#10b981;font-weight:600">${et.existing?.open_pct||'—'}%</td>
-      <td style="color:#10b981;font-weight:600">${et.existing?.click_pct||'—'}%</td>
+      <td style="color:white;font-weight:600">${(ex.mailed||0).toLocaleString()}</td>
+      <td style="color:#10b981;font-weight:600">${ex.open_pct||'—'}%</td>
+      <td style="color:#10b981;font-weight:600">${ex.click_pct||'—'}%</td>
     </tr>
     <tr>
-      <td style="color:white;font-weight:600">New Subscribers</td>
-      <td style="color:white;font-weight:600">${et.new_subs?.mailed?.toLocaleString()||'—'}</td>
-      <td style="color:#10b981;font-weight:600">${et.new_subs?.open_pct||'—'}%</td>
-      <td style="color:#10b981;font-weight:600">${et.new_subs?.click_pct||'—'}%</td>
+      <td style="color:white;font-weight:600">New Leads</td>
+      <td style="color:white;font-weight:600">${(nl.mailed||0).toLocaleString()}</td>
+      <td style="color:#10b981;font-weight:600">${nl.open_pct||'—'}%</td>
+      <td style="color:#10b981;font-weight:600">${nl.click_pct||'—'}%</td>
     </tr>
   </table>
 </div>`:''}
 
 <!-- SEGMENTS -->
-${seg.total?`
+${lst.total?`
 <div class="card">
   <div class="title">List Health — Engagement Segments</div>
-  <p style="color:rgba(148,163,184,.35);font-size:11px;margin-bottom:12px">Current list snapshot — lifetime engagement classification (not date-scoped)</p>
+  <p style="color:rgba(148,163,184,.35);font-size:11px;margin-bottom:12px">Current list snapshot — HTI tag-based classification</p>
   <!-- Segment bar -->
   <div style="display:flex;height:10px;border-radius:5px;overflow:hidden;margin-bottom:16px;background:rgba(99,102,241,.08)">
-    ${[[seg.active,'#10b981'],[seg.warmingUp,'#06b6d4'],[seg.cold,'#f59e0b'],[seg.dead,'#f43f5e']].map(([n,c])=>`<div style="width:${seg.total>0?(n as number)/seg.total*100:0}%;background:${c};min-width:${(n as number)>0?3:0}px"></div>`).join('')}
+    ${[[lst.green,'#10b981'],[lst.slipping,'#f59e0b'],[lst.never_engaged,'#f43f5e'],[lst.never_sent,'rgba(99,102,241,.3)']].map(([n,c])=>`<div style="width:${lst.total>0?(n as number)/lst.total*100:0}%;background:${c};min-width:${(n as number)>0?3:0}px"></div>`).join('')}
   </div>
   ${[
-    {label:'Best Assets',sub:'Opened in last 30 days',count:seg.active,color:'#10b981'},
-    {label:'Assets',sub:'Opened in last 30-90 days',count:seg.warmingUp,color:'#06b6d4'},
-    {label:'Liabilities',sub:'Opened in last 90-365 days',count:seg.cold,color:'#f59e0b'},
-    {label:'Worst Liabilities',sub:'Never opened or over 1 year',count:seg.dead,color:'#f43f5e'},
+    {label:'Best Assets',sub:'Green tag — engaged 0-30 days',count:lst.green,color:'#10b981'},
+    {label:'Liabilities',sub:'Slipping tag — 90-365 days inactive',count:lst.slipping,color:'#f59e0b'},
+    {label:'Worst Liabilities',sub:'Never engaged or >1 year',count:lst.never_engaged,color:'#f43f5e'},
+    {label:'Never Sent',sub:'No emails sent yet',count:lst.never_sent,color:'rgba(99,102,241,.6)'},
   ].map(s=>`
     <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(99,102,241,.06)">
       <div>
@@ -4595,15 +4610,15 @@ ${seg.total?`
         <div style="color:rgba(148,163,184,.4);font-size:11px;margin-left:18px;margin-top:2px">${s.sub}</div>
       </div>
       <div style="text-align:right">
-        <span style="color:${s.color};font-weight:700;font-size:15px">${(s.count as number).toLocaleString()}</span>
-        <span style="color:rgba(148,163,184,.3);font-size:11px;margin-left:6px">${pct(s.count as number,seg.total)}</span>
+        <span style="color:${s.color};font-weight:700;font-size:15px">${((s.count||0) as number).toLocaleString()}</span>
+        <span style="color:rgba(148,163,184,.3);font-size:11px;margin-left:6px">${pct((s.count||0) as number,lst.total)}</span>
       </div>
     </div>`).join('')}
   <!-- Summary stats -->
   <div style="display:flex;gap:0;margin-top:14px;border-top:1px solid rgba(99,102,241,.08);padding-top:12px">
-    ${[['Contacts',seg.total,'#a5b4fc'],['Opted Out',seg.optedOut,'rgba(148,163,184,.5)'],['Marketable',seg.marketable,'#10b981'],['New',seg.new,'#6366f1']].map(([l,v,c])=>`
+    ${[['Total',lst.total,'#a5b4fc'],['Marketable',lst.marketable,'#10b981'],['Bounced',lst.bounced_tag,'#f59e0b'],['Spam',lst.spam_tag,'#f43f5e']].map(([l,v,c])=>`
     <div style="flex:1;text-align:center">
-      <div style="font-size:18px;font-weight:700;color:${c}">${(v as number).toLocaleString()}</div>
+      <div style="font-size:18px;font-weight:700;color:${c}">${((v||0) as number).toLocaleString()}</div>
       <div style="font-size:9px;color:rgba(148,163,184,.4);text-transform:uppercase;margin-top:2px">${l}</div>
     </div>`).join('')}
   </div>
@@ -4613,7 +4628,7 @@ ${seg.total?`
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
   <div class="card">
     <div class="title">Email Quality</div>
-    ${[['✅ Safe to send',report.quality?.green,'#10b981'],['🚫 Do not send',report.quality?.red,'#f43f5e'],['⚠️ Bounced',report.quality?.bounced,'#f59e0b'],['🚨 Spam risk',report.quality?.spam,'#dc2626']].map(([l,c,col])=>`
+    ${[['✅ Safe to send',lst.green,'#10b981'],['🚫 Do not send',lst.red,'#f43f5e'],['⚠️ Bounced',lst.bounced_tag,'#f59e0b'],['🚨 Spam risk',lst.spam_tag,'#dc2626']].map(([l,c,col])=>`
     <div class="row"><span>${l}</span><span style="color:${col};font-weight:700">${((c||0) as number).toLocaleString()}</span></div>`).join('')}
   </div>
   <div class="card">
@@ -5011,6 +5026,161 @@ function SemanticSearchModal({ onClose, onNavigate }: { onClose: () => void; onN
   )
 }
 
+// ── Email Health Baseline Panel ────────────────────────────────────────────
+
+function EmailHealthBaselinePanel() {
+  const now = new Date()
+  // Default to last completed month
+  const defaultMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 7)
+
+  const [month, setMonth] = useState(defaultMonth)
+  const [form, setForm] = useState({
+    existing_mailed: '', new_mailed: '', open_rate: '', delivered: '',
+    total_opened: '', total_clicked: '', bounced: '', spam: '', unsub: '', engaged_90d: '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved]   = useState(false)
+  const [error, setError]   = useState('')
+  const [existing, setExisting] = useState<any[]>([])
+
+  // Build last-24-completed-months list
+  const monthOptions = Array.from({ length: 24 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - 1 - i, 1)
+    return d.toISOString().slice(0, 7)
+  })
+
+  async function loadBaselines() {
+    const r = await fetch('/api/reports/email-health?action=baselines')
+    if (r.ok) { const d = await r.json(); setExisting(d.baselines || []) }
+  }
+
+  async function loadMonth(m: string) {
+    setMonth(m)
+    const r = await fetch(`/api/reports/email-health?action=baseline&month=${m}`)
+    if (r.ok) {
+      const d = await r.json()
+      if (d.baseline) {
+        setForm({
+          existing_mailed: String(d.baseline.existing_mailed),
+          new_mailed:      String(d.baseline.new_mailed),
+          open_rate:       String(d.baseline.open_rate),
+          delivered:       String(d.baseline.delivered),
+          total_opened:    String(d.baseline.total_opened),
+          total_clicked:   String(d.baseline.total_clicked),
+          bounced:         String(d.baseline.bounced),
+          spam:            String(d.baseline.spam),
+          unsub:           String(d.baseline.unsub),
+          engaged_90d:     String(d.baseline.engaged_90d),
+        })
+      } else {
+        setForm({ existing_mailed:'', new_mailed:'', open_rate:'', delivered:'',
+          total_opened:'', total_clicked:'', bounced:'', spam:'', unsub:'', engaged_90d:'' })
+      }
+    }
+  }
+
+  useEffect(() => { loadBaselines(); loadMonth(defaultMonth) }, [])
+
+  async function save() {
+    setSaving(true); setError('')
+    const body = {
+      month,
+      existing_mailed: Number(form.existing_mailed),
+      new_mailed:      Number(form.new_mailed),
+      open_rate:       Number(form.open_rate),
+      delivered:       Number(form.delivered),
+      total_opened:    Number(form.total_opened),
+      total_clicked:   Number(form.total_clicked),
+      bounced:         Number(form.bounced),
+      spam:            Number(form.spam),
+      unsub:           Number(form.unsub),
+      engaged_90d:     Number(form.engaged_90d),
+    }
+    const r = await fetch('/api/reports/email-health', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    })
+    const d = await r.json()
+    if (!r.ok) { setError(d.error || 'Save failed') } else { setSaved(true); setTimeout(() => setSaved(false), 2500); loadBaselines() }
+    setSaving(false)
+  }
+
+  const cardStyle = { background: 'rgba(15,20,35,0.7)', border: '1px solid rgba(99,102,241,0.12)', borderRadius: 12, padding: '16px 18px', marginBottom: 14 }
+  const lbl = { display: 'block' as const, fontSize: 10, color: 'rgba(148,163,184,0.5)', fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase' as const, marginBottom: 5 }
+  const inp = { width: '100%', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.15)', borderRadius: 7, padding: '7px 10px', color: 'white', fontSize: 13, outline: 'none', boxSizing: 'border-box' as const }
+  const fields: { key: keyof typeof form; label: string; hint?: string }[] = [
+    { key: 'existing_mailed',  label: 'Existing Contacts Mailed',  hint: 'Smart list: existing contacts mailed this month' },
+    { key: 'new_mailed',       label: 'New Contacts Mailed',       hint: 'Smart list: new contacts mailed this month' },
+    { key: 'engaged_90d',      label: 'Engaged in 90 Days',        hint: 'Smart list: existing mailed + green OR slipping tag' },
+    { key: 'delivered',        label: 'Emails Delivered',          hint: 'GHL Statistics page' },
+    { key: 'open_rate',        label: 'Open Rate (%)',             hint: 'e.g. 34.50' },
+    { key: 'total_opened',     label: 'Total Opened',              hint: 'GHL Statistics page' },
+    { key: 'total_clicked',    label: 'Total Clicked',             hint: 'GHL Statistics page' },
+    { key: 'bounced',          label: 'Bounced',                   hint: 'GHL Statistics page' },
+    { key: 'spam',             label: 'Spam Complaints',           hint: 'GHL Statistics page' },
+    { key: 'unsub',            label: 'Unsubscribed',              hint: 'GHL Statistics page' },
+  ]
+
+  return (
+    <div style={cardStyle}>
+      <div style={{ fontSize: 11, color: '#a5b4fc', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 14 }}>Email Health Baselines</div>
+      <p style={{ fontSize: 12, color: 'rgba(148,163,184,0.5)', marginBottom: 14, lineHeight: 1.6 }}>Enter monthly numbers from GHL Statistics + smart lists. Used to generate the Email Health Report each month.</p>
+
+      {/* Month picker */}
+      <div style={{ marginBottom: 14 }}>
+        <label style={lbl}>Month</label>
+        <select value={month} onChange={e => loadMonth(e.target.value)} style={{ ...inp, fontFamily: 'inherit' }}>
+          {monthOptions.map(m => (
+            <option key={m} value={m} style={{ background: '#0f1423' }}>
+              {new Date(m + '-15').toLocaleString('default', { month: 'long', year: 'numeric' })}
+              {existing.some(b => b.month === m) ? ' ✓' : ''}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Fields in 2-col grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 14px', marginBottom: 14 }}>
+        {fields.map(f => (
+          <div key={f.key}>
+            <label style={lbl}>{f.label}</label>
+            <input
+              value={form[f.key]}
+              onChange={e => setForm(prev => ({ ...prev, [f.key]: e.target.value }))}
+              placeholder={f.hint}
+              style={inp}
+              type="number"
+              min="0"
+              step={f.key === 'open_rate' ? '0.01' : '1'}
+            />
+          </div>
+        ))}
+      </div>
+
+      {error && <p style={{ color: '#f43f5e', fontSize: 12, marginBottom: 10 }}>{error}</p>}
+
+      <motion.button onClick={save} disabled={saving} whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
+        style={{ width: '100%', padding: '9px 0', background: saved ? 'rgba(16,185,129,0.2)' : 'linear-gradient(135deg,#4338ca,#6366f1)', border: saved ? '1px solid rgba(16,185,129,0.4)' : 'none', borderRadius: 9, color: saved ? '#10b981' : 'white', fontWeight: 600, fontSize: 13, cursor: 'pointer', opacity: saving ? 0.6 : 1 }}>
+        {saved ? '✓ Baseline Saved' : saving ? 'Saving…' : 'Save Baseline'}
+      </motion.button>
+
+      {/* Saved baselines list */}
+      {existing.length > 0 && (
+        <div style={{ marginTop: 14, borderTop: '1px solid rgba(99,102,241,0.1)', paddingTop: 12 }}>
+          <div style={{ fontSize: 10, color: 'rgba(148,163,184,0.4)', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 8 }}>Saved Baselines</div>
+          {existing.map((b: any) => (
+            <div key={b.month} onClick={() => loadMonth(b.month)} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px solid rgba(99,102,241,0.06)', cursor: 'pointer' }}>
+              <span style={{ color: 'rgba(148,163,184,0.7)', fontSize: 12 }}>{new Date(b.month + '-15').toLocaleString('default', { month: 'long', year: 'numeric' })}</span>
+              <span style={{ color: '#a5b4fc', fontSize: 12, fontWeight: 600 }}>Score {b.strict_score} · Relaxed {b.relaxed_score}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Settings View ─────────────────────────────────────────────────────────
+
 function SettingsView({ agents = [] }: { agents?: Agent[] }) {
   const [openaiUrl, setOpenaiUrl] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('openaiUrl') || 'https://api.openai.com/v1' : '')
   const [model, setModel] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('openaiModel') || 'gpt-4o-mini' : '')
@@ -5032,6 +5202,7 @@ function SettingsView({ agents = [] }: { agents?: Agent[] }) {
       <WebhooksPanel />
       <DriveSyncPanel agents={agents} />
       <ApiKeysPanel />
+      <EmailHealthBaselinePanel />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
         {[
           { label: 'OPENAI BASE URL', value: openaiUrl, set: setOpenaiUrl, placeholder: 'https://api.openai.com/v1' },

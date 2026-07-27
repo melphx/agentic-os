@@ -1286,6 +1286,75 @@ export function getAllSnapshots(locationId: string): EmailSnapshot[] {
   `).all(locationId) as EmailSnapshot[]
 }
 
+// ── Email Health Baselines ─────────────────────────────────────────────────
+// Stores manually-entered monthly baseline numbers for the email health report.
+// One row per month (YYYY-MM). Used as denominators for scores + HTI-style metrics.
+
+export interface EmailHealthBaseline {
+  month: string             // 'YYYY-MM'
+  existing_mailed: number   // unique existing contacts mailed that month (from smart list)
+  new_mailed: number        // unique new contacts mailed that month (from smart list)
+  open_rate: number         // % from GHL Statistics page (e.g. 34.5)
+  click_rate: number        // % (clicked / delivered × 100)
+  delivered: number         // total emails delivered (from GHL Statistics)
+  total_opened: number      // total open events
+  total_clicked: number     // total click events
+  bounced: number
+  spam: number
+  unsub: number
+  engaged_90d: number       // of existing_mailed: how many have green or slipping tag
+  strict_score: number      // open_rate × 10
+  relaxed_score: number     // engaged_90d / existing_mailed × 100 × 10
+  created_at?: string
+}
+
+export function ensureEmailHealthBaselinesTable() {
+  getDb().exec(`CREATE TABLE IF NOT EXISTS email_health_baselines (
+    month TEXT PRIMARY KEY,
+    existing_mailed INTEGER NOT NULL DEFAULT 0,
+    new_mailed INTEGER NOT NULL DEFAULT 0,
+    open_rate REAL NOT NULL DEFAULT 0,
+    click_rate REAL NOT NULL DEFAULT 0,
+    delivered INTEGER NOT NULL DEFAULT 0,
+    total_opened INTEGER NOT NULL DEFAULT 0,
+    total_clicked INTEGER NOT NULL DEFAULT 0,
+    bounced INTEGER NOT NULL DEFAULT 0,
+    spam INTEGER NOT NULL DEFAULT 0,
+    unsub INTEGER NOT NULL DEFAULT 0,
+    engaged_90d INTEGER NOT NULL DEFAULT 0,
+    strict_score INTEGER NOT NULL DEFAULT 0,
+    relaxed_score INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`)
+}
+
+export function saveEmailHealthBaseline(data: EmailHealthBaseline) {
+  ensureEmailHealthBaselinesTable()
+  const strict_score  = Math.min(999, Math.round(data.open_rate * 10))
+  const relaxed_score = data.existing_mailed > 0
+    ? Math.min(999, Math.round(data.engaged_90d / data.existing_mailed * 100 * 10))
+    : 0
+  const click_rate = data.delivered > 0 ? data.total_clicked / data.delivered * 100 : 0
+  getDb().prepare(`
+    INSERT OR REPLACE INTO email_health_baselines
+    (month, existing_mailed, new_mailed, open_rate, click_rate, delivered, total_opened,
+     total_clicked, bounced, spam, unsub, engaged_90d, strict_score, relaxed_score)
+    VALUES (@month, @existing_mailed, @new_mailed, @open_rate, @click_rate, @delivered,
+            @total_opened, @total_clicked, @bounced, @spam, @unsub, @engaged_90d,
+            @strict_score, @relaxed_score)
+  `).run({ ...data, strict_score, relaxed_score, click_rate })
+}
+
+export function getEmailHealthBaseline(month: string): EmailHealthBaseline | null {
+  ensureEmailHealthBaselinesTable()
+  return getDb().prepare(`SELECT * FROM email_health_baselines WHERE month = ?`).get(month) as EmailHealthBaseline | null
+}
+
+export function getAllEmailHealthBaselines(): EmailHealthBaseline[] {
+  ensureEmailHealthBaselinesTable()
+  return getDb().prepare(`SELECT * FROM email_health_baselines ORDER BY month DESC`).all() as EmailHealthBaseline[]
+}
+
 // ── MCD Reports ────────────────────────────────────────────────────────────
 
 export interface McdReport {
