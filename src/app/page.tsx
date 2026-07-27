@@ -4088,9 +4088,12 @@ function McdReportsView() {
 
 function EmailHealthReportView() {
   const todayStr = new Date().toISOString().slice(0,10)
-  const firstOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0,10)
-  const [startDate, setStartDate] = useState(firstOfMonth)
-  const [endDate, setEndDate] = useState(todayStr)
+  const thisMonth = new Date().toISOString().slice(0,7)
+  const [selectedMonth, setSelectedMonth] = useState(thisMonth)
+  // Derived: full calendar month, clamped to today
+  const startDate = selectedMonth + '-01'
+  const lastDayRaw = new Date(parseInt(selectedMonth.slice(0,4)), parseInt(selectedMonth.slice(5,7)), 0).toISOString().slice(0,10)
+  const endDate = lastDayRaw > todayStr ? todayStr : lastDayRaw
   const [loading, setLoading] = useState(false)
   const [report, setReport] = useState<any | null>(null)
   const [error, setError] = useState('')
@@ -4156,19 +4159,15 @@ function EmailHealthReportView() {
           {backend?.configured && <span style={{ fontSize:10, color:'#10b981', background:'rgba(16,185,129,0.1)', border:'1px solid rgba(16,185,129,0.2)', padding:'1px 7px', borderRadius:10 }}>Connected</span>}
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-            <span style={{ color:'rgba(148,163,184,0.4)', fontSize:11 }}>From</span>
-            <input type="date" value={startDate} max={todayStr} onChange={e=>setStartDate(e.target.value)}
-              style={{ background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:7, padding:'5px 8px', color:'white', fontSize:12, outline:'none', fontFamily:'inherit', colorScheme:'dark' }} />
-            <span style={{ color:'rgba(148,163,184,0.4)', fontSize:11 }}>To</span>
-            <input type="date" value={endDate} max={todayStr} onChange={e=>{ const v=e.target.value; setEndDate(v>todayStr?todayStr:v) }}
-              style={{ background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:7, padding:'5px 8px', color:'white', fontSize:12, outline:'none', fontFamily:'inherit', colorScheme:'dark' }} />
-          </div>
-          <div style={{ display:'flex', gap:4 }}>
-            <button onClick={()=>{ const t=new Date(); setStartDate(new Date(t.getFullYear(),t.getMonth(),1).toISOString().slice(0,10)); setEndDate(t.toISOString().slice(0,10)) }} style={{ padding:'4px 8px', background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:6, color:'#a5b4fc', fontSize:10, cursor:'pointer' }}>This Month</button>
-            <button onClick={()=>{ const t=new Date(); const s=new Date(t); s.setDate(t.getDate()-7); setStartDate(s.toISOString().slice(0,10)); setEndDate(t.toISOString().slice(0,10)) }} style={{ padding:'4px 8px', background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:6, color:'#a5b4fc', fontSize:10, cursor:'pointer' }}>Last 7d</button>
-            <button onClick={()=>{ const t=new Date(); const s=new Date(t); s.setDate(t.getDate()-30); setStartDate(s.toISOString().slice(0,10)); setEndDate(t.toISOString().slice(0,10)) }} style={{ padding:'4px 8px', background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:6, color:'#a5b4fc', fontSize:10, cursor:'pointer' }}>Last 30d</button>
-          </div>
+          <select value={selectedMonth} onChange={e=>setSelectedMonth(e.target.value)}
+            style={{ background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:7, padding:'5px 10px', color:'white', fontSize:12, outline:'none', fontFamily:'inherit', colorScheme:'dark', cursor:'pointer' }}>
+            {Array.from({length:13},(_,i)=>{
+              const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()-i);
+              const val = d.toISOString().slice(0,7);
+              const label = d.toLocaleDateString('en-US',{month:'long',year:'numeric'});
+              return <option key={val} value={val}>{label}</option>
+            })}
+          </select>
           {!postmasterConnected && <button onClick={()=>{window.location.href='/api/postmaster/oauth?action=start'}} style={{ padding:'5px 10px', background:'rgba(16,185,129,0.1)', border:'1px solid rgba(16,185,129,0.2)', borderRadius:7, color:'#10b981', fontSize:11, cursor:'pointer' }}>+ Postmaster</button>}
           <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.98}} onClick={generate} disabled={loading}
             style={{ padding:'7px 16px', background:'linear-gradient(135deg,#4338ca,#6366f1)', border:'none', borderRadius:8, color:'white', fontWeight:700, fontSize:12, cursor:'pointer', opacity:loading?0.6:1 }}>
@@ -4342,8 +4341,8 @@ function EmailHealthReportView() {
 
           {/* ── 7. AUDIENCE BREAKDOWN ── */}
           <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
-            <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:4 }}>Audience Breakdown</div>
-            <p style={{ color:'rgba(148,163,184,0.35)', fontSize:11, margin:'0 0 14px' }}>Engagement quality of your existing contact list</p>
+            <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:4 }}>List Health — Engagement Segments</div>
+            <p style={{ color:'rgba(148,163,184,0.35)', fontSize:11, margin:'0 0 14px' }}>Current list snapshot — lifetime engagement classification (not date-scoped)</p>
             <div style={{ display:'flex', height:10, borderRadius:8, overflow:'hidden', marginBottom:14 }}>
               {([
                 [report.segments.active,'#10b981'],[report.segments.warmingUp,'#06b6d4'],
@@ -4378,7 +4377,8 @@ function EmailHealthReportView() {
           {/* ── 8. EMAIL QUALITY + PROVIDERS ── */}
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:12 }}>
             <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px' }}>
-              <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:10 }}>Email Quality</div>
+              <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:4 }}>Email Quality</div>
+              <p style={{ color:'rgba(148,163,184,0.3)', fontSize:10, margin:'0 0 10px' }}>Current list snapshot</p>
               {[['✅ Safe to send',report.quality.green,'#10b981'],['🚫 Do not send',report.quality.red,'#f43f5e'],['⚠️ Bounced',report.quality.bounced,'#f59e0b'],['🚨 Spam risk',report.quality.spam,'#dc2626'],['❓ Invalid',report.quality.notFound,'rgba(148,163,184,0.4)'],['🔀 Catchall',report.quality.catchall,'rgba(148,163,184,0.4)']].map(([l,c,col])=>(
                 <div key={l as string} style={{ display:'flex', justifyContent:'space-between', padding:'5px 0', borderBottom:'1px solid rgba(99,102,241,0.05)' }}>
                   <span style={{ color:'rgba(148,163,184,0.6)', fontSize:12 }}>{l as string}</span>
@@ -4399,38 +4399,32 @@ function EmailHealthReportView() {
             </div>
           </div>
 
-          {/* ── 9. DMARC + GOOGLE SIGNALS ── */}
-          {postmasterData && (
-            <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
+          {/* ── 9. DMARC + GOOGLE SIGNALS ── always shown ── */}
+          {report && (
+            <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(16,185,129,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
+              <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:12 }}>DMARC & Google Postmaster Signals</div>
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
                 <div>
-                  <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:10 }}>DMARC Compliance</div>
-                  <div style={{ fontSize:28, fontWeight:800, color:'#10b981', marginBottom:4 }}>{postmasterData.dmarc_success_ratio!=null?(postmasterData.dmarc_success_ratio*100).toFixed(1)+'%':'N/A'}</div>
+                  <div style={{ color:'rgba(148,163,184,0.4)', fontSize:10, marginBottom:6 }}>DMARC Compliance</div>
+                  <div style={{ fontSize:28, fontWeight:800, color:'#10b981', marginBottom:4 }}>{postmasterData?.dmarc_success_ratio!=null?(postmasterData.dmarc_success_ratio*100).toFixed(1)+'%':'N/A'}</div>
                   <div style={{ color:'rgba(148,163,184,0.4)', fontSize:10, marginBottom:10 }}>Excellent DMARC Compliance Score</div>
-                  {[['SPF', postmasterData.spf_success_ratio],['DKIM', postmasterData.dkim_success_ratio]].map(([l,v])=>(
-                    <div key={l as string} style={{ display:'flex', justifyContent:'space-between', padding:'4px 0' }}>
-                      <span style={{ color:'rgba(148,163,184,0.5)', fontSize:12 }}>{l as string}</span>
-                      <span style={{ color:'#10b981', fontWeight:700, fontSize:12 }}>{(v as number)!=null?((v as number)*100).toFixed(1)+'%':'N/A'}</span>
+                  {[['SPF', postmasterData?.spf_success_ratio],['DKIM', postmasterData?.dkim_success_ratio]].map(([l,v])=>(
+                    <div key={l as string} style={{ display:'flex', justifyContent:'space-between', padding:'5px 0', borderBottom:'1px solid rgba(99,102,241,0.06)' }}>
+                      <span style={{ color:'rgba(148,163,184,0.5)', fontSize:12 }}>{l as string} Pass Rate</span>
+                      <span style={{ color:'#10b981', fontWeight:700, fontSize:12 }}>{v!=null?((v as number)*100).toFixed(1)+'%':'N/A'}</span>
                     </div>
                   ))}
                 </div>
                 <div>
-                  <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:10 }}>Google Signals</div>
-                  {[['l.phxhomeremodeling.com', postmasterData.domain_reputation],['phxhomeremodeling.com', postmasterData.domain_reputation]].map(([d,rep])=>(
-                    <div key={d as string} style={{ marginBottom:8 }}>
-                      <div style={{ color:'rgba(148,163,184,0.5)', fontSize:10, marginBottom:2 }}>{d}</div>
-                      <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                        <div style={{ width:8, height:8, borderRadius:'50%', background: rep==='HIGH'?'#10b981':'#f59e0b' }}/>
-                        <span style={{ color: rep==='HIGH'?'#10b981':'#f59e0b', fontWeight:700, fontSize:13 }}>Domain Reputation: {rep}</span>
-                      </div>
+                  <div style={{ color:'rgba(148,163,184,0.4)', fontSize:10, marginBottom:6 }}>Domain Reputation</div>
+                  <div style={{ fontSize:22, fontWeight:700, color: postmasterData?.domain_reputation==='HIGH'?'#10b981':'rgba(148,163,184,0.5)', marginBottom:10 }}>{postmasterData?.domain_reputation||'UNKNOWN'}</div>
+                  {[['Gmail Spam Rate', postmasterData?.spam_rate!=null?((postmasterData.spam_rate*100).toFixed(3)+'%'):null],['Inbox Rate', postmasterData?.inbox_placement_rate!=null?((postmasterData.inbox_placement_rate*100).toFixed(1)+'%'):null]].map(([l,v])=>(
+                    <div key={l as string} style={{ display:'flex', justifyContent:'space-between', padding:'5px 0', borderBottom:'1px solid rgba(99,102,241,0.06)' }}>
+                      <span style={{ color:'rgba(148,163,184,0.5)', fontSize:12 }}>{l as string}</span>
+                      <span style={{ color: v?'#10b981':'rgba(148,163,184,0.4)', fontWeight:700, fontSize:12 }}>{(v as string)||'N/A'}</span>
                     </div>
                   ))}
-                  {postmasterData.spam_rate != null && (
-                    <div style={{ marginTop:6, padding:'6px 10px', background:'rgba(16,185,129,0.06)', borderRadius:7 }}>
-                      <span style={{ color:'rgba(148,163,184,0.5)', fontSize:10 }}>GMAIL SPAM RATE </span>
-                      <span style={{ color:'#10b981', fontWeight:700, fontSize:13 }}>{(postmasterData.spam_rate*100).toFixed(3)}%</span>
-                    </div>
-                  )}
+                  {!postmasterConnected && <div style={{ marginTop:8, color:'rgba(148,163,184,0.3)', fontSize:10 }}>Connect Google Postmaster for live data</div>}
                 </div>
               </div>
             </div>
@@ -4581,7 +4575,7 @@ ${et?`
 ${seg.total?`
 <div class="card">
   <div class="title">List Health — Engagement Segments</div>
-  <p style="color:rgba(148,163,184,.35);font-size:11px;margin-bottom:12px">Engagement quality of your existing contact list</p>
+  <p style="color:rgba(148,163,184,.35);font-size:11px;margin-bottom:12px">Current list snapshot — lifetime engagement classification (not date-scoped)</p>
   <!-- Segment bar -->
   <div style="display:flex;height:10px;border-radius:5px;overflow:hidden;margin-bottom:16px;background:rgba(99,102,241,.08)">
     ${[[seg.active,'#10b981'],[seg.warmingUp,'#06b6d4'],[seg.cold,'#f59e0b'],[seg.dead,'#f43f5e']].map(([n,c])=>`<div style="width:${seg.total>0?(n as number)/seg.total*100:0}%;background:${c};min-width:${(n as number)>0?3:0}px"></div>`).join('')}
@@ -4630,29 +4624,28 @@ ${seg.total?`
 </div>
 
 <!-- DMARC + GOOGLE SIGNALS -->
-${pm?`
 <div class="card" style="border-color:rgba(16,185,129,.15)">
   <div class="title">DMARC &amp; Google Postmaster Signals</div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
     <div>
       <div style="color:rgba(148,163,184,.4);font-size:10px;margin-bottom:8px">DMARC Compliance</div>
-      <div style="font-size:28px;font-weight:700;color:#10b981">${pm.dmarc_success_ratio!=null?(pm.dmarc_success_ratio*100).toFixed(1)+'%':'N/A'}</div>
+      <div style="font-size:28px;font-weight:700;color:#10b981">${pm?.dmarc_success_ratio!=null?(pm.dmarc_success_ratio*100).toFixed(1)+'%':'N/A'}</div>
       <div style="color:rgba(148,163,184,.4);font-size:11px;margin-top:4px">Excellent DMARC Compliance Score</div>
       <div style="margin-top:12px">
-        <div class="row"><span>SPF Pass Rate</span><span style="color:#10b981;font-weight:700">${pm.spf_success_ratio!=null?(pm.spf_success_ratio*100).toFixed(0)+'%':'N/A'}</span></div>
-        <div class="row"><span>DKIM Pass Rate</span><span style="color:#10b981;font-weight:700">${pm.dkim_success_ratio!=null?(pm.dkim_success_ratio*100).toFixed(0)+'%':'N/A'}</span></div>
+        <div class="row"><span>SPF Pass Rate</span><span style="color:#10b981;font-weight:700">${pm?.spf_success_ratio!=null?(pm.spf_success_ratio*100).toFixed(0)+'%':'N/A'}</span></div>
+        <div class="row"><span>DKIM Pass Rate</span><span style="color:#10b981;font-weight:700">${pm?.dkim_success_ratio!=null?(pm.dkim_success_ratio*100).toFixed(0)+'%':'N/A'}</span></div>
       </div>
     </div>
     <div>
       <div style="color:rgba(148,163,184,.4);font-size:10px;margin-bottom:8px">Domain Reputation</div>
-      <div style="font-size:22px;font-weight:700;color:#10b981">${pm.domain_reputation||'UNKNOWN'}</div>
+      <div style="font-size:22px;font-weight:700;color:#10b981">${pm?.domain_reputation||'UNKNOWN'}</div>
       <div style="margin-top:12px">
-        <div class="row"><span>Spam Rate</span><span style="color:white;font-weight:700">${pm.spam_rate!=null?(pm.spam_rate*100).toFixed(3)+'%':'N/A'}</span></div>
-        <div class="row"><span>Inbox Rate</span><span style="color:#10b981;font-weight:700">${pm.inbox_placement_rate!=null?(pm.inbox_placement_rate*100).toFixed(1)+'%':'N/A'}</span></div>
+        <div class="row"><span>Spam Rate</span><span style="color:white;font-weight:700">${pm?.spam_rate!=null?(pm.spam_rate*100).toFixed(3)+'%':'N/A'}</span></div>
+        <div class="row"><span>Inbox Rate</span><span style="color:#10b981;font-weight:700">${pm?.inbox_placement_rate!=null?(pm.inbox_placement_rate*100).toFixed(1)+'%':'N/A'}</span></div>
       </div>
     </div>
   </div>
-</div>`:''}
+</div>
 
 <p style="color:rgba(148,163,184,.2);font-size:11px;text-align:center;padding:24px 0">Generated ${new Date(report.generated_at).toLocaleString()} · ${report.domain} · Phoenix Home Remodeling</p>
 </body></html>`
