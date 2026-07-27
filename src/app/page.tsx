@@ -5087,7 +5087,8 @@ function SemanticSearchModal({ onClose, onNavigate }: { onClose: () => void; onN
 function EmailHealthBaselinePanel() {
   const now = new Date()
   // Default to last completed month
-  const defaultMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 7)
+  const _dm = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+  const defaultMonth = `${_dm.getFullYear()}-${String(_dm.getMonth() + 1).padStart(2, '0')}`
 
   const [month, setMonth] = useState(defaultMonth)
   const [form, setForm] = useState({
@@ -5099,10 +5100,10 @@ function EmailHealthBaselinePanel() {
   const [error, setError]   = useState('')
   const [existing, setExisting] = useState<any[]>([])
 
-  // Build last-24-completed-months list
+  // Build last-24-completed-months list (use local date props to avoid UTC timezone shift)
+  const toMonthStr = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
   const monthOptions = Array.from({ length: 24 }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - 1 - i, 1)
-    return d.toISOString().slice(0, 7)
+    return toMonthStr(new Date(now.getFullYear(), now.getMonth() - 1 - i, 1))
   })
 
   async function loadBaselines() {
