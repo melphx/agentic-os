@@ -4151,6 +4151,14 @@ function EmailHealthReportView() {
     if (selectedMonth) loadCachedReport(selectedMonth)
   }, [selectedMonth])
 
+  // When postmaster status resolves after report is already loaded, fetch the data
+  useEffect(() => {
+    if (postmasterConnected && report && !report.in_progress && !report.no_baseline) {
+      fetch('/api/postmaster/data?domain=l.phxhomeremodeling.com')
+        .then(r=>r.json()).then(pd=>{ if(!pd.error) setPostmasterData(pd) }).catch(()=>{})
+    }
+  }, [postmasterConnected])
+
   async function generate() {
     if (!selectedMonth) return
     setLoading(true); setError(''); setPostmasterData(null)
@@ -4193,7 +4201,17 @@ function EmailHealthReportView() {
                 ))}
               </select>
           }
-          {!postmasterConnected && <button onClick={()=>{window.location.href='/api/postmaster/oauth?action=start'}} style={{ padding:'5px 10px', background:'rgba(16,185,129,0.1)', border:'1px solid rgba(16,185,129,0.2)', borderRadius:7, color:'#10b981', fontSize:11, cursor:'pointer' }}>+ Postmaster</button>}
+          {postmasterConnected
+            ? <span style={{ fontSize:10, color:'#10b981', background:'rgba(16,185,129,0.08)', border:'1px solid rgba(16,185,129,0.2)', padding:'3px 8px', borderRadius:6 }}>✓ Postmaster</span>
+            : <button onClick={()=>{window.location.href='/api/postmaster/oauth?action=start'}} style={{ padding:'5px 10px', background:'rgba(16,185,129,0.1)', border:'1px solid rgba(16,185,129,0.2)', borderRadius:7, color:'#10b981', fontSize:11, cursor:'pointer' }}>+ Connect Postmaster</button>
+          }
+          <button onClick={async ()=>{
+            try {
+              const r = await fetch('/api/reports/email-snapshot', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({}) })
+              const d = await r.json()
+              alert(d.ok ? `✓ Snapshot saved — ${d.saved} workflows recorded for ${d.snapshot_date}` : `Error: ${d.error}`)
+            } catch(e:any) { alert('Snapshot failed: '+e.message) }
+          }} style={{ padding:'5px 10px', background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.15)', borderRadius:7, color:'rgba(148,163,184,0.6)', fontSize:11, cursor:'pointer' }} title="Save current workflow stats as a baseline snapshot">📸 Snapshot</button>
           <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.98}} onClick={generate} disabled={loading || !selectedMonth}
             style={{ padding:'7px 16px', background:'linear-gradient(135deg,#4338ca,#6366f1)', border:'none', borderRadius:8, color:'white', fontWeight:700, fontSize:12, cursor: !selectedMonth ? 'not-allowed' : 'pointer', opacity: loading || !selectedMonth ? 0.5 : 1 }}>
             {loading ? '⏳ Generating…' : report && !report.in_progress && !report.no_baseline ? '🔄 Regenerate' : '⚡ Generate'}
@@ -4496,7 +4514,13 @@ function EmailHealthReportView() {
           {/* ── 10. WORKFLOW TABLE ── */}
           {report.workflows && report.workflows.length > 0 && (
             <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
-              <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:12 }}>Workflow Campaign Details</div>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4 }}>
+                <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const }}>Workflow Campaign Details</div>
+                <span style={{ fontSize:9, color: report.workflows_are_monthly ? '#10b981' : 'rgba(148,163,184,0.3)', background: report.workflows_are_monthly ? 'rgba(16,185,129,0.08)' : 'rgba(99,102,241,0.06)', border:`1px solid ${report.workflows_are_monthly ? 'rgba(16,185,129,0.2)' : 'rgba(99,102,241,0.1)'}`, padding:'2px 7px', borderRadius:4 }}>
+                  {report.workflows_are_monthly ? `📅 ${report.month_label}` : 'All-time cumulative'}
+                </span>
+              </div>
+              {!report.workflows_are_monthly && <p style={{ color:'rgba(148,163,184,0.25)', fontSize:10, margin:'0 0 12px', lineHeight:1.5 }}>Save a workflow snapshot at the end of this month and the previous month to see monthly numbers.</p>}
               <div style={{ overflowX:'auto' as const }}>
                 <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
                   <thead>

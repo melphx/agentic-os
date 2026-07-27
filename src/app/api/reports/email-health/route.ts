@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import {
   getEmailHealthBaseline, getAllEmailHealthBaselines, saveEmailHealthBaseline,
-  saveEmailHealthReport, getEmailHealthReport,
+  saveEmailHealthReport, getEmailHealthReport, getClosestSnapshot,
 } from '@/lib/db'
 
 const client = new OpenAI({
@@ -22,8 +22,8 @@ const GHL23 = (apiKey: string) => ({
 })
 
 async function fetchWorkflowCampaigns(apiKey: string, locationId: string) {
+  // Note: GHL workflow stats endpoint returns all-time cumulative only — date params are ignored
   try {
-    // Paginate through all workflow campaigns
     let all: any[] = []
     let offset = 0, total = Infinity
     while (all.length < total) {
@@ -39,10 +39,8 @@ async function fetchWorkflowCampaigns(apiKey: string, locationId: string) {
       all = all.concat(batch)
       offset += batch.length
     }
-    // Deduplicate
     const seen = new Set<string>()
     const campaigns = all.filter((c: any) => { const id = c.sourceId || c.id; if (seen.has(id)) return false; seen.add(id); return true })
-    // Fetch stats for each in parallel
     const results = await Promise.all(campaigns.map(async (c: any) => {
       try {
         const sourceId = c.sourceId || c.id
@@ -55,13 +53,14 @@ async function fetchWorkflowCampaigns(apiKey: string, locationId: string) {
         const s = d.stats || {}
         if (!s.sent || s.sent === 0) return null
         return {
-          name:       c.name || sourceId,
-          sent:       s.sent        || 0,
-          opened:     s.opened      || 0,
-          clicked:    s.clicked     || 0,
-          bounced:    s.permanentFail || s.bounced || 0,
-          openRate:   s.sent > 0 ? parseFloat(((s.opened  || 0) / s.sent * 100).toFixed(1)) : 0,
-          clickRate:  s.sent > 0 ? parseFloat(((s.clicked || 0) / s.sent * 100).toFixed(1)) : 0,
+          sourceId,
+          name:      c.name || sourceId,
+          sent:      s.sent          || 0,
+          opened:    s.opened        || 0,
+          clicked:   s.clicked       || 0,
+          bounced:   s.permanentFail || s.bounced || 0,
+          openRate:  parseFloat((s.openRate  || 0).toFixed(1)),
+          clickRate: parseFloat((s.clickRate || 0).toFixed(1)),
         }
       } catch { return null }
     }))
@@ -371,6 +370,34 @@ Data:\n${dataCtx}`,
       analysis = match ? JSON.parse(match[0]) : {}
     } catch { analysis = {} }
 
+    // ── Workflow monthly deltas via snapshots ──────────────────────────────
+    // End of report month and end of previous month
+    const [wy, wm] = month.split('-').map(Number)
+    const endOfMonth    = `${month}-${String(new Date(wy, wm, 0).getDate()).padStart(2, '0')}`
+    const prevMonthEnd  = new Date(wy, wm - 2, 1)
+    const prevMonthEndStr = `${prevMonthEnd.getFullYear()}-${String(prevMonthEnd.getMonth() + 1).padStart(2, '0')}-${String(new Date(prevMonthEnd.getFullYear(), prevMonthEnd.getMonth() + 1, 0).getDate()).padStart(2, '0')}`
+
+    let workflowsWithDeltas: any[] = (workflows as any[])
+    let workflowsAreMonthly = false
+    const workflowsComputed = (workflows as any[]).map((w: any) => {
+      const snapEnd   = getClosestSnapshot(endOfMonth,     locationId, w.sourceId)
+      const snapStart = getClosestSnapshot(prevMonthEndStr, locationId, w.sourceId)
+      if (snapEnd && snapStart) {
+        workflowsAreMonthly = true
+        const sent    = Math.max(0, snapEnd.sent    - snapStart.sent)
+        const opened  = Math.max(0, snapEnd.opened  - snapStart.opened)
+        const clicked = Math.max(0, snapEnd.clicked - snapStart.clicked)
+        const bounced = Math.max(0, snapEnd.bounced - snapStart.bounced)
+        if (sent === 0) return null
+        return { ...w, sent, opened, clicked, bounced,
+          openRate:  parseFloat((opened  / sent * 100).toFixed(1)),
+          clickRate: parseFloat((clicked / sent * 100).toFixed(1)),
+          is_monthly: true }
+      }
+      return { ...w, is_monthly: false }
+    }).filter(Boolean)
+    workflowsWithDeltas = workflowsComputed
+
     const reportPayload = {
       generated_at: new Date().toISOString(),
       month,
@@ -438,8 +465,9 @@ Data:\n${dataCtx}`,
       // Providers (live snapshot)
       providers: { google, microsoft, yahoo, other: otherProvider, scanned },
 
-      // Workflow campaign details (live snapshot)
-      workflows,
+      // Workflow campaign details
+      workflows: workflowsWithDeltas,
+      workflows_are_monthly: workflowsAreMonthly,
 
       analysis,
     }

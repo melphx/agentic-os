@@ -85,13 +85,36 @@ export async function POST(req: NextRequest) {
   if (error) return error
 
   const body = await req.json().catch(() => ({}))
-  const apiKey     = (body.ghl_api_key  || process.env.GHL_API_KEY     || '').trim()
   const locationId = (body.location_id  || process.env.GHL_LOCATION_ID || '').trim()
-  // Default snapshot date to end of current month
   const now = new Date()
-  const defaultDate = now.toISOString().slice(0, 10) // today by default
+  const defaultDate = now.toISOString().slice(0, 10)
   const snapshotDate = body.snapshot_date || defaultDate
 
+  // Manual injection mode: caller provides pre-aggregated campaign data
+  if (Array.isArray(body.manual_campaigns)) {
+    if (!locationId) return NextResponse.json({ error: 'location_id required' }, { status: 400 })
+    ensureEmailSnapshotsTable()
+    let saved = 0
+    for (const c of body.manual_campaigns as any[]) {
+      if (!c.source_id) continue
+      saveEmailSnapshot({
+        snapshot_date: snapshotDate,
+        location_id:   locationId,
+        source_id:     c.source_id,
+        campaign_name: c.name || '',
+        sent:          c.sent          || 0,
+        opened:        c.opened        || 0,
+        clicked:       c.clicked       || 0,
+        bounced:       c.bounced       || 0,
+        complained:    c.complained    || 0,
+        unsubscribed:  c.unsubscribed  || 0,
+      })
+      saved++
+    }
+    return NextResponse.json({ ok: true, snapshot_date: snapshotDate, saved, mode: 'manual' })
+  }
+
+  const apiKey = (body.ghl_api_key || process.env.GHL_API_KEY || '').trim()
   if (!apiKey || !locationId) return NextResponse.json({ error: 'credentials required' }, { status: 400 })
 
   try {
