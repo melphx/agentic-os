@@ -4293,6 +4293,7 @@ function EmailHealthReportView() {
               </div>
             ))}
           </div>
+          )}
 
           {/* ── 4. PROBLEMS COSTING REVENUE ── */}
           {Array.isArray(report.analysis?.problems) && report.analysis.problems.length > 0 && (
