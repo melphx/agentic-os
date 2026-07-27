@@ -285,10 +285,9 @@ export async function POST(req: NextRequest) {
     // Not engaged in 90d = existing_mailed - engaged_90d
     const engaged90d         = baseline.engaged_90d
     const notEngaged90d      = existingMailed - engaged90d
-    // Liabilities = slipping tag (from live list — approximation)
-    // Worst liabilities = neverEngaged tag
-    const liabilities        = Math.min(slipping,     existingMailed)
-    const worstLiabilities   = Math.min(neverEngaged, existingMailed)
+    // Liabilities = mailed contacts not engaged in last 90 days (accurate: from baseline engaged_90d)
+    // We cannot compute worst-liabilities (never/1yr+) for the mailed subset without per-contact data
+    const liabilities        = notEngaged90d  // existingMailed - engaged_90d
 
     // ── List health ────────────────────────────────────────────────────────
     const marketable   = Math.max(0, total - red)
@@ -319,9 +318,7 @@ Did not open: ${existingNotOpen.toLocaleString()}
 Clicked: ${existingClicked.toLocaleString()} (${pctOf(existingClicked, existingMailed)}%)
 Did not click: ${existingNotClick.toLocaleString()} (${pctOf(existingNotClick, existingMailed)}%)
 Engaged in last 90 days (relaxed): ${engaged90d.toLocaleString()} (${pctOf(engaged90d, existingMailed)}%)
-Not engaged in 90+ days: ${notEngaged90d.toLocaleString()}
-Liabilities (slipping 90-365d): ${liabilities.toLocaleString()}
-Worst Liabilities (never/1yr+): ${worstLiabilities.toLocaleString()}
+Not engaged / at-risk (90d+): ${liabilities.toLocaleString()} (${pctOf(liabilities, existingMailed)}%)
 
 NEW CONTACTS MAILED: ${newMailed.toLocaleString()}
 Opened: ${newOpened.toLocaleString()} (${pctOf(newOpened, newMailed)}%)
@@ -379,15 +376,15 @@ Return valid JSON only.`,
 - executive_summary: A comprehensive 3-paragraph executive summary in HTI style.
   Paragraph 1 (2-3 sentences): Open with "Your Email Health Score for ${monthLabel(month)} is ${strictScore}/999 (${scoreLabel(strictScore)})." State the score change vs prior month. One sentence framing the overall picture for the ${(existingMailed + newMailed).toLocaleString()} contacts mailed this month.
   Paragraph 2 — Good news (start with "Good news that works in your favor:"): 4-6 sentences each on its own line. Cover: relaxed score of ${relaxedScore}, score change, new contact clicks (${newClicked} of ${newMailed}), domain/blocklist status, DMARC compliance, open rate, low bounce/spam. Use exact numbers from data.
-  Paragraph 3 — Issues (start with "Lack of engagement can damage your sending reputation:"): 4-6 sentences each on its own line covering ONLY mailed-contact issues with exact counts: existing contacts who didn't open, who didn't click, liabilities (${liabilities}) and worst liabilities (${worstLiabilities}) in the mailed pool, new contacts who didn't engage. No DND/red/never-sent totals.
+  Paragraph 3 — Issues (start with "Lack of engagement can damage your sending reputation:"): 4-6 sentences each on its own line covering ONLY mailed-contact issues with exact counts: existing contacts who didn't open, who didn't click, ${liabilities} at-risk contacts (not engaged in 90d+) in the mailed pool, new contacts who didn't engage. No DND/red/never-sent totals.
 
 - good_news: array of 5-7 strings — each citing specific numbers. Cover: relaxed score, score improvement, new contact open/click rates, domain health, DMARC, bounce rate, spam rate, any positive trend vs prior month.
 
-- problems: array of {title, description} objects — 3-4 items. ONLY from mailed contacts. Include exact counts. Examples: "${existingNotClick.toLocaleString()} existing contacts didn't click", "${liabilities.toLocaleString()} liabilities in your mailed pool", new contacts who didn't open/click.
+- problems: array of {title, description} objects — 3-4 items. ONLY from mailed contacts. Include exact counts. Examples: "${existingNotClick.toLocaleString()} existing contacts didn't click", "${liabilities.toLocaleString()} mailed contacts haven't engaged in 90+ days", new contacts who didn't open/click.
 
 - actions_new_contacts: array of 5-7 detailed action strings. Be specific with counts from the data (${newNotOpen} didn't open, ${newNotClick} didn't click). Mirror HTI style: reach out to the X who didn't open, verify emails, drive clicks, weekly cadence, content tips, thank-you page instructions.
 
-- actions_existing_contacts: array of 6-8 detailed action strings. Be specific with counts. Mirror HTI style: DRIVE THE CLICK campaign for ${existingNotClick.toLocaleString()} who haven't clicked, IS THIS GOOD-BYE campaign for ${liabilities.toLocaleString()} slipping contacts, opt out ${worstLiabilities.toLocaleString()} worst liabilities, weekly email cadence, content strategies.
+- actions_existing_contacts: array of 6-8 detailed action strings. Be specific with counts. Mirror HTI style: DRIVE THE CLICK campaign for ${existingNotClick.toLocaleString()} who haven't clicked, IS THIS GOOD-BYE re-engagement campaign for ${liabilities.toLocaleString()} contacts not engaged in 90+ days, weekly email cadence, content strategies.
 
 - actions_maintenance: array of 2-3 ongoing best practice strings.
 - analyst_note: 1-2 sentences — the single most important insight from this month's actual sends.
@@ -463,7 +460,6 @@ Data:\n${dataCtx}`,
         engaged_90d: engaged90d,
         not_engaged_90d: notEngaged90d,
         liabilities,
-        worst_liabilities: worstLiabilities,
       },
 
       // New contacts
