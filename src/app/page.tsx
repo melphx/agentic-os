@@ -4127,10 +4127,11 @@ function EmailHealthReportView() {
   const sc = !report ? '#6366f1' : report.strict_score >= 800 ? '#10b981' : report.strict_score >= 650 ? '#06b6d4' : report.strict_score >= 500 ? '#f59e0b' : report.strict_score >= 300 ? '#f43f5e' : '#dc2626'
   const pct = (n: number, d: number) => d > 0 ? (n/d*100).toFixed(1)+'%' : '0%'
 
-  const badge = (level: string) => {
+  const badgeStyle = (level: string): React.CSSProperties => {
     const colors: Record<string,string> = { high:'#f43f5e', medium:'#f59e0b', low:'#06b6d4' }
-    return <span style={{ padding:'1px 6px', borderRadius:4, background:`${colors[level]}20`, border:`1px solid ${colors[level]}40`, color:colors[level], fontSize:9, fontWeight:700, textTransform:'uppercase' as const, marginRight:6 }}>{level}</span>
+    return { padding:'1px 6px', borderRadius:4, background:`${colors[level]}20`, border:`1px solid ${colors[level]}40`, color:colors[level], fontSize:9, fontWeight:700, textTransform:'uppercase', marginRight:6 }
   }
+  const badge = (level: string) => <span style={badgeStyle(level)}>{level}</span>
 
   return (
     <div style={{ height:'100%', overflowY:'auto', background:'#080c14' }}>
