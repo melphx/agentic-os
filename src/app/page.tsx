@@ -4283,7 +4283,11 @@ function EmailHealthReportView() {
                   {report.score_delta > 0 ? `▲ +${report.score_delta}` : report.score_delta < 0 ? `▼ ${report.score_delta}` : '— no change'} vs {report.prev_month}
                 </span>}
               </div>
-              <p style={{ color:'rgba(148,163,184,0.6)', fontSize:12, margin:'0 0 6px', lineHeight:1.5 }}>{report.analysis?.executive_summary || 'Generating analysis…'}</p>
+              <div style={{ color:'rgba(148,163,184,0.7)', fontSize:13, margin:'0 0 6px', lineHeight:1.7 }}>
+                {(report.analysis?.executive_summary || 'Generating analysis…').split('\n').map((line:string, i:number) => (
+                  line.trim() ? <p key={i} style={{ margin:'0 0 8px' }}>{line}</p> : <div key={i} style={{ height:4 }} />
+                ))}
+              </div>
               <div style={{ display:'flex', gap:16 }}>
                 <div><span style={{ color:'rgba(148,163,184,0.4)', fontSize:10 }}>STRICT </span><span style={{ color:sc, fontWeight:700, fontSize:13 }}>{report.strict_score}</span></div>
                 <div><span style={{ color:'rgba(148,163,184,0.4)', fontSize:10 }}>RELAXED </span><span style={{ color:'#06b6d4', fontWeight:700, fontSize:13 }}>{report.relaxed_score}</span></div>
@@ -4331,7 +4335,7 @@ function EmailHealthReportView() {
           {/* ── 5. ACTIONS — NEW CONTACTS ── */}
           {Array.isArray(report.analysis?.actions_new_contacts) && report.analysis.actions_new_contacts.length > 0 && (
           <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
-            <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:12 }}>Actions — New Contacts ({report.new_leads?.mailed?.toLocaleString()} mailed)</div>
+            <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:12 }}>Actions To Take — New Leads Added &amp; Emailed in {report.month_label?.split(' ')[0]} ({report.new_leads?.mailed?.toLocaleString()} contacts)</div>
             {report.analysis.actions_new_contacts.map((a:string,i:number)=>(
               <div key={i} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid rgba(99,102,241,0.06)', alignItems:'flex-start' }}>
                 <span style={{ flexShrink:0, marginTop:1 }}><ActionBadge level="medium" /></span>
@@ -4344,7 +4348,7 @@ function EmailHealthReportView() {
           {/* ── 5b. ACTIONS — EXISTING CONTACTS ── */}
           {Array.isArray(report.analysis?.actions_existing_contacts) && report.analysis.actions_existing_contacts.length > 0 && (
           <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
-            <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:12 }}>Actions — Existing Contacts ({report.existing?.mailed?.toLocaleString()} mailed)</div>
+            <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:12 }}>Actions To Take — Existing Contacts Emailed in {report.month_label?.split(' ')[0]} ({report.existing?.mailed?.toLocaleString()} contacts)</div>
             {report.analysis.actions_existing_contacts.map((a:string,i:number)=>(
               <div key={i} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid rgba(99,102,241,0.06)', alignItems:'flex-start' }}>
                 <span style={{ flexShrink:0, marginTop:1 }}><ActionBadge level="high" /></span>
@@ -4397,7 +4401,7 @@ function EmailHealthReportView() {
                 </thead>
                 <tbody>
                   <tr style={{ borderBottom:'1px solid rgba(99,102,241,0.05)' }}>
-                    <td style={{ padding:'7px 10px', color:'rgba(148,163,184,0.8)', fontSize:12 }}>Existing</td>
+                    <td style={{ padding:'7px 10px', color:'rgba(148,163,184,0.8)', fontSize:12 }}>Existing contacts emailed in {report.month_label?.split(' ')[0]}</td>
                     <td style={{ padding:'7px 10px', color:'white', fontWeight:600, fontSize:12 }}>{report.existing?.mailed?.toLocaleString()}</td>
                     <td style={{ padding:'7px 10px', color:'rgba(148,163,184,0.7)', fontSize:12 }}>{report.existing?.opened?.toLocaleString()}</td>
                     <td style={{ padding:'7px 10px', color:'rgba(148,163,184,0.7)', fontSize:12 }}>{report.existing?.clicked?.toLocaleString()}</td>
@@ -4405,7 +4409,7 @@ function EmailHealthReportView() {
                     <td style={{ padding:'7px 10px', color:'#10b981', fontWeight:600, fontSize:12 }}>{report.existing?.click_pct}%</td>
                   </tr>
                   <tr>
-                    <td style={{ padding:'7px 10px', color:'rgba(148,163,184,0.8)', fontSize:12 }}>New Leads</td>
+                    <td style={{ padding:'7px 10px', color:'rgba(148,163,184,0.8)', fontSize:12 }}>New leads added &amp; emailed in {report.month_label?.split(' ')[0]}</td>
                     <td style={{ padding:'7px 10px', color:'white', fontWeight:600, fontSize:12 }}>{report.new_leads?.mailed?.toLocaleString()}</td>
                     <td style={{ padding:'7px 10px', color:'rgba(148,163,184,0.7)', fontSize:12 }}>{report.new_leads?.opened?.toLocaleString()}</td>
                     <td style={{ padding:'7px 10px', color:'rgba(148,163,184,0.7)', fontSize:12 }}>{report.new_leads?.clicked?.toLocaleString()}</td>

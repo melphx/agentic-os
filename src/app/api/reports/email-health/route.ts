@@ -83,6 +83,21 @@ async function countByTag(apiKey: string, locationId: string, tag: string): Prom
   } catch { return 0 }
 }
 
+// Count contacts that have ALL of the given tags (AND logic)
+async function countByAllTags(apiKey: string, locationId: string, ...tags: string[]): Promise<number> {
+  try {
+    const res = await fetch('https://services.leadconnectorhq.com/contacts/search', {
+      method: 'POST',
+      headers: { ...GHL(apiKey), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ locationId, pageLimit: 1, filters: tags.map(tag => ({ field: 'tags', operator: 'contains', value: tag })) }),
+      signal: AbortSignal.timeout(10000), cache: 'no-store',
+    })
+    if (!res.ok) return 0
+    const d = await res.json() as Record<string, any>
+    return d.total || 0
+  } catch { return 0 }
+}
+
 async function getTotalContacts(apiKey: string, locationId: string): Promise<number> {
   try {
     const res = await fetch(
@@ -217,6 +232,7 @@ export async function POST(req: NextRequest) {
       neverEngaged, slipping, neverSent,
       google, microsoft, yahoo, otherProvider,
       workflows,
+      greenAndSlipping, greenAndNeverEngaged, slippingAndNeverEngaged,
     ] = await Promise.all([
       getTotalContacts(apiKey, locationId),
       countByTag(apiKey, locationId, 'hti status = green (send responsibly)'),
@@ -235,7 +251,17 @@ export async function POST(req: NextRequest) {
       countByTag(apiKey, locationId, 'hti email provider check = is yahoo'),
       countByTag(apiKey, locationId, 'hti email provider check = is other email provider'),
       fetchWorkflowCampaigns(apiKey, locationId),
+      countByAllTags(apiKey, locationId, 'hti status = green (send responsibly)',      'hti engagement check = slipping'),
+      countByAllTags(apiKey, locationId, 'hti status = green (send responsibly)',      'hti engagement check = never engaged'),
+      countByAllTags(apiKey, locationId, 'hti engagement check = slipping',            'hti engagement check = never engaged'),
     ])
+
+    // Deduplicate engagement segments using priority: neverEngaged > slipping > green
+    // A contact with a stale "green" tag who is now slipping or never-engaged belongs in the worse bucket
+    const trueGreen       = Math.max(0, green    - greenAndSlipping    - greenAndNeverEngaged)
+    const trueSlipping    = Math.max(0, slipping - slippingAndNeverEngaged)
+    const trueNeverEngaged = neverEngaged  // top priority — no deduction
+    const trueNeverSent   = neverSent      // separate dimension — not engagement-based
 
     // ── Scores ─────────────────────────────────────────────────────────────
     const strictScore  = baseline.strict_score
@@ -331,7 +357,7 @@ Invalid/Not found: ${notFound.toLocaleString()} | Bounced: ${bouncedTag.toLocale
 
     const completion = await client.chat.completions.create({
       model: MODEL,
-      max_completion_tokens: 3000,
+      max_completion_tokens: 5000,
       messages: [
         {
           role: 'system',
@@ -350,13 +376,23 @@ Return valid JSON only.`,
           role: 'user',
           content: `Generate the email health analysis for ${monthLabel(month)}. Return JSON with exactly these keys:
 
-- executive_summary: 3-4 sentences. HTI style — lead with the score ("Your Email Health Score for ${monthLabel(month)} is ${strictScore}/999 (${scoreLabel(strictScore)})."), then mention score change vs prior month, the open rate and click rate from the ${existingMailed + newMailed} contacts mailed, and one forward-looking sentence. Be specific with numbers.
-- good_news: array of 3-4 strings — genuinely positive findings from the mailed contacts or list signals (strong open rate, low bounce, domain health, etc.)
-- problems: array of objects {title, description} — ONLY problems from the actual sends: low click rate, unopened contacts, re-engagement need. Max 3 items. No DND/red/never-sent framing.
-- actions_new_contacts: array of 3-4 action strings for the ${newMailed} new contacts who didn't click
-- actions_existing_contacts: array of 4-5 action strings for existing contact segments to drive clicks and re-engagement
-- actions_maintenance: array of 2-3 ongoing best practice strings
-- analyst_note: 1-2 sentences — the single most important insight from this month's actual sends
+- executive_summary: A comprehensive 3-paragraph executive summary in HTI style.
+  Paragraph 1 (2-3 sentences): Open with "Your Email Health Score for ${monthLabel(month)} is ${strictScore}/999 (${scoreLabel(strictScore)})." State the score change vs prior month. One sentence framing the overall picture for the ${(existingMailed + newMailed).toLocaleString()} contacts mailed this month.
+  Paragraph 2 — Good news (start with "Good news that works in your favor:"): 4-6 sentences each on its own line. Cover: relaxed score of ${relaxedScore}, score change, new contact clicks (${newClicked} of ${newMailed}), domain/blocklist status, DMARC compliance, open rate, low bounce/spam. Use exact numbers from data.
+  Paragraph 3 — Issues (start with "Lack of engagement can damage your sending reputation:"): 4-6 sentences each on its own line covering ONLY mailed-contact issues with exact counts: existing contacts who didn't open, who didn't click, liabilities (${liabilities}) and worst liabilities (${worstLiabilities}) in the mailed pool, new contacts who didn't engage. No DND/red/never-sent totals.
+
+- good_news: array of 5-7 strings — each citing specific numbers. Cover: relaxed score, score improvement, new contact open/click rates, domain health, DMARC, bounce rate, spam rate, any positive trend vs prior month.
+
+- problems: array of {title, description} objects — 3-4 items. ONLY from mailed contacts. Include exact counts. Examples: "${existingNotClick.toLocaleString()} existing contacts didn't click", "${liabilities.toLocaleString()} liabilities in your mailed pool", new contacts who didn't open/click.
+
+- actions_new_contacts: array of 5-7 detailed action strings. Be specific with counts from the data (${newNotOpen} didn't open, ${newNotClick} didn't click). Mirror HTI style: reach out to the X who didn't open, verify emails, drive clicks, weekly cadence, content tips, thank-you page instructions.
+
+- actions_existing_contacts: array of 6-8 detailed action strings. Be specific with counts. Mirror HTI style: DRIVE THE CLICK campaign for ${existingNotClick.toLocaleString()} who haven't clicked, IS THIS GOOD-BYE campaign for ${liabilities.toLocaleString()} slipping contacts, opt out ${worstLiabilities.toLocaleString()} worst liabilities, weekly email cadence, content strategies.
+
+- actions_maintenance: array of 2-3 ongoing best practice strings.
+- analyst_note: 1-2 sentences — the single most important insight from this month's actual sends.
+
+Data:\n${dataCtx}`
 
 Data:\n${dataCtx}`,
         },
@@ -456,11 +492,12 @@ Data:\n${dataCtx}`,
         unsub:       baseline.unsub,
       },
 
-      // List health (live snapshot)
+      // List health (deduplicated by priority: neverEngaged > slipping > green)
       list: {
         total, marketable,
-        green, red,
-        slipping, never_engaged: neverEngaged, never_sent: neverSent,
+        green: trueGreen,
+        red,
+        slipping: trueSlipping, never_engaged: trueNeverEngaged, never_sent: trueNeverSent,
         catchall, suspicious, free_email: freeEmail, not_found: notFound,
         bounced_tag: bouncedTag, spam_tag: spamTag,
       },
