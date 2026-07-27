@@ -392,8 +392,6 @@ Return valid JSON only.`,
 - actions_maintenance: array of 2-3 ongoing best practice strings.
 - analyst_note: 1-2 sentences — the single most important insight from this month's actual sends.
 
-Data:\n${dataCtx}`
-
 Data:\n${dataCtx}`,
         },
       ],
