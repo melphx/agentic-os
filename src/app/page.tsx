@@ -4086,28 +4086,74 @@ function McdReportsView() {
 
 // ── Email Health Report View ───────────────────────────────────────────────
 
+const ACTION_BADGE_COLORS: Record<string,string> = { high:'#f43f5e', medium:'#f59e0b', low:'#06b6d4' }
+function ActionBadge({ level }: { level: string }) {
+  const c = ACTION_BADGE_COLORS[level] || '#6366f1'
+  const s: React.CSSProperties = { padding:'1px 6px', borderRadius:4, background:c+'20', border:'1px solid '+c+'40', color:c, fontSize:9, fontWeight:700, textTransform:'uppercase', marginRight:6 }
+  return <span style={s}>{level}</span>
+}
+
 function EmailHealthReportView() {
-  // Default to last completed month (not current)
   const currentMonth = new Date().toISOString().slice(0,7)
-  const lastCompletedDate = new Date(); lastCompletedDate.setDate(1); lastCompletedDate.setMonth(lastCompletedDate.getMonth()-1)
-  const lastCompletedMonth = lastCompletedDate.toISOString().slice(0,7)
-  const [selectedMonth, setSelectedMonth] = useState(lastCompletedMonth)
+  const [availableMonths, setAvailableMonths] = useState<{month:string;label:string}[]>([])
+  const [selectedMonth, setSelectedMonth] = useState('')
   const [loading, setLoading] = useState(false)
   const [report, setReport] = useState<any | null>(null)
+  const [reportGeneratedAt, setReportGeneratedAt] = useState<string|null>(null)
   const [error, setError] = useState('')
   const [postmasterData, setPostmasterData] = useState<any | null>(null)
   const [postmasterConnected, setPostmasterConnected] = useState(false)
   const [backend, setBackend] = useState<{configured:boolean;domain:string}|null>(null)
-  const isCurrentMonth = selectedMonth >= currentMonth
+
+  // Load available months (only those with baselines, excluding current month)
+  async function loadAvailableMonths() {
+    try {
+      const r = await fetch('/api/reports/email-health?action=baselines')
+      const d = await r.json()
+      const months = ((d.baselines || []) as any[])
+        .filter((b: any) => b.month < currentMonth)
+        .map((b: any) => ({
+          month: b.month,
+          label: new Date(b.month + '-15').toLocaleString('default', { month: 'long', year: 'numeric' }),
+        }))
+      setAvailableMonths(months)
+      if (months.length > 0 && !selectedMonth) {
+        setSelectedMonth(months[0].month)
+      }
+    } catch {}
+  }
+
+  // Auto-load cached report when month changes
+  async function loadCachedReport(month: string) {
+    if (!month) return
+    setReport(null); setReportGeneratedAt(null); setError('')
+    try {
+      const r = await fetch(`/api/reports/email-health?action=report&month=${month}`)
+      const d = await r.json()
+      if (d.cached) {
+        setReport(d.cached)
+        setReportGeneratedAt(d.generated_at)
+        if (postmasterConnected) {
+          fetch('/api/postmaster/data?domain=l.phxhomeremodeling.com')
+            .then(r2=>r2.json()).then(pd=>{ if(!pd.error) setPostmasterData(pd) }).catch(()=>{})
+        }
+      }
+    } catch {}
+  }
 
   useEffect(() => {
     fetch('/api/reports/email-health').then(r=>r.json()).then(d=>setBackend(d)).catch(()=>{})
     fetch('/api/postmaster/oauth?action=status').then(r=>r.json()).then(d=>setPostmasterConnected(d.connected)).catch(()=>{})
+    loadAvailableMonths()
   }, [])
 
+  useEffect(() => {
+    if (selectedMonth) loadCachedReport(selectedMonth)
+  }, [selectedMonth])
+
   async function generate() {
-    if (isCurrentMonth) return
-    setLoading(true); setError(''); setReport(null); setPostmasterData(null)
+    if (!selectedMonth) return
+    setLoading(true); setError(''); setPostmasterData(null)
     try {
       const r = await fetch('/api/reports/email-health', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -4116,6 +4162,7 @@ function EmailHealthReportView() {
       const d = await r.json()
       if (!r.ok && !d.in_progress && !d.no_baseline) { setError(d.error || 'Failed'); return }
       setReport(d)
+      setReportGeneratedAt(d.generated_at)
       if (postmasterConnected && !d.in_progress && !d.no_baseline) {
         fetch('/api/postmaster/data?domain=l.phxhomeremodeling.com')
           .then(r2=>r2.json()).then(pd=>{ if(!pd.error) setPostmasterData(pd) }).catch(()=>{})
@@ -4127,11 +4174,6 @@ function EmailHealthReportView() {
   const sc = !report ? '#6366f1' : report.strict_score >= 800 ? '#10b981' : report.strict_score >= 650 ? '#06b6d4' : report.strict_score >= 500 ? '#f59e0b' : report.strict_score >= 300 ? '#f43f5e' : '#dc2626'
   const pct = (n: number, d: number) => d > 0 ? (n/d*100).toFixed(1)+'%' : '0%'
 
-  const badgeStyle = (level: string): React.CSSProperties => {
-    const colors: Record<string,string> = { high:'#f43f5e', medium:'#f59e0b', low:'#06b6d4' }
-    return { padding:'1px 6px', borderRadius:4, background:`${colors[level]}20`, border:`1px solid ${colors[level]}40`, color:colors[level], fontSize:9, fontWeight:700, textTransform:'uppercase', marginRight:6 }
-  }
-  const badge = (level: string) => <span style={badgeStyle(level)}>{level}</span>
 
   return (
     <div style={{ height:'100%', overflowY:'auto', background:'#080c14' }}>
@@ -4141,21 +4183,26 @@ function EmailHealthReportView() {
           <span style={{ color:'white', fontWeight:700, fontSize:15 }}>📧 Email Health Report</span>
           {backend?.configured && <span style={{ fontSize:10, color:'#10b981', background:'rgba(16,185,129,0.1)', border:'1px solid rgba(16,185,129,0.2)', padding:'1px 7px', borderRadius:10 }}>Connected</span>}
         </div>
-        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-          <select value={selectedMonth} onChange={e=>{ setSelectedMonth(e.target.value); setReport(null) }}
-            style={{ background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:7, padding:'5px 10px', color:'white', fontSize:12, outline:'none', fontFamily:'inherit', colorScheme:'dark', cursor:'pointer' }}>
-            {Array.from({length:24},(_,i)=>{
-              const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()-(i+1));
-              const val = d.toISOString().slice(0,7);
-              const label = d.toLocaleDateString('en-US',{month:'long',year:'numeric'});
-              return <option key={val} value={val}>{label}</option>
-            })}
-          </select>
+        <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
+          {availableMonths.length === 0
+            ? <span style={{ fontSize:12, color:'rgba(148,163,184,0.4)' }}>No baselines saved — add one in Settings</span>
+            : <select value={selectedMonth} onChange={e=>{ setSelectedMonth(e.target.value) }}
+                style={{ background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:7, padding:'5px 10px', color:'white', fontSize:12, outline:'none', fontFamily:'inherit', colorScheme:'dark', cursor:'pointer' }}>
+                {availableMonths.map(m=>(
+                  <option key={m.month} value={m.month}>{m.label}</option>
+                ))}
+              </select>
+          }
           {!postmasterConnected && <button onClick={()=>{window.location.href='/api/postmaster/oauth?action=start'}} style={{ padding:'5px 10px', background:'rgba(16,185,129,0.1)', border:'1px solid rgba(16,185,129,0.2)', borderRadius:7, color:'#10b981', fontSize:11, cursor:'pointer' }}>+ Postmaster</button>}
-          <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.98}} onClick={generate} disabled={loading || isCurrentMonth}
-            style={{ padding:'7px 16px', background:'linear-gradient(135deg,#4338ca,#6366f1)', border:'none', borderRadius:8, color:'white', fontWeight:700, fontSize:12, cursor: isCurrentMonth ? 'not-allowed' : 'pointer', opacity: loading || isCurrentMonth ? 0.5 : 1 }}>
-            {loading?'⏳ Generating…':'⚡ Generate'}
+          <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.98}} onClick={generate} disabled={loading || !selectedMonth}
+            style={{ padding:'7px 16px', background:'linear-gradient(135deg,#4338ca,#6366f1)', border:'none', borderRadius:8, color:'white', fontWeight:700, fontSize:12, cursor: !selectedMonth ? 'not-allowed' : 'pointer', opacity: loading || !selectedMonth ? 0.5 : 1 }}>
+            {loading ? '⏳ Generating…' : report && !report.in_progress && !report.no_baseline ? '🔄 Regenerate' : '⚡ Generate'}
           </motion.button>
+          {reportGeneratedAt && report && !report.in_progress && !report.no_baseline && (
+            <span style={{ fontSize:10, color:'rgba(148,163,184,0.35)' }}>
+              {new Date(reportGeneratedAt).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
+            </span>
+          )}
           {report && !report.in_progress && !report.no_baseline && <button onClick={()=>{
             const html = buildEmailReportHTML(report, postmasterData)
             const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([html],{type:'text/html'}))
@@ -4168,11 +4215,18 @@ function EmailHealthReportView() {
 
       {error && <div style={{ margin:16, padding:'10px 14px', background:'rgba(244,63,94,0.08)', border:'1px solid rgba(244,63,94,0.2)', borderRadius:9, color:'#f43f5e', fontSize:13 }}>{error}</div>}
 
-      {!report && !loading && (
+      {!report && !loading && availableMonths.length > 0 && (
         <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', minHeight:'60vh', gap:14, padding:40, textAlign:'center' }}>
           <div style={{ fontSize:44 }}>📧</div>
           <h2 style={{ color:'white', fontWeight:700, fontSize:20, margin:0 }}>Email Health Report</h2>
-          <p style={{ color:'rgba(148,163,184,0.5)', fontSize:13, maxWidth:400 }}>Select a completed month and generate your monthly email deliverability report. Baseline numbers for each month are managed in Settings.</p>
+          <p style={{ color:'rgba(148,163,184,0.5)', fontSize:13, maxWidth:400 }}>Hit Generate to run the report for {availableMonths.find(m=>m.month===selectedMonth)?.label || selectedMonth}.</p>
+        </div>
+      )}
+      {!report && !loading && availableMonths.length === 0 && (
+        <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', minHeight:'60vh', gap:14, padding:40, textAlign:'center' }}>
+          <div style={{ fontSize:44 }}>📋</div>
+          <h2 style={{ color:'white', fontWeight:700, fontSize:20, margin:0 }}>No Baselines Yet</h2>
+          <p style={{ color:'rgba(148,163,184,0.5)', fontSize:13, maxWidth:400 }}>Go to Settings → Email Health Baselines and enter June's numbers to get started.</p>
         </div>
       )}
 
@@ -4261,7 +4315,7 @@ function EmailHealthReportView() {
             <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:12 }}>Actions — New Contacts ({report.new_leads?.mailed?.toLocaleString()} mailed)</div>
             {report.analysis.actions_new_contacts.map((a:string,i:number)=>(
               <div key={i} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid rgba(99,102,241,0.06)', alignItems:'flex-start' }}>
-                <span style={{ flexShrink:0, marginTop:1 }}>{badge('medium')}</span>
+                <span style={{ flexShrink:0, marginTop:1 }}><ActionBadge level="medium" /></span>
                 <span style={{ color:'rgba(148,163,184,0.75)', fontSize:13, lineHeight:1.55 }}>{a}</span>
               </div>
             ))}
@@ -4274,7 +4328,7 @@ function EmailHealthReportView() {
             <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:12 }}>Actions — Existing Contacts ({report.existing?.mailed?.toLocaleString()} mailed)</div>
             {report.analysis.actions_existing_contacts.map((a:string,i:number)=>(
               <div key={i} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid rgba(99,102,241,0.06)', alignItems:'flex-start' }}>
-                <span style={{ flexShrink:0, marginTop:1 }}>{badge('high')}</span>
+                <span style={{ flexShrink:0, marginTop:1 }}><ActionBadge level="high" /></span>
                 <span style={{ color:'rgba(148,163,184,0.75)', fontSize:13, lineHeight:1.55 }}>{a}</span>
               </div>
             ))}
@@ -4287,7 +4341,7 @@ function EmailHealthReportView() {
             <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:12 }}>Maintenance</div>
             {report.analysis.actions_maintenance.map((a:string,i:number)=>(
               <div key={i} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid rgba(99,102,241,0.06)', alignItems:'flex-start' }}>
-                <span style={{ flexShrink:0, marginTop:1 }}>{badge('low')}</span>
+                <span style={{ flexShrink:0, marginTop:1 }}><ActionBadge level="low" /></span>
                 <span style={{ color:'rgba(148,163,184,0.75)', fontSize:13, lineHeight:1.55 }}>{a}</span>
               </div>
             ))}

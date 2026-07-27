@@ -1355,6 +1355,32 @@ export function getAllEmailHealthBaselines(): EmailHealthBaseline[] {
   return getDb().prepare(`SELECT * FROM email_health_baselines ORDER BY month DESC`).all() as EmailHealthBaseline[]
 }
 
+// ── Email Health Reports (cached) ──────────────────────────────────────────
+
+function ensureEmailHealthReportsTable() {
+  getDb().exec(`
+    CREATE TABLE IF NOT EXISTS email_health_reports (
+      month       TEXT PRIMARY KEY,
+      report_json TEXT NOT NULL,
+      generated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `)
+}
+
+export function saveEmailHealthReport(month: string, reportJson: string) {
+  ensureEmailHealthReportsTable()
+  getDb().prepare(`
+    INSERT INTO email_health_reports (month, report_json, generated_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT(month) DO UPDATE SET report_json=excluded.report_json, generated_at=excluded.generated_at
+  `).run(month, reportJson)
+}
+
+export function getEmailHealthReport(month: string): { month: string; report_json: string; generated_at: string } | null {
+  ensureEmailHealthReportsTable()
+  return getDb().prepare(`SELECT * FROM email_health_reports WHERE month = ?`).get(month) as any || null
+}
+
 // ── MCD Reports ────────────────────────────────────────────────────────────
 
 export interface McdReport {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import {
   getEmailHealthBaseline, getAllEmailHealthBaselines, saveEmailHealthBaseline,
+  saveEmailHealthReport, getEmailHealthReport,
 } from '@/lib/db'
 
 const client = new OpenAI({
@@ -73,6 +74,14 @@ export async function GET(req: NextRequest) {
     if (!month) return NextResponse.json({ error: 'month required' }, { status: 400 })
     const baseline = getEmailHealthBaseline(month)
     return NextResponse.json({ baseline })
+  }
+
+  if (action === 'report') {
+    const month = req.nextUrl.searchParams.get('month')
+    if (!month) return NextResponse.json({ error: 'month required' }, { status: 400 })
+    const cached = getEmailHealthReport(month)
+    if (!cached) return NextResponse.json({ cached: null })
+    return NextResponse.json({ cached: JSON.parse(cached.report_json), generated_at: cached.generated_at })
   }
 
   return NextResponse.json({
@@ -298,7 +307,7 @@ Data:\n${dataCtx}`,
       analysis = match ? JSON.parse(match[0]) : {}
     } catch { analysis = {} }
 
-    return NextResponse.json({
+    const reportPayload = {
       generated_at: new Date().toISOString(),
       month,
       month_label: monthLabel(month),
@@ -366,7 +375,12 @@ Data:\n${dataCtx}`,
       providers: { google, microsoft, yahoo, other: otherProvider, scanned },
 
       analysis,
-    })
+    }
+
+    // Cache report to DB for instant reloading
+    try { saveEmailHealthReport(month, JSON.stringify(reportPayload)) } catch {}
+
+    return NextResponse.json(reportPayload)
 
   } catch (err: any) {
     console.error('[email-health]', err.message)
