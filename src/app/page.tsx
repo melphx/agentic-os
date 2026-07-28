@@ -4104,6 +4104,8 @@ function EmailHealthReportView() {
   const [postmasterData, setPostmasterData] = useState<any | null>(null)
   const [postmasterConnected, setPostmasterConnected] = useState(false)
   const [backend, setBackend] = useState<{configured:boolean;domain:string}|null>(null)
+  const [sending, setSending] = useState(false)
+  const [sendMsg, setSendMsg] = useState('')
 
   // Load available months (only those with baselines, excluding current month)
   async function loadAvailableMonths() {
@@ -4228,6 +4230,20 @@ function EmailHealthReportView() {
           }} style={{ padding:'5px 10px', background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:7, color:'#a5b4fc', fontSize:11, cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}>
             <Download size={11}/> Export
           </button>}
+          {report && !report.in_progress && !report.no_baseline && (
+            <button onClick={async ()=>{
+              setSending(true); setSendMsg('')
+              try {
+                const r = await fetch(`/api/reports/email-health?action=send&month=${selectedMonth}`)
+                const d = await r.json()
+                setSendMsg(d.ok ? `✓ Sent to ${d.to}` : `✗ ${d.error}`)
+              } catch(e:any) { setSendMsg('✗ ' + e.message) }
+              setSending(false)
+            }} disabled={sending} style={{ padding:'5px 10px', background:'rgba(16,185,129,0.08)', border:'1px solid rgba(16,185,129,0.2)', borderRadius:7, color: sending ? 'rgba(16,185,129,0.4)' : '#10b981', fontSize:11, cursor: sending ? 'not-allowed' : 'pointer', display:'flex', alignItems:'center', gap:4 }}>
+              {sending ? '⏳ Sending…' : '📧 Send'}
+            </button>
+          )}
+          {sendMsg && <span style={{ fontSize:11, color: sendMsg.startsWith('✓') ? '#10b981' : '#f43f5e' }}>{sendMsg}</span>}
         </div>
       </div>
 
@@ -4779,6 +4795,46 @@ ${lst.total?`
     </div>
   </div>
 </div>
+
+<!-- MONTHLY WORKFLOW CAMPAIGN DETAILS -->
+${Array.isArray(report.workflows)&&report.workflows.length>0?`
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div class="title" style="margin-bottom:0">Workflow Campaign Details</div>
+    <span style="font-size:10px;color:#10b981;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);padding:2px 8px;border-radius:4px">${report.workflows_are_monthly?`📅 ${report.month_label}`:'All-time cumulative'}</span>
+  </div>
+  <table>
+    <tr><th>Workflow</th><th>Sent</th><th>Open %</th><th>Click %</th><th>Bounce %</th></tr>
+    ${[...(report.workflows as any[])].sort((a:any,b:any)=>b.sent-a.sent).map((w:any)=>`
+    <tr>
+      <td style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${w.name}">${w.name}</td>
+      <td style="color:white;font-weight:600">${(w.sent||0).toLocaleString()}</td>
+      <td style="color:${(w.openRate||0)>=25?'#10b981':'#f59e0b'};font-weight:600">${(w.openRate||0).toFixed(1)}%</td>
+      <td style="color:${(w.clickRate||0)>=3?'#10b981':'#f59e0b'};font-weight:600">${(w.clickRate||0).toFixed(1)}%</td>
+      <td style="color:${w.sent>0&&(w.bounced/w.sent*100)<2?'#10b981':'#f43f5e'};font-weight:600">${w.sent>0?(w.bounced/w.sent*100).toFixed(2):'0.00'}%</td>
+    </tr>`).join('')}
+  </table>
+</div>`:''}
+
+<!-- ANNUAL WORKFLOW CAMPAIGN DETAILS -->
+${Array.isArray(report.workflow_history_campaigns)&&report.workflow_history_campaigns.length>0?`
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div class="title" style="margin-bottom:0">Workflow Campaign Details</div>
+    <span style="font-size:10px;color:#10b981;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);padding:2px 8px;border-radius:4px">📅 ${report.workflow_history_label||'Annual'}</span>
+  </div>
+  <table>
+    <tr><th>Workflow</th><th>Sent</th><th>Open %</th><th>Click %</th><th>Bounce %</th></tr>
+    ${(report.workflow_history_campaigns as any[]).map((w:any)=>`
+    <tr>
+      <td style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${w.name}">${w.name}</td>
+      <td style="color:white;font-weight:600">${(w.sent||0).toLocaleString()}</td>
+      <td style="color:${(w.openRate??0)>=25?'#10b981':'#f59e0b'};font-weight:600">${(w.openRate??0).toFixed(1)}%</td>
+      <td style="color:${(w.clickRate??0)>=3?'#10b981':'#f59e0b'};font-weight:600">${(w.clickRate??0).toFixed(1)}%</td>
+      <td style="color:${w.sent>0&&(w.bounced/w.sent*100)<2?'#10b981':'#f43f5e'};font-weight:600">${w.sent>0?((w.bounced/w.sent)*100).toFixed(2):'0.00'}%</td>
+    </tr>`).join('')}
+  </table>
+</div>`:''}
 
 <p style="color:rgba(148,163,184,.2);font-size:11px;text-align:center;padding:24px 0">Generated ${new Date(report.generated_at).toLocaleString()} · ${report.domain} · Phoenix Home Remodeling</p>
 </body></html>`

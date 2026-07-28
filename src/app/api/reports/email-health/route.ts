@@ -150,6 +150,36 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ cached: JSON.parse(cached.report_json), generated_at: cached.generated_at })
   }
 
+  if (action === 'send') {
+    const month = req.nextUrl.searchParams.get('month')
+    if (!month) return NextResponse.json({ error: 'month required' }, { status: 400 })
+    const webhook = process.env.EMAIL_HEALTH_N8N_WEBHOOK
+    if (!webhook) return NextResponse.json({ error: 'EMAIL_HEALTH_N8N_WEBHOOK not configured in .env.local' }, { status: 500 })
+    const cached = getEmailHealthReport(month)
+    if (!cached) return NextResponse.json({ error: 'No report found for this month — generate it first' }, { status: 404 })
+    const report = JSON.parse(cached.report_json)
+    const subject = `Email Health Report — ${report.month_label || month}`
+    try {
+      const res = await fetch(webhook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to:      'mel@phxhomeremodeling.com',
+          subject,
+          month,
+          month_label: report.month_label || month,
+          report_json: cached.report_json,
+          generated_at: cached.generated_at,
+        }),
+        signal: AbortSignal.timeout(15000),
+      })
+      if (!res.ok) return NextResponse.json({ error: `N8N returned ${res.status}` }, { status: 502 })
+      return NextResponse.json({ ok: true, to: 'mel@phxhomeremodeling.com', subject })
+    } catch (e: any) {
+      return NextResponse.json({ error: e.message }, { status: 500 })
+    }
+  }
+
   return NextResponse.json({
     configured: !!(process.env.GHL_API_KEY && process.env.GHL_LOCATION_ID),
     domain: process.env.GHL_DOMAIN || 'phxhomeremodeling.com',
