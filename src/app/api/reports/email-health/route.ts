@@ -444,6 +444,14 @@ Data:\n${dataCtx}`,
     for (const k of Object.keys(snapsBySource)) {
       snapsBySource[k].sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date))
     }
+    // Build campaign name map from current workflows + all snapshot campaign_name fields
+    const nameMap: Record<string, string> = {}
+    for (const w of workflows as any[]) nameMap[w.sourceId] = w.name
+    for (const s of allSnaps as any[]) {
+      if (!nameMap[s.source_id] && s.campaign_name) nameMap[s.source_id] = s.campaign_name
+    }
+    // All source_ids that have any snapshot data (includes historical campaigns no longer active)
+    const allSourceIds = Object.keys(snapsBySource)
     // Helper: find closest END-OF-MONTH snapshot on or before targetDate.
     // End-of-month = snapshot_date is the last calendar day of its month.
     // This excludes live mid-month GHL snapshots (e.g. stored as 2026-07-28)
@@ -469,38 +477,83 @@ Data:\n${dataCtx}`,
       last12Months.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`)
     }
     const workflowHistory = last12Months.map(hm => {
-      const [hy, hmo] = hm.split('-').map(Number)
-      const hEnd     = `${hm}-${String(new Date(hy, hmo, 0).getDate()).padStart(2,'0')}`
-      const hPrevM   = new Date(hy, hmo - 2, 1)
-      const hPrevEnd = `${hPrevM.getFullYear()}-${String(hPrevM.getMonth()+1).padStart(2,'0')}-${String(new Date(hPrevM.getFullYear(), hPrevM.getMonth()+1, 0).getDate()).padStart(2,'0')}`
-      let sent = 0, opened = 0, clicked = 0, hasData = false
-      const monthCampaigns: any[] = []
-      for (const w of workflows as any[]) {
-        const sid = w.sourceId
-        const se = closestEOMInMem(sid, hEnd)
-        const ss = closestEOMInMem(sid, hPrevEnd)
-        if (se && ss) {
-          const wSent    = Math.max(0, se.sent    - ss.sent)
-          const wOpened  = Math.max(0, se.opened  - ss.opened)
-          const wClicked = Math.max(0, se.clicked - ss.clicked)
-          const wBounced = Math.max(0, se.bounced - ss.bounced)
+      const label = new Date(hm + '-15').toLocaleString('default', { month:'short', year:'2-digit' })
+
+      // Current report month: use workflowsWithDeltas (already correctly computed above)
+      if (hm === month) {
+        let sent = 0, opened = 0, clicked = 0
+        const monthCampaigns: any[] = []
+        for (const w of workflowsWithDeltas as any[]) {
+          const wSent    = w.sent    || 0
+          const wOpened  = w.opened  || 0
+          const wClicked = w.clicked || 0
+          const wBounced = w.bounced || 0
           if (wSent > 0) {
             sent += wSent; opened += wOpened; clicked += wClicked
-            hasData = true
             monthCampaigns.push({
-              name:      w.name,
-              sent:      wSent,
-              opened:    wOpened,
-              clicked:   wClicked,
-              bounced:   wBounced,
+              name: w.name, sent: wSent, opened: wOpened, clicked: wClicked, bounced: wBounced,
               openRate:  parseFloat((wOpened  / wSent * 100).toFixed(1)),
               clickRate: parseFloat((wClicked / wSent * 100).toFixed(1)),
             })
           }
         }
+        monthCampaigns.sort((a: any, b: any) => b.sent - a.sent)
+        return {
+          month: hm, label, sent, opened, clicked, has_data: sent > 0,
+          openRate:  sent > 0 ? parseFloat((opened  / sent * 100).toFixed(1)) : 0,
+          clickRate: sent > 0 ? parseFloat((clicked / sent * 100).toFixed(1)) : 0,
+          campaigns: monthCampaigns,
+        }
       }
+
+      // Historical months: use YYYY-MM-01 direct snapshots (from WorkflowHistoryPanel),
+      // with EOM delta fallback (for live GHL cumulative snapshots)
+      const [hy, hmo] = hm.split('-').map(Number)
+      const hEnd       = `${hm}-${String(new Date(hy, hmo, 0).getDate()).padStart(2,'0')}`
+      const hPrevM     = new Date(hy, hmo - 2, 1)
+      const hPrevEnd   = `${hPrevM.getFullYear()}-${String(hPrevM.getMonth()+1).padStart(2,'0')}-${String(new Date(hPrevM.getFullYear(), hPrevM.getMonth()+1, 0).getDate()).padStart(2,'0')}`
+      const firstOfMonth = `${hm}-01`
+      let sent = 0, opened = 0, clicked = 0, hasData = false
+      const monthCampaigns: any[] = []
+
+      for (const sid of allSourceIds) {
+        // Primary: direct monthly snapshot saved as YYYY-MM-01 by WorkflowHistoryPanel
+        const directSnap = (snapsBySource[sid] || []).find(s => s.snapshot_date === firstOfMonth)
+        let wSent = 0, wOpened = 0, wClicked = 0, wBounced = 0
+
+        if (directSnap) {
+          wSent    = directSnap.sent    || 0
+          wOpened  = directSnap.opened  || 0
+          wClicked = directSnap.clicked || 0
+          wBounced = directSnap.bounced || 0
+        } else {
+          // Fallback: EOM delta (live GHL cumulative snapshots)
+          const se = closestEOMInMem(sid, hEnd)
+          const ss = closestEOMInMem(sid, hPrevEnd)
+          if (se) {
+            wSent    = Math.max(0, se.sent    - (ss ? ss.sent    : 0))
+            wOpened  = Math.max(0, se.opened  - (ss ? ss.opened  : 0))
+            wClicked = Math.max(0, se.clicked - (ss ? ss.clicked : 0))
+            wBounced = Math.max(0, se.bounced - (ss ? ss.bounced : 0))
+          }
+        }
+
+        if (wSent > 0) {
+          sent += wSent; opened += wOpened; clicked += wClicked
+          hasData = true
+          monthCampaigns.push({
+            name:      nameMap[sid] || sid,
+            sent:      wSent,
+            opened:    wOpened,
+            clicked:   wClicked,
+            bounced:   wBounced,
+            openRate:  parseFloat((wOpened  / wSent * 100).toFixed(1)),
+            clickRate: parseFloat((wClicked / wSent * 100).toFixed(1)),
+          })
+        }
+      }
+
       monthCampaigns.sort((a: any, b: any) => b.sent - a.sent)
-      const label = new Date(hm + '-15').toLocaleString('default', { month:'short', year:'2-digit' })
       return {
         month: hm, label, sent, opened, clicked, has_data: hasData,
         openRate:  sent > 0 ? parseFloat((opened  / sent * 100).toFixed(1)) : 0,
@@ -508,6 +561,28 @@ Data:\n${dataCtx}`,
         campaigns: monthCampaigns,
       }
     })
+
+    // ── Flat annual campaign totals (sum across all 12 months per campaign) ──
+    const annualMap: Record<string, any> = {}
+    for (const hEntry of workflowHistory) {
+      for (const c of hEntry.campaigns as any[]) {
+        if (!annualMap[c.name]) annualMap[c.name] = { name: c.name, sent:0, opened:0, clicked:0, bounced:0 }
+        annualMap[c.name].sent    += c.sent
+        annualMap[c.name].opened  += c.opened
+        annualMap[c.name].clicked += c.clicked
+        annualMap[c.name].bounced += c.bounced
+      }
+    }
+    const workflowHistoryCampaigns = (Object.values(annualMap) as any[])
+      .map((c: any) => ({
+        ...c,
+        openRate:  c.sent > 0 ? parseFloat((c.opened  / c.sent * 100).toFixed(1)) : 0,
+        clickRate: c.sent > 0 ? parseFloat((c.clicked / c.sent * 100).toFixed(1)) : 0,
+      }))
+      .sort((a: any, b: any) => b.sent - a.sent)
+    const historyLabel = last12Months.length === 12
+      ? `${new Date(last12Months[0]+'-15').toLocaleString('default',{month:'short',year:'numeric'})} – ${new Date(last12Months[11]+'-15').toLocaleString('default',{month:'short',year:'numeric'})}`
+      : ''
 
     const reportPayload = {
       generated_at: new Date().toISOString(),
@@ -580,6 +655,8 @@ Data:\n${dataCtx}`,
       workflows: workflowsWithDeltas,
       workflows_are_monthly: workflowsAreMonthly,
       workflow_history: workflowHistory,
+      workflow_history_campaigns: workflowHistoryCampaigns,
+      workflow_history_label: historyLabel,
 
       analysis,
     }

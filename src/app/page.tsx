@@ -4550,9 +4550,38 @@ function EmailHealthReportView() {
             </div>
           )}
 
-          {/* ── 11. 12-MONTH WORKFLOW HISTORY TABLE ── */}
-          {report.workflow_history && report.workflow_history.some((h: any) => h.has_data) && (
-            <WorkflowHistoryTable history={report.workflow_history} currentMonth={report.month} />
+          {/* ── 11. 12-MONTH WORKFLOW CAMPAIGN DETAILS (flat annual — same format as monthly) ── */}
+          {report.workflow_history_campaigns && report.workflow_history_campaigns.length > 0 && (
+            <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4 }}>
+                <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const }}>Workflow Campaign Details</div>
+                <span style={{ fontSize:9, color:'#10b981', background:'rgba(16,185,129,0.08)', border:'1px solid rgba(16,185,129,0.2)', padding:'2px 7px', borderRadius:4 }}>
+                  📅 {report.workflow_history_label || 'Annual'}
+                </span>
+              </div>
+              <div style={{ overflowX:'auto' as const }}>
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
+                  <thead>
+                    <tr style={{ borderBottom:'1px solid rgba(99,102,241,0.15)' }}>
+                      {['Workflow','Sent','Open %','Click %','Bounce %'].map(h=>(
+                        <th key={h} style={{ padding:'5px 8px', textAlign:'left' as const, color:'rgba(148,163,184,0.4)', fontWeight:600, fontSize:9, textTransform:'uppercase' as const }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.workflow_history_campaigns.map((w: any, i: number) => (
+                      <tr key={i} style={{ borderBottom:'1px solid rgba(99,102,241,0.05)' }}>
+                        <td style={{ padding:'6px 8px', color:'rgba(148,163,184,0.8)', maxWidth:340, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' as const }} title={w.name}>{w.name}</td>
+                        <td style={{ padding:'6px 8px', color:'white', fontWeight:600 }}>{(w.sent||0).toLocaleString()}</td>
+                        <td style={{ padding:'6px 8px', color:(w.openRate??0)>=25?'#10b981':'#f59e0b', fontWeight:600 }}>{(w.openRate??0).toFixed(1)}%</td>
+                        <td style={{ padding:'6px 8px', color:(w.clickRate??0)>=3?'#10b981':'#f59e0b', fontWeight:600 }}>{(w.clickRate??0).toFixed(1)}%</td>
+                        <td style={{ padding:'6px 8px', color:w.sent>0&&(w.bounced/w.sent*100)<2?'#10b981':'#f43f5e', fontWeight:600 }}>{w.sent>0?((w.bounced/w.sent)*100).toFixed(2):'0.00'}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           )}
 
           <p style={{ color:'rgba(148,163,184,0.2)', fontSize:11, textAlign:'center' as const }}>Generated {new Date(report.generated_at).toLocaleString()} · {report.domain} via HighLevel</p>
@@ -5363,74 +5392,7 @@ function WorkflowImportPanel() {
   )
 }
 
-function WorkflowHistoryTable({ history, currentMonth }: { history: any[], currentMonth: string }) {
-  const [expanded, setExpanded] = useState<Set<string>>(new Set([currentMonth]))
-  const withData = history.filter((h: any) => h.has_data)
-  if (!withData.length) return null
-
-  const toggle = (m: string) => setExpanded(prev => {
-    const next = new Set(prev)
-    if (next.has(m)) next.delete(m); else next.add(m)
-    return next
-  })
-
-  const thStyle: React.CSSProperties = { padding:'5px 8px', textAlign:'left', color:'rgba(148,163,184,0.4)', fontWeight:600, fontSize:9, textTransform:'uppercase', letterSpacing:'0.06em' }
-  const tdBase: React.CSSProperties = { padding:'5px 8px', fontSize:11 }
-
-  return (
-    <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(20,184,166,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4 }}>
-        <div style={{ color:'#14b8a6', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const }}>12-Month Workflow Campaign Details</div>
-        <span style={{ fontSize:9, color:'rgba(148,163,184,0.3)' }}>Click a month to expand campaigns</span>
-      </div>
-      <div style={{ overflowX:'auto' }}>
-        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
-          <thead>
-            <tr style={{ borderBottom:'1px solid rgba(99,102,241,0.15)' }}>
-              {['Month / Workflow','Sent','Open %','Click %','Bounce %'].map(h => (
-                <th key={h} style={thStyle}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {withData.map((h: any) => {
-              const isOpen = expanded.has(h.month)
-              const isCurrent = h.month === currentMonth
-              return (
-                <React.Fragment key={h.month}>
-                  {/* Month summary row */}
-                  <tr
-                    onClick={() => toggle(h.month)}
-                    style={{ cursor:'pointer', borderBottom: isOpen ? 'none' : '1px solid rgba(99,102,241,0.08)', background: isCurrent ? 'rgba(20,184,166,0.06)' : 'rgba(99,102,241,0.03)' }}
-                  >
-                    <td style={{ ...tdBase, color: isCurrent ? '#14b8a6' : '#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase' as const }}>
-                      {isOpen ? '▾' : '▸'} {h.label}{isCurrent ? '  ★' : ''}
-                    </td>
-                    <td style={{ ...tdBase, color:'white', fontWeight:700 }}>{(h.sent||0).toLocaleString()}</td>
-                    <td style={{ ...tdBase, color: (h.openRate||0) >= 25 ? '#10b981' : '#f59e0b', fontWeight:600 }}>{(h.openRate??0).toFixed(1)}%</td>
-                    <td style={{ ...tdBase, color: (h.clickRate||0) >= 3 ? '#10b981' : '#f59e0b', fontWeight:600 }}>{(h.clickRate??0).toFixed(1)}%</td>
-                    <td style={{ ...tdBase, color:'rgba(148,163,184,0.3)' }}>—</td>
-                  </tr>
-                  {/* Expanded campaign rows */}
-                  {isOpen && (h.campaigns || []).map((c: any, ci: number) => (
-                    <tr key={ci} style={{ borderBottom:'1px solid rgba(99,102,241,0.04)', background: isCurrent ? 'rgba(20,184,166,0.02)' : 'transparent' }}>
-                      <td style={{ ...tdBase, color:'rgba(148,163,184,0.75)', paddingLeft:22, maxWidth:360, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' as const }} title={c.name}>{c.name}</td>
-                      <td style={{ ...tdBase, color:'rgba(255,255,255,0.85)', fontWeight:500 }}>{(c.sent||0).toLocaleString()}</td>
-                      <td style={{ ...tdBase, color: (c.openRate||0) >= 25 ? '#10b981' : '#f59e0b' }}>{(c.openRate??0).toFixed(1)}%</td>
-                      <td style={{ ...tdBase, color: (c.clickRate||0) >= 3 ? '#10b981' : '#f59e0b' }}>{(c.clickRate??0).toFixed(1)}%</td>
-                      <td style={{ ...tdBase, color: c.sent > 0 && (c.bounced / c.sent * 100) < 2 ? '#10b981' : '#f43f5e' }}>{c.sent > 0 ? (c.bounced / c.sent * 100).toFixed(2) : '0.00'}%</td>
-                    </tr>
-                  ))}
-                  {isOpen && <tr><td colSpan={5} style={{ height:6 }} /></tr>}
-                </React.Fragment>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
+// (WorkflowHistoryTable removed — annual view now uses flat campaign list inline)
 
 function WorkflowHistoryPanel() {
   const [status, setStatus] = useState<string|null>(null)
@@ -5472,44 +5434,22 @@ function WorkflowHistoryPanel() {
       if (!months.length) { setStatus('No data found in this file.'); setLoading(false); return }
       setStatus(`Found ${months.length} months (${months[0]} → ${months[months.length-1]}). Saving…`)
 
-      // Build CUMULATIVE snapshots — delta system needs snapshot[N] - snapshot[N-1] = monthly sends
-      const cumulative: Record<string, any> = {}
+      // Save per-month sends directly to YYYY-MM-01.
+      // Route.ts checks for YYYY-MM-01 snapshots first (direct monthly) before
+      // falling back to EOM delta — so no cumulative math or zero-baselines needed.
       let saved = 0
 
       for (let mi = 0; mi < months.length; mi++) {
         const m = months[mi]
-        for (const [sid, stats] of Object.entries(byMonth[m])) {
-          if (!cumulative[sid]) cumulative[sid] = { name: (stats as any).name, sent:0, opened:0, clicked:0, bounced:0, complained:0, unsubscribed:0 }
-          const c = cumulative[sid]
-          c.sent        += (stats as any).sent
-          c.opened      += (stats as any).opened
-          c.clicked     += (stats as any).clicked
-          c.bounced     += (stats as any).bounced
-          c.complained  += (stats as any).complained
-          c.unsubscribed+= (stats as any).unsubscribed
-        }
-        const [y, mo] = m.split('-').map(Number)
-        const endDate = `${m}-${String(new Date(y, mo, 0).getDate()).padStart(2,'0')}`
-        const campaigns = Object.entries(cumulative)
+        const campaigns = Object.entries(byMonth[m])
           .filter(([,v]) => (v as any).sent > 0)
           .map(([source_id, v]) => ({ source_id, ...(v as any) }))
-
-        // For the first month: also save a zero baseline for the previous month-end
-        // so the delta for month[0] computes correctly
-        if (mi === 0) {
-          const prevM   = new Date(y, mo - 2, 1)
-          const prevEnd = `${prevM.getFullYear()}-${String(prevM.getMonth()+1).padStart(2,'0')}-${String(new Date(prevM.getFullYear(), prevM.getMonth()+1, 0).getDate()).padStart(2,'0')}`
-          const zeros   = campaigns.map(c => ({ ...c, sent:0, opened:0, clicked:0, bounced:0, complained:0, unsubscribed:0 }))
-          await fetch('/api/reports/email-snapshot', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ snapshot_date: prevEnd, manual_campaigns: zeros })
-          })
-        }
+        if (!campaigns.length) continue
 
         setProgress(`${m} (${mi+1}/${months.length})`)
         const r = await fetch('/api/reports/email-snapshot', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ snapshot_date: endDate, manual_campaigns: campaigns })
+          body: JSON.stringify({ snapshot_date: `${m}-01`, manual_campaigns: campaigns })
         })
         const d = await r.json()
         if (d.ok) saved++
