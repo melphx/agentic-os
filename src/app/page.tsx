@@ -5476,7 +5476,8 @@ function WorkflowHistoryPanel() {
       const cumulative: Record<string, any> = {}
       let saved = 0
 
-      for (const m of months) {
+      for (let mi = 0; mi < months.length; mi++) {
+        const m = months[mi]
         for (const [sid, stats] of Object.entries(byMonth[m])) {
           if (!cumulative[sid]) cumulative[sid] = { name: (stats as any).name, sent:0, opened:0, clicked:0, bounced:0, complained:0, unsubscribed:0 }
           const c = cumulative[sid]
@@ -5493,7 +5494,19 @@ function WorkflowHistoryPanel() {
           .filter(([,v]) => (v as any).sent > 0)
           .map(([source_id, v]) => ({ source_id, ...(v as any) }))
 
-        setProgress(`${m} (${months.indexOf(m)+1}/${months.length})`)
+        // For the first month: also save a zero baseline for the previous month-end
+        // so the delta for month[0] computes correctly
+        if (mi === 0) {
+          const prevM   = new Date(y, mo - 2, 1)
+          const prevEnd = `${prevM.getFullYear()}-${String(prevM.getMonth()+1).padStart(2,'0')}-${String(new Date(prevM.getFullYear(), prevM.getMonth()+1, 0).getDate()).padStart(2,'0')}`
+          const zeros   = campaigns.map(c => ({ ...c, sent:0, opened:0, clicked:0, bounced:0, complained:0, unsubscribed:0 }))
+          await fetch('/api/reports/email-snapshot', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ snapshot_date: prevEnd, manual_campaigns: zeros })
+          })
+        }
+
+        setProgress(`${m} (${mi+1}/${months.length})`)
         const r = await fetch('/api/reports/email-snapshot', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ snapshot_date: endDate, manual_campaigns: campaigns })
