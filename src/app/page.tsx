@@ -4550,54 +4550,10 @@ function EmailHealthReportView() {
             </div>
           )}
 
-          {/* ── 11. 12-MONTH WORKFLOW HISTORY ── */}
-          {report.workflow_history && report.workflow_history.some((h: any) => h.has_data) && (() => {
-            const hist = report.workflow_history as any[]
-            const maxSent = Math.max(...hist.map((h: any) => h.sent), 1)
-            return (
-              <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(20,184,166,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
-                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16 }}>
-                  <div style={{ color:'#14b8a6', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const }}>12-Month Send Volume</div>
-                  <span style={{ fontSize:9, color:'rgba(148,163,184,0.4)' }}>Emails sent per month · all workflow campaigns</span>
-                </div>
-                {/* Bar chart */}
-                <div style={{ display:'flex', alignItems:'flex-end', gap:6, height:100, marginBottom:8 }}>
-                  {hist.map((h: any) => {
-                    const pct = h.sent / maxSent
-                    const isCurrentMonth = h.month === report.month
-                    return (
-                      <div key={h.month} style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:4, height:'100%', justifyContent:'flex-end' }} title={`${h.label}: ${h.sent.toLocaleString()} sent`}>
-                        <div style={{ fontSize:8, color: h.has_data ? (isCurrentMonth ? '#14b8a6' : 'rgba(148,163,184,0.5)') : 'rgba(148,163,184,0.15)', fontWeight: isCurrentMonth ? 700 : 400 }}>
-                          {h.has_data ? h.sent.toLocaleString() : '–'}
-                        </div>
-                        <div style={{ width:'100%', background: h.has_data ? (isCurrentMonth ? 'rgba(20,184,166,0.7)' : 'rgba(99,102,241,0.4)') : 'rgba(99,102,241,0.08)', borderRadius:'3px 3px 0 0', height: h.has_data ? `${Math.max(pct * 100, 3)}%` : '3%', transition:'height 0.3s' }} />
-                      </div>
-                    )
-                  })}
-                </div>
-                {/* Month labels */}
-                <div style={{ display:'flex', gap:6 }}>
-                  {hist.map((h: any) => (
-                    <div key={h.month} style={{ flex:1, textAlign:'center', fontSize:8, color: h.month === report.month ? '#14b8a6' : 'rgba(148,163,184,0.3)', fontWeight: h.month === report.month ? 700 : 400 }}>{h.label}</div>
-                  ))}
-                </div>
-                {/* Summary row */}
-                <div style={{ display:'flex', gap:24, marginTop:14, paddingTop:12, borderTop:'1px solid rgba(20,184,166,0.08)' }}>
-                  {[
-                    { label:'Total Sent (12mo)', val: hist.filter((h:any)=>h.has_data).reduce((s:number,h:any)=>s+h.sent,0).toLocaleString() },
-                    { label:'Avg / Month', val: (() => { const d=hist.filter((h:any)=>h.has_data); return d.length ? Math.round(d.reduce((s:number,h:any)=>s+h.sent,0)/d.length).toLocaleString() : '–' })() },
-                    { label:'Best Month', val: (() => { const d=hist.filter((h:any)=>h.has_data); if(!d.length) return '–'; const b=d.reduce((m:any,h:any)=>h.sent>m.sent?h:m,d[0]); return `${b.label} (${b.sent.toLocaleString()})` })() },
-                    { label:'Months w/ Data', val: `${hist.filter((h:any)=>h.has_data).length} / 12` },
-                  ].map(s => (
-                    <div key={s.label}>
-                      <div style={{ fontSize:9, color:'rgba(148,163,184,0.35)', textTransform:'uppercase' as const, letterSpacing:'0.06em', marginBottom:3 }}>{s.label}</div>
-                      <div style={{ fontSize:14, fontWeight:700, color:'#e2e8f0' }}>{s.val}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )
-          })()}
+          {/* ── 11. 12-MONTH WORKFLOW HISTORY TABLE ── */}
+          {report.workflow_history && report.workflow_history.some((h: any) => h.has_data) && (
+            <WorkflowHistoryTable history={report.workflow_history} currentMonth={report.month} />
+          )}
 
           <p style={{ color:'rgba(148,163,184,0.2)', fontSize:11, textAlign:'center' as const }}>Generated {new Date(report.generated_at).toLocaleString()} · {report.domain} via HighLevel</p>
         </div>
@@ -5403,6 +5359,75 @@ function WorkflowImportPanel() {
         <input ref={fileRef} type="file" accept=".csv" onChange={handleFile} disabled={loading} style={{display:'none'}} />
       </label>
       {status && <p style={{ marginTop:10, fontSize:12, color: status.startsWith('✓')?'#10b981':status.startsWith('Error')?'#f43f5e':'rgba(148,163,184,0.7)', lineHeight:1.5 }}>{status}</p>}
+    </div>
+  )
+}
+
+function WorkflowHistoryTable({ history, currentMonth }: { history: any[], currentMonth: string }) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set([currentMonth]))
+  const withData = history.filter((h: any) => h.has_data)
+  if (!withData.length) return null
+
+  const toggle = (m: string) => setExpanded(prev => {
+    const next = new Set(prev)
+    if (next.has(m)) next.delete(m); else next.add(m)
+    return next
+  })
+
+  const thStyle: React.CSSProperties = { padding:'5px 8px', textAlign:'left', color:'rgba(148,163,184,0.4)', fontWeight:600, fontSize:9, textTransform:'uppercase', letterSpacing:'0.06em' }
+  const tdBase: React.CSSProperties = { padding:'5px 8px', fontSize:11 }
+
+  return (
+    <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(20,184,166,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4 }}>
+        <div style={{ color:'#14b8a6', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const }}>12-Month Workflow Campaign Details</div>
+        <span style={{ fontSize:9, color:'rgba(148,163,184,0.3)' }}>Click a month to expand campaigns</span>
+      </div>
+      <div style={{ overflowX:'auto' }}>
+        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
+          <thead>
+            <tr style={{ borderBottom:'1px solid rgba(99,102,241,0.15)' }}>
+              {['Month / Workflow','Sent','Open %','Click %','Bounce %'].map(h => (
+                <th key={h} style={thStyle}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {withData.map((h: any) => {
+              const isOpen = expanded.has(h.month)
+              const isCurrent = h.month === currentMonth
+              return (
+                <React.Fragment key={h.month}>
+                  {/* Month summary row */}
+                  <tr
+                    onClick={() => toggle(h.month)}
+                    style={{ cursor:'pointer', borderBottom: isOpen ? 'none' : '1px solid rgba(99,102,241,0.08)', background: isCurrent ? 'rgba(20,184,166,0.06)' : 'rgba(99,102,241,0.03)' }}
+                  >
+                    <td style={{ ...tdBase, color: isCurrent ? '#14b8a6' : '#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase' as const }}>
+                      {isOpen ? '▾' : '▸'} {h.label}{isCurrent ? '  ★' : ''}
+                    </td>
+                    <td style={{ ...tdBase, color:'white', fontWeight:700 }}>{h.sent.toLocaleString()}</td>
+                    <td style={{ ...tdBase, color: h.openRate >= 25 ? '#10b981' : '#f59e0b', fontWeight:600 }}>{h.openRate.toFixed(1)}%</td>
+                    <td style={{ ...tdBase, color: h.clickRate >= 3 ? '#10b981' : '#f59e0b', fontWeight:600 }}>{h.clickRate.toFixed(1)}%</td>
+                    <td style={{ ...tdBase, color:'rgba(148,163,184,0.3)' }}>—</td>
+                  </tr>
+                  {/* Expanded campaign rows */}
+                  {isOpen && (h.campaigns || []).map((c: any, ci: number) => (
+                    <tr key={ci} style={{ borderBottom:'1px solid rgba(99,102,241,0.04)', background: isCurrent ? 'rgba(20,184,166,0.02)' : 'transparent' }}>
+                      <td style={{ ...tdBase, color:'rgba(148,163,184,0.75)', paddingLeft:22, maxWidth:360, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' as const }} title={c.name}>{c.name}</td>
+                      <td style={{ ...tdBase, color:'rgba(255,255,255,0.85)', fontWeight:500 }}>{c.sent.toLocaleString()}</td>
+                      <td style={{ ...tdBase, color: c.openRate >= 25 ? '#10b981' : '#f59e0b' }}>{c.openRate.toFixed(1)}%</td>
+                      <td style={{ ...tdBase, color: c.clickRate >= 3 ? '#10b981' : '#f59e0b' }}>{c.clickRate.toFixed(1)}%</td>
+                      <td style={{ ...tdBase, color: c.sent > 0 && (c.bounced / c.sent * 100) < 2 ? '#10b981' : '#f43f5e' }}>{c.sent > 0 ? (c.bounced / c.sent * 100).toFixed(2) : '0.00'}%</td>
+                    </tr>
+                  ))}
+                  {isOpen && <tr><td colSpan={5} style={{ height:6 }} /></tr>}
+                </React.Fragment>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

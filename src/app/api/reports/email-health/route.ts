@@ -461,32 +461,52 @@ Data:\n${dataCtx}`,
       }
       return result
     }
-    // Build last 12 months list (oldest → newest)
-    const now12 = new Date()
+    // Build 12-month list ending at the REPORT month (fiscal year Jul→Jun aligns naturally)
+    const [rYear, rMo] = month.split('-').map(Number)
     const last12Months: string[] = []
     for (let i = 11; i >= 0; i--) {
-      const d = new Date(now12.getFullYear(), now12.getMonth() - i, 1)
+      const d = new Date(rYear, rMo - 1 - i, 1)
       last12Months.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`)
     }
-    const workflowHistory = last12Months.map(m => {
-      const [hy, hmo] = m.split('-').map(Number)
-      const hEnd      = `${m}-${String(new Date(hy, hmo, 0).getDate()).padStart(2,'0')}`
-      const hPrevM    = new Date(hy, hmo - 2, 1)
-      const hPrevEnd  = `${hPrevM.getFullYear()}-${String(hPrevM.getMonth()+1).padStart(2,'0')}-${String(new Date(hPrevM.getFullYear(), hPrevM.getMonth()+1, 0).getDate()).padStart(2,'0')}`
+    const workflowHistory = last12Months.map(hm => {
+      const [hy, hmo] = hm.split('-').map(Number)
+      const hEnd     = `${hm}-${String(new Date(hy, hmo, 0).getDate()).padStart(2,'0')}`
+      const hPrevM   = new Date(hy, hmo - 2, 1)
+      const hPrevEnd = `${hPrevM.getFullYear()}-${String(hPrevM.getMonth()+1).padStart(2,'0')}-${String(new Date(hPrevM.getFullYear(), hPrevM.getMonth()+1, 0).getDate()).padStart(2,'0')}`
       let sent = 0, opened = 0, clicked = 0, hasData = false
+      const monthCampaigns: any[] = []
       for (const w of workflows as any[]) {
         const sid = w.sourceId
-        const se = closestEOMInMem(sid, hEnd)    // end-of-month only
-        const ss = closestEOMInMem(sid, hPrevEnd) // end-of-month only
+        const se = closestEOMInMem(sid, hEnd)
+        const ss = closestEOMInMem(sid, hPrevEnd)
         if (se && ss) {
-          sent    += Math.max(0, se.sent    - ss.sent)
-          opened  += Math.max(0, se.opened  - ss.opened)
-          clicked += Math.max(0, se.clicked - ss.clicked)
-          hasData = true
+          const wSent    = Math.max(0, se.sent    - ss.sent)
+          const wOpened  = Math.max(0, se.opened  - ss.opened)
+          const wClicked = Math.max(0, se.clicked - ss.clicked)
+          const wBounced = Math.max(0, se.bounced - ss.bounced)
+          if (wSent > 0) {
+            sent += wSent; opened += wOpened; clicked += wClicked
+            hasData = true
+            monthCampaigns.push({
+              name:      w.name,
+              sent:      wSent,
+              opened:    wOpened,
+              clicked:   wClicked,
+              bounced:   wBounced,
+              openRate:  parseFloat((wOpened  / wSent * 100).toFixed(1)),
+              clickRate: parseFloat((wClicked / wSent * 100).toFixed(1)),
+            })
+          }
         }
       }
-      const label = new Date(m + '-15').toLocaleString('default', { month:'short', year:'2-digit' })
-      return { month: m, label, sent, opened, clicked, has_data: hasData }
+      monthCampaigns.sort((a: any, b: any) => b.sent - a.sent)
+      const label = new Date(hm + '-15').toLocaleString('default', { month:'short', year:'2-digit' })
+      return {
+        month: hm, label, sent, opened, clicked, has_data: hasData,
+        openRate:  sent > 0 ? parseFloat((opened  / sent * 100).toFixed(1)) : 0,
+        clickRate: sent > 0 ? parseFloat((clicked / sent * 100).toFixed(1)) : 0,
+        campaigns: monthCampaigns,
+      }
     })
 
     const reportPayload = {
