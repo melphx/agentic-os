@@ -119,6 +119,52 @@ function monthLabel(month: string) {
   return new Date(parseInt(y), parseInt(m) - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
 }
 
+// ── Server-side HTML builder for email delivery ───────────────────────────
+function buildReportHTML(r: any): string {
+  const sc = r.strict_score >= 800 ? '#10b981' : r.strict_score >= 650 ? '#06b6d4' : r.strict_score >= 500 ? '#f59e0b' : r.strict_score >= 300 ? '#f43f5e' : '#dc2626'
+  const pct = (n: number, d: number) => d > 0 ? (n/d*100).toFixed(1)+'%' : '0%'
+  const lst = r.list || {}
+  const ex  = r.existing || {}
+  const nl  = r.new_leads || {}
+  const wf  = Array.isArray(r.workflows) ? [...r.workflows].sort((a:any,b:any)=>b.sent-a.sent) : []
+  const awf = Array.isArray(r.workflow_history_campaigns) ? r.workflow_history_campaigns : []
+
+  const workflowTable = (rows: any[], label: string, badge: string) => rows.length === 0 ? '' : `
+<div style="background:rgba(15,20,35,.9);border:1px solid rgba(99,102,241,.15);border-radius:14px;padding:20px;margin:14px 0">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <span style="color:#a5b4fc;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase">${label}</span>
+    <span style="font-size:10px;color:#10b981;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);padding:2px 8px;border-radius:4px">${badge}</span>
+  </div>
+  <table style="width:100%;border-collapse:collapse">
+    <tr><th style="color:rgba(148,163,184,.4);font-size:10px;font-weight:600;text-transform:uppercase;padding:6px 10px;text-align:left;border-bottom:1px solid rgba(99,102,241,.1)">Workflow</th><th style="color:rgba(148,163,184,.4);font-size:10px;font-weight:600;text-transform:uppercase;padding:6px 10px;text-align:left;border-bottom:1px solid rgba(99,102,241,.1)">Sent</th><th style="color:rgba(148,163,184,.4);font-size:10px;font-weight:600;text-transform:uppercase;padding:6px 10px;text-align:left;border-bottom:1px solid rgba(99,102,241,.1)">Open %</th><th style="color:rgba(148,163,184,.4);font-size:10px;font-weight:600;text-transform:uppercase;padding:6px 10px;text-align:left;border-bottom:1px solid rgba(99,102,241,.1)">Click %</th><th style="color:rgba(148,163,184,.4);font-size:10px;font-weight:600;text-transform:uppercase;padding:6px 10px;text-align:left;border-bottom:1px solid rgba(99,102,241,.1)">Bounce %</th></tr>
+    ${rows.map((w:any)=>`<tr><td style="padding:8px 10px;border-bottom:1px solid rgba(99,102,241,.06);font-size:12px;color:rgba(148,163,184,.8);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${w.name}</td><td style="padding:8px 10px;border-bottom:1px solid rgba(99,102,241,.06);font-size:12px;color:white;font-weight:600">${(w.sent||0).toLocaleString()}</td><td style="padding:8px 10px;border-bottom:1px solid rgba(99,102,241,.06);font-size:12px;color:${(w.openRate??0)>=25?'#10b981':'#f59e0b'};font-weight:600">${(w.openRate??0).toFixed(1)}%</td><td style="padding:8px 10px;border-bottom:1px solid rgba(99,102,241,.06);font-size:12px;color:${(w.clickRate??0)>=3?'#10b981':'#f59e0b'};font-weight:600">${(w.clickRate??0).toFixed(1)}%</td><td style="padding:8px 10px;border-bottom:1px solid rgba(99,102,241,.06);font-size:12px;color:${w.sent>0&&(w.bounced/w.sent*100)<2?'#10b981':'#f43f5e'};font-weight:600">${w.sent>0?((w.bounced/w.sent)*100).toFixed(2):'0.00'}%</td></tr>`).join('')}
+  </table>
+</div>`
+
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Email Health Report - ${r.month_label}</title>
+<style>*{box-sizing:border-box;margin:0;padding:0}body{background:#080c14;color:#e2e8f0;font-family:Inter,system-ui,sans-serif;padding:32px;max-width:1200px;margin:0 auto}.card{background:rgba(15,20,35,.9);border:1px solid rgba(99,102,241,.15);border-radius:14px;padding:20px;margin:14px 0}.title{color:#a5b4fc;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:12px}p{color:rgba(148,163,184,.7);line-height:1.7;margin-bottom:8px}.row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid rgba(99,102,241,.06)}</style></head><body>
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px">
+  <div>
+    <div style="font-size:64px;font-weight:900;color:${sc};line-height:1">${r.strict_score}</div>
+    <div style="font-size:22px;font-weight:800;color:${sc};margin-top:2px">${r.score_label}</div>
+    <div style="color:rgba(148,163,184,.4);font-size:11px;margin-top:6px">Strict Email Health Score · ${r.month_label} · via HighLevel</div>
+  </div>
+  <div style="text-align:right">
+    <div style="font-size:20px;font-weight:700;color:white">Phoenix Home Remodeling</div>
+    <div style="color:rgba(148,163,184,.4);font-size:13px;margin-top:4px">${r.domain}</div>
+  </div>
+</div>
+<div class="card"><div class="title">Analyst Notes</div><p>${r.analysis?.analyst_note||''}</p></div>
+<div class="card"><div class="title">Executive Summary</div><p>${r.analysis?.executive_summary||''}</p></div>
+${Array.isArray(r.analysis?.problems)&&r.analysis.problems.length?`<div class="card" style="border-color:rgba(244,63,94,.2)"><div class="title" style="color:#f43f5e">⚠️ Problems Costing You Revenue</div>${r.analysis.problems.map((p:any)=>`<div style="padding:10px 0;border-bottom:1px solid rgba(244,63,94,.08)"><strong style="color:white">${p.title}</strong><p style="margin-top:4px">${p.description}</p></div>`).join('')}</div>`:''}
+${r.stats?.campaigns_analyzed>0?`<div class="card"><div class="title">Email Performance — ${r.stats.campaigns_analyzed} Workflows</div><div style="display:flex;margin-bottom:8px">${[['Open Rate',r.stats.open_rate+'%'],['Click Rate',r.stats.click_rate+'%'],['Bounce Rate',r.stats.bounce_rate+'%'],['Delivered',(r.stats.delivered||0).toLocaleString()],['Unsubs',(r.stats.unsub||0).toLocaleString()]].map(([l,v])=>`<div style="flex:1;text-align:center;padding:8px 4px"><div style="font-size:20px;font-weight:700;color:${sc}">${v}</div><div style="font-size:9px;color:rgba(148,163,184,.4);text-transform:uppercase;margin-top:2px">${l}</div></div>`).join('')}</div></div>`:''}
+${lst.total?`<div class="card"><div class="title">List Health</div>${[{label:'Best Assets',count:lst.green,color:'#10b981'},{label:'Liabilities',count:lst.slipping,color:'#f59e0b'},{label:'Never Engaged',count:lst.never_engaged,color:'#f43f5e'},{label:'Never Sent',count:lst.never_sent,color:'rgba(99,102,241,.6)'}].map(s=>`<div class="row"><span style="color:white">${s.label}</span><span style="color:${s.color};font-weight:700">${((s.count||0) as number).toLocaleString()} (${pct((s.count||0) as number,lst.total)})</span></div>`).join('')}</div>`:''}
+${workflowTable(wf, 'Workflow Campaign Details', r.workflows_are_monthly ? `📅 ${r.month_label}` : 'All-time')}
+${workflowTable(awf, 'Workflow Campaign Details', `📅 ${r.workflow_history_label||'Annual'}`)}
+<p style="color:rgba(148,163,184,.2);font-size:11px;text-align:center;padding:24px 0">Generated ${new Date(r.generated_at).toLocaleString()} · ${r.domain} · Phoenix Home Remodeling</p>
+</body></html>`
+}
+
 // ── GET — status / baselines list ─────────────────────────────────────────
 export async function GET(req: NextRequest) {
   const action = req.nextUrl.searchParams.get('action')
@@ -159,16 +205,17 @@ export async function GET(req: NextRequest) {
     if (!cached) return NextResponse.json({ error: 'No report found for this month — generate it first' }, { status: 404 })
     const report = JSON.parse(cached.report_json)
     const subject = `Email Health Report — ${report.month_label || month}`
+    const html = buildReportHTML(report)
     try {
       const res = await fetch(webhook, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          to:      'mel@phxhomeremodeling.com',
+          to:          'mel@phxhomeremodeling.com',
           subject,
+          html,
           month,
           month_label: report.month_label || month,
-          report_json: cached.report_json,
           generated_at: cached.generated_at,
         }),
         signal: AbortSignal.timeout(15000),
