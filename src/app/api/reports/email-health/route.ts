@@ -121,48 +121,203 @@ function monthLabel(month: string) {
 
 // ── Server-side HTML builder for email delivery ───────────────────────────
 function buildReportHTML(r: any): string {
-  const sc = r.strict_score >= 800 ? '#10b981' : r.strict_score >= 650 ? '#06b6d4' : r.strict_score >= 500 ? '#f59e0b' : r.strict_score >= 300 ? '#f43f5e' : '#dc2626'
-  const pct = (n: number, d: number) => d > 0 ? (n/d*100).toFixed(1)+'%' : '0%'
-  const lst = r.list || {}
-  const ex  = r.existing || {}
-  const nl  = r.new_leads || {}
-  const wf  = Array.isArray(r.workflows) ? [...r.workflows].sort((a:any,b:any)=>b.sent-a.sent) : []
-  const awf = Array.isArray(r.workflow_history_campaigns) ? r.workflow_history_campaigns : []
+  const sc   = r.strict_score >= 800 ? '#059669' : r.strict_score >= 650 ? '#0891b2' : r.strict_score >= 500 ? '#d97706' : r.strict_score >= 300 ? '#dc2626' : '#991b1b'
+  const scBg = r.strict_score >= 800 ? '#ecfdf5' : r.strict_score >= 650 ? '#ecfeff' : r.strict_score >= 500 ? '#fffbeb' : r.strict_score >= 300 ? '#fef2f2' : '#fef2f2'
+  const pct  = (n: number, d: number) => d > 0 ? (n/d*100).toFixed(1)+'%' : '0%'
+  const num  = (n: number) => (n||0).toLocaleString()
+  const lst  = r.list     || {}
+  const ex   = r.existing || {}
+  const nl   = r.new_leads|| {}
+  const st   = r.stats    || {}
+  const wf   = Array.isArray(r.workflows) ? [...r.workflows].sort((a:any,b:any)=>b.sent-a.sent) : []
+  const awf  = Array.isArray(r.workflow_history_campaigns) ? r.workflow_history_campaigns : []
+  const an   = r.analysis || {}
 
-  const workflowTable = (rows: any[], label: string, badge: string) => rows.length === 0 ? '' : `
-<div style="background:rgba(15,20,35,.9);border:1px solid rgba(99,102,241,.15);border-radius:14px;padding:20px;margin:14px 0">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-    <span style="color:#a5b4fc;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase">${label}</span>
-    <span style="font-size:10px;color:#10b981;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);padding:2px 8px;border-radius:4px">${badge}</span>
-  </div>
-  <table style="width:100%;border-collapse:collapse">
-    <tr><th style="color:rgba(148,163,184,.4);font-size:10px;font-weight:600;text-transform:uppercase;padding:6px 10px;text-align:left;border-bottom:1px solid rgba(99,102,241,.1)">Workflow</th><th style="color:rgba(148,163,184,.4);font-size:10px;font-weight:600;text-transform:uppercase;padding:6px 10px;text-align:left;border-bottom:1px solid rgba(99,102,241,.1)">Sent</th><th style="color:rgba(148,163,184,.4);font-size:10px;font-weight:600;text-transform:uppercase;padding:6px 10px;text-align:left;border-bottom:1px solid rgba(99,102,241,.1)">Open %</th><th style="color:rgba(148,163,184,.4);font-size:10px;font-weight:600;text-transform:uppercase;padding:6px 10px;text-align:left;border-bottom:1px solid rgba(99,102,241,.1)">Click %</th><th style="color:rgba(148,163,184,.4);font-size:10px;font-weight:600;text-transform:uppercase;padding:6px 10px;text-align:left;border-bottom:1px solid rgba(99,102,241,.1)">Bounce %</th></tr>
-    ${rows.map((w:any)=>`<tr><td style="padding:8px 10px;border-bottom:1px solid rgba(99,102,241,.06);font-size:12px;color:rgba(148,163,184,.8);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${w.name}</td><td style="padding:8px 10px;border-bottom:1px solid rgba(99,102,241,.06);font-size:12px;color:white;font-weight:600">${(w.sent||0).toLocaleString()}</td><td style="padding:8px 10px;border-bottom:1px solid rgba(99,102,241,.06);font-size:12px;color:${(w.openRate??0)>=25?'#10b981':'#f59e0b'};font-weight:600">${(w.openRate??0).toFixed(1)}%</td><td style="padding:8px 10px;border-bottom:1px solid rgba(99,102,241,.06);font-size:12px;color:${(w.clickRate??0)>=3?'#10b981':'#f59e0b'};font-weight:600">${(w.clickRate??0).toFixed(1)}%</td><td style="padding:8px 10px;border-bottom:1px solid rgba(99,102,241,.06);font-size:12px;color:${w.sent>0&&(w.bounced/w.sent*100)<2?'#10b981':'#f43f5e'};font-weight:600">${w.sent>0?((w.bounced/w.sent)*100).toFixed(2):'0.00'}%</td></tr>`).join('')}
+  const card = (title: string, accentColor: string, content: string) =>
+    `<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;padding:20px 24px;margin:12px 0;border-top:3px solid ${accentColor}">
+      <div style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:${accentColor};margin-bottom:14px">${title}</div>
+      ${content}
+    </div>`
+
+  const row2 = (label: string, value: string, valueColor = '#111827') =>
+    `<tr>
+      <td style="padding:7px 0;border-bottom:1px solid #f3f4f6;font-size:13px;color:#374151">${label}</td>
+      <td style="padding:7px 0;border-bottom:1px solid #f3f4f6;font-size:13px;font-weight:700;color:${valueColor};text-align:right">${value}</td>
+    </tr>`
+
+  const workflowTable = (rows: any[], label: string, badge: string) => rows.length === 0 ? '' :
+    card(label, '#6366f1',
+      `<div style="margin-bottom:12px">
+        <span style="font-size:11px;background:#f0f4ff;color:#4f46e5;border:1px solid #c7d2fe;padding:3px 10px;border-radius:4px;font-weight:600">${badge}</span>
+      </div>
+      <table style="width:100%;border-collapse:collapse">
+        <tr style="background:#f9fafb">
+          <th style="font-size:10px;font-weight:700;text-transform:uppercase;color:#6b7280;padding:8px 10px;text-align:left;border-bottom:2px solid #e5e7eb">Workflow</th>
+          <th style="font-size:10px;font-weight:700;text-transform:uppercase;color:#6b7280;padding:8px 10px;text-align:right;border-bottom:2px solid #e5e7eb">Sent</th>
+          <th style="font-size:10px;font-weight:700;text-transform:uppercase;color:#6b7280;padding:8px 10px;text-align:right;border-bottom:2px solid #e5e7eb">Open %</th>
+          <th style="font-size:10px;font-weight:700;text-transform:uppercase;color:#6b7280;padding:8px 10px;text-align:right;border-bottom:2px solid #e5e7eb">Click %</th>
+          <th style="font-size:10px;font-weight:700;text-transform:uppercase;color:#6b7280;padding:8px 10px;text-align:right;border-bottom:2px solid #e5e7eb">Bounce %</th>
+        </tr>
+        ${rows.map((w:any, i:number)=>{
+          const openC  = (w.openRate??0)>=25 ? '#059669' : (w.openRate??0)>=15 ? '#d97706' : '#dc2626'
+          const clkC   = (w.clickRate??0)>=3 ? '#059669' : (w.clickRate??0)>=1 ? '#d97706' : '#dc2626'
+          const bncPct = w.sent>0 ? (w.bounced/w.sent*100).toFixed(2) : '0.00'
+          const bncC   = parseFloat(bncPct)<2 ? '#059669' : '#dc2626'
+          return `<tr style="background:${i%2===0?'#ffffff':'#f9fafb'}">
+            <td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#374151;max-width:280px">${w.name}</td>
+            <td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#111827;font-weight:700;text-align:right">${num(w.sent)}</td>
+            <td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;font-size:12px;color:${openC};font-weight:700;text-align:right">${(w.openRate??0).toFixed(1)}%</td>
+            <td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;font-size:12px;color:${clkC};font-weight:700;text-align:right">${(w.clickRate??0).toFixed(1)}%</td>
+            <td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;font-size:12px;color:${bncC};font-weight:700;text-align:right">${bncPct}%</td>
+          </tr>`
+        }).join('')}
+      </table>`)
+
+  // Executive summary paragraphs
+  const summaryHtml = (() => {
+    const s = an.executive_summary || ''
+    if (!s) return ''
+    return s.split(/\n{2,}/).map((p: string) =>
+      `<p style="font-size:13px;color:#374151;line-height:1.75;margin:0 0 10px 0">${p.trim()}</p>`
+    ).join('')
+  })()
+
+  // Bullet list helper
+  const bullets = (items: string[], color: string) => (Array.isArray(items) && items.length)
+    ? items.map(i=>`<tr><td style="padding:4px 0;vertical-align:top"><span style="color:${color};font-weight:700;font-size:14px;line-height:1">•</span></td><td style="padding:4px 0 4px 8px;font-size:13px;color:#374151;line-height:1.6">${i}</td></tr>`).join('')
+    : ''
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Email Health Report — ${r.month_label||r.month}</title>
+</head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#f3f4f6">
+<tr><td align="center" style="padding:24px 16px">
+<table width="100%" style="max-width:700px" cellpadding="0" cellspacing="0" role="presentation">
+
+<!-- Header -->
+<tr><td style="background:#1e2433;border-radius:12px 12px 0 0;padding:28px 32px">
+  <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+    <tr>
+      <td style="vertical-align:middle">
+        <div style="font-size:13px;color:#a5b4fc;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px">Email Health Report</div>
+        <div style="font-size:22px;font-weight:800;color:#ffffff">${r.month_label||r.month}</div>
+        <div style="font-size:12px;color:#94a3b8;margin-top:4px">Phoenix Home Remodeling &nbsp;·&nbsp; ${r.domain}</div>
+      </td>
+      <td style="vertical-align:middle;text-align:right">
+        <div style="display:inline-block;background:${scBg};border:2px solid ${sc};border-radius:12px;padding:10px 18px;text-align:center">
+          <div style="font-size:40px;font-weight:900;color:${sc};line-height:1">${r.strict_score}</div>
+          <div style="font-size:11px;font-weight:700;color:${sc};text-transform:uppercase;margin-top:2px">${r.score_label}</div>
+          <div style="font-size:10px;color:#6b7280;margin-top:1px">/ 999</div>
+        </div>
+      </td>
+    </tr>
   </table>
-</div>`
+</td></tr>
 
-  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Email Health Report - ${r.month_label}</title>
-<style>*{box-sizing:border-box;margin:0;padding:0}body{background:#080c14;color:#e2e8f0;font-family:Inter,system-ui,sans-serif;padding:32px;max-width:1200px;margin:0 auto}.card{background:rgba(15,20,35,.9);border:1px solid rgba(99,102,241,.15);border-radius:14px;padding:20px;margin:14px 0}.title{color:#a5b4fc;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:12px}p{color:rgba(148,163,184,.7);line-height:1.7;margin-bottom:8px}.row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid rgba(99,102,241,.06)}</style></head><body>
-<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px">
-  <div>
-    <div style="font-size:64px;font-weight:900;color:${sc};line-height:1">${r.strict_score}</div>
-    <div style="font-size:22px;font-weight:800;color:${sc};margin-top:2px">${r.score_label}</div>
-    <div style="color:rgba(148,163,184,.4);font-size:11px;margin-top:6px">Strict Email Health Score · ${r.month_label} · via HighLevel</div>
-  </div>
-  <div style="text-align:right">
-    <div style="font-size:20px;font-weight:700;color:white">Phoenix Home Remodeling</div>
-    <div style="color:rgba(148,163,184,.4);font-size:13px;margin-top:4px">${r.domain}</div>
-  </div>
-</div>
-<div class="card"><div class="title">Analyst Notes</div><p>${r.analysis?.analyst_note||''}</p></div>
-<div class="card"><div class="title">Executive Summary</div><p>${r.analysis?.executive_summary||''}</p></div>
-${Array.isArray(r.analysis?.problems)&&r.analysis.problems.length?`<div class="card" style="border-color:rgba(244,63,94,.2)"><div class="title" style="color:#f43f5e">⚠️ Problems Costing You Revenue</div>${r.analysis.problems.map((p:any)=>`<div style="padding:10px 0;border-bottom:1px solid rgba(244,63,94,.08)"><strong style="color:white">${p.title}</strong><p style="margin-top:4px">${p.description}</p></div>`).join('')}</div>`:''}
-${r.stats?.campaigns_analyzed>0?`<div class="card"><div class="title">Email Performance — ${r.stats.campaigns_analyzed} Workflows</div><div style="display:flex;margin-bottom:8px">${[['Open Rate',r.stats.open_rate+'%'],['Click Rate',r.stats.click_rate+'%'],['Bounce Rate',r.stats.bounce_rate+'%'],['Delivered',(r.stats.delivered||0).toLocaleString()],['Unsubs',(r.stats.unsub||0).toLocaleString()]].map(([l,v])=>`<div style="flex:1;text-align:center;padding:8px 4px"><div style="font-size:20px;font-weight:700;color:${sc}">${v}</div><div style="font-size:9px;color:rgba(148,163,184,.4);text-transform:uppercase;margin-top:2px">${l}</div></div>`).join('')}</div></div>`:''}
-${lst.total?`<div class="card"><div class="title">List Health</div>${[{label:'Best Assets',count:lst.green,color:'#10b981'},{label:'Liabilities',count:lst.slipping,color:'#f59e0b'},{label:'Never Engaged',count:lst.never_engaged,color:'#f43f5e'},{label:'Never Sent',count:lst.never_sent,color:'rgba(99,102,241,.6)'}].map(s=>`<div class="row"><span style="color:white">${s.label}</span><span style="color:${s.color};font-weight:700">${((s.count||0) as number).toLocaleString()} (${pct((s.count||0) as number,lst.total)})</span></div>`).join('')}</div>`:''}
-${workflowTable(wf, 'Workflow Campaign Details', r.workflows_are_monthly ? `📅 ${r.month_label}` : 'All-time')}
-${workflowTable(awf, 'Workflow Campaign Details', `📅 ${r.workflow_history_label||'Annual'}`)}
-<p style="color:rgba(148,163,184,.2);font-size:11px;text-align:center;padding:24px 0">Generated ${new Date(r.generated_at).toLocaleString()} · ${r.domain} · Phoenix Home Remodeling</p>
-</body></html>`
+<!-- Body -->
+<tr><td style="background:#f8fafc;padding:20px 28px">
+
+${an.analyst_note ? card('Analyst Note', '#6366f1',
+  `<p style="font-size:14px;color:#1e2433;line-height:1.7;font-style:italic;margin:0">"${an.analyst_note}"</p>`
+) : ''}
+
+${summaryHtml ? card('Executive Summary', '#0891b2', summaryHtml) : ''}
+
+${Array.isArray(an.problems)&&an.problems.length ? card('⚠️ Problems Costing You Revenue', '#dc2626',
+  an.problems.map((p:any)=>`
+    <div style="padding:10px 0;border-bottom:1px solid #fef2f2">
+      <div style="font-size:13px;font-weight:700;color:#111827;margin-bottom:3px">${p.title||''}</div>
+      <div style="font-size:12px;color:#374151;line-height:1.6">${p.description||''}</div>
+    </div>`).join('')
+) : ''}
+
+${Array.isArray(an.good_news)&&an.good_news.length ? card('✅ Good News Working In Your Favor', '#059669',
+  `<table cellpadding="0" cellspacing="0" style="width:100%">${bullets(an.good_news,'#059669')}</table>`
+) : ''}
+
+${st.delivered ? card('Campaign Performance — ' + r.month_label, '#0891b2',
+  `<table width="100%" cellpadding="0" cellspacing="0">
+    ${row2('Emails Delivered', num(st.delivered))}
+    ${row2('Open Rate', (st.open_rate||0).toFixed(2)+'%', (st.open_rate||0)>=25?'#059669':'#d97706')}
+    ${row2('Click Rate', (st.click_rate||0).toFixed(2)+'%', (st.click_rate||0)>=3?'#059669':'#d97706')}
+    ${row2('Bounce Rate', (st.bounce_rate||0).toFixed(3)+'%', (st.bounce_rate||0)<2?'#059669':'#dc2626')}
+    ${row2('Spam Complaints', num(st.spam))}
+    ${row2('Unsubscribes', num(st.unsub))}
+  </table>`
+) : ''}
+
+${ex.mailed ? card('Existing Contacts — ' + r.month_label, '#7c3aed',
+  `<table width="100%" cellpadding="0" cellspacing="0">
+    ${row2('Mailed', num(ex.mailed))}
+    ${row2('Opened', num(ex.opened) + ' (' + pct(ex.opened,ex.mailed) + ')', '#059669')}
+    ${row2('Did Not Open', num(ex.not_opened), '#dc2626')}
+    ${row2('Clicked', num(ex.clicked) + ' (' + pct(ex.clicked,ex.mailed) + ')', '#059669')}
+    ${row2('Did Not Click', num(ex.not_clicked), '#dc2626')}
+    ${row2('Engaged Last 90 Days', num(ex.engaged_90d) + ' (' + pct(ex.engaged_90d,ex.mailed) + ')', '#059669')}
+    ${row2('At-Risk (90d+ no engagement)', num(ex.liabilities), '#dc2626')}
+  </table>`
+) : ''}
+
+${nl.mailed ? card('New Leads — ' + r.month_label, '#0891b2',
+  `<table width="100%" cellpadding="0" cellspacing="0">
+    ${row2('Mailed', num(nl.mailed))}
+    ${row2('Opened', num(nl.opened) + ' (' + pct(nl.opened,nl.mailed) + ')', '#059669')}
+    ${row2('Did Not Open', num(nl.not_opened), '#dc2626')}
+    ${row2('Clicked', num(nl.clicked) + ' (' + pct(nl.clicked,nl.mailed) + ')', '#059669')}
+    ${row2('Did Not Click', num(nl.not_clicked), '#dc2626')}
+  </table>`
+) : ''}
+
+${lst.total ? card('List Health — Live Snapshot', '#d97706',
+  `<table width="100%" cellpadding="0" cellspacing="0">
+    ${row2('Total Contacts', num(lst.total))}
+    ${row2('Safe to Send (Green)', num(lst.green) + ' (' + pct(lst.green,lst.total) + ')', '#059669')}
+    ${row2('Do Not Send (Red)', num(lst.red) + ' (' + pct(lst.red,lst.total) + ')', '#dc2626')}
+    ${row2('Never Engaged', num(lst.never_engaged), '#dc2626')}
+    ${row2('Slipping', num(lst.slipping), '#d97706')}
+    ${row2('Never Sent', num(lst.never_sent), '#6b7280')}
+    ${row2('Bounced Tag', num(lst.bounced_tag), '#dc2626')}
+    ${row2('Spam Risk Tag', num(lst.spam_tag), '#dc2626')}
+  </table>`
+) : ''}
+
+${Array.isArray(an.actions_new_contacts)&&an.actions_new_contacts.length ? card('Actions — New Contacts', '#0891b2',
+  `<table cellpadding="0" cellspacing="0" style="width:100%">${bullets(an.actions_new_contacts,'#0891b2')}</table>`
+) : ''}
+
+${Array.isArray(an.actions_existing_contacts)&&an.actions_existing_contacts.length ? card('Actions — Existing Contacts', '#7c3aed',
+  `<table cellpadding="0" cellspacing="0" style="width:100%">${bullets(an.actions_existing_contacts,'#7c3aed')}</table>`
+) : ''}
+
+${Array.isArray(an.actions_maintenance)&&an.actions_maintenance.length ? card('Maintenance Actions', '#6b7280',
+  `<table cellpadding="0" cellspacing="0" style="width:100%">${bullets(an.actions_maintenance,'#6b7280')}</table>`
+) : ''}
+
+${workflowTable(wf, 'Workflow Campaign Details — ' + r.month_label, r.workflows_are_monthly ? '📅 Monthly' : 'All-time cumulative')}
+${workflowTable(awf, 'Annual Workflow Campaign Details', '📅 ' + (r.workflow_history_label||'12-Month Total'))}
+
+</td></tr>
+
+<!-- Footer -->
+<tr><td style="background:#1e2433;border-radius:0 0 12px 12px;padding:16px 32px">
+  <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+    <tr>
+      <td style="font-size:11px;color:#94a3b8">PHR OS &nbsp;·&nbsp; Email Health Report &nbsp;·&nbsp; Auto-generated</td>
+      <td style="text-align:right;font-size:11px;color:#64748b">Generated ${new Date(r.generated_at).toLocaleString('en-US',{timeZone:'America/Phoenix',month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'})} MST</td>
+    </tr>
+  </table>
+</td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>`
 }
 
 // ── GET — status / baselines list ─────────────────────────────────────────
