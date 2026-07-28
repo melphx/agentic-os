@@ -444,11 +444,21 @@ Data:\n${dataCtx}`,
     for (const k of Object.keys(snapsBySource)) {
       snapsBySource[k].sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date))
     }
-    // Helper: find closest snapshot on or before targetDate for a sourceId
-    const closestInMem = (sid: string, targetDate: string) => {
+    // Helper: find closest END-OF-MONTH snapshot on or before targetDate.
+    // End-of-month = snapshot_date is the last calendar day of its month.
+    // This excludes live mid-month GHL snapshots (e.g. stored as 2026-07-28)
+    // so they never contaminate the history deltas.
+    const isEndOfMonth = (date: string) => {
+      const [ey, em] = date.slice(0,7).split('-').map(Number)
+      return parseInt(date.slice(8)) === new Date(ey, em, 0).getDate()
+    }
+    const closestEOMInMem = (sid: string, targetDate: string) => {
       const snaps = snapsBySource[sid] || []
       let result: typeof snaps[0] | null = null
-      for (const s of snaps) { if (s.snapshot_date <= targetDate) result = s; else break }
+      for (const s of snaps) {
+        if (s.snapshot_date <= targetDate && isEndOfMonth(s.snapshot_date)) result = s
+        else if (s.snapshot_date > targetDate) break
+      }
       return result
     }
     // Build last 12 months list (oldest → newest)
@@ -466,8 +476,8 @@ Data:\n${dataCtx}`,
       let sent = 0, opened = 0, clicked = 0, hasData = false
       for (const w of workflows as any[]) {
         const sid = w.sourceId
-        const se = closestInMem(sid, hEnd)
-        const ss = closestInMem(sid, hPrevEnd)
+        const se = closestEOMInMem(sid, hEnd)    // end-of-month only
+        const ss = closestEOMInMem(sid, hPrevEnd) // end-of-month only
         if (se && ss) {
           sent    += Math.max(0, se.sent    - ss.sent)
           opened  += Math.max(0, se.opened  - ss.opened)
