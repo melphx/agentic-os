@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import {
   getEmailHealthBaseline, getAllEmailHealthBaselines, saveEmailHealthBaseline,
-  saveEmailHealthReport, getEmailHealthReport, getClosestSnapshot,
+  saveEmailHealthReport, getEmailHealthReport, getClosestSnapshot, getAllSnapshots,
 } from '@/lib/db'
 
 const client = new OpenAI({
@@ -432,6 +432,53 @@ Data:\n${dataCtx}`,
       ? workflowsComputed.filter((w: any) => w.is_monthly)
       : workflowsComputed
 
+    // ── 12-month workflow history ──────────────────────────────────────────
+    // Load all snapshots once, then compute monthly totals in memory
+    const allSnaps = getAllSnapshots(locationId)
+    // Build per-sourceId map: sourceId → snapshots sorted ascending by date
+    const snapsBySource: Record<string, Array<{snapshot_date:string,sent:number,opened:number,clicked:number,bounced:number}>> = {}
+    for (const s of allSnaps as any[]) {
+      if (!snapsBySource[s.source_id]) snapsBySource[s.source_id] = []
+      snapsBySource[s.source_id].push(s)
+    }
+    for (const k of Object.keys(snapsBySource)) {
+      snapsBySource[k].sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date))
+    }
+    // Helper: find closest snapshot on or before targetDate for a sourceId
+    const closestInMem = (sid: string, targetDate: string) => {
+      const snaps = snapsBySource[sid] || []
+      let result: typeof snaps[0] | null = null
+      for (const s of snaps) { if (s.snapshot_date <= targetDate) result = s; else break }
+      return result
+    }
+    // Build last 12 months list (oldest → newest)
+    const now12 = new Date()
+    const last12Months: string[] = []
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now12.getFullYear(), now12.getMonth() - i, 1)
+      last12Months.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`)
+    }
+    const workflowHistory = last12Months.map(m => {
+      const [hy, hmo] = m.split('-').map(Number)
+      const hEnd      = `${m}-${String(new Date(hy, hmo, 0).getDate()).padStart(2,'0')}`
+      const hPrevM    = new Date(hy, hmo - 2, 1)
+      const hPrevEnd  = `${hPrevM.getFullYear()}-${String(hPrevM.getMonth()+1).padStart(2,'0')}-${String(new Date(hPrevM.getFullYear(), hPrevM.getMonth()+1, 0).getDate()).padStart(2,'0')}`
+      let sent = 0, opened = 0, clicked = 0, hasData = false
+      for (const w of workflows as any[]) {
+        const sid = w.sourceId
+        const se = closestInMem(sid, hEnd)
+        const ss = closestInMem(sid, hPrevEnd)
+        if (se && ss) {
+          sent    += Math.max(0, se.sent    - ss.sent)
+          opened  += Math.max(0, se.opened  - ss.opened)
+          clicked += Math.max(0, se.clicked - ss.clicked)
+          hasData = true
+        }
+      }
+      const label = new Date(m + '-15').toLocaleString('default', { month:'short', year:'2-digit' })
+      return { month: m, label, sent, opened, clicked, has_data: hasData }
+    })
+
     const reportPayload = {
       generated_at: new Date().toISOString(),
       month,
@@ -502,6 +549,7 @@ Data:\n${dataCtx}`,
       // Workflow campaign details
       workflows: workflowsWithDeltas,
       workflows_are_monthly: workflowsAreMonthly,
+      workflow_history: workflowHistory,
 
       analysis,
     }

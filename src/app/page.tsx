@@ -4550,6 +4550,55 @@ function EmailHealthReportView() {
             </div>
           )}
 
+          {/* ── 11. 12-MONTH WORKFLOW HISTORY ── */}
+          {report.workflow_history && report.workflow_history.some((h: any) => h.has_data) && (() => {
+            const hist = report.workflow_history as any[]
+            const maxSent = Math.max(...hist.map((h: any) => h.sent), 1)
+            return (
+              <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(20,184,166,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16 }}>
+                  <div style={{ color:'#14b8a6', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const }}>12-Month Send Volume</div>
+                  <span style={{ fontSize:9, color:'rgba(148,163,184,0.4)' }}>Emails sent per month · all workflow campaigns</span>
+                </div>
+                {/* Bar chart */}
+                <div style={{ display:'flex', alignItems:'flex-end', gap:6, height:100, marginBottom:8 }}>
+                  {hist.map((h: any) => {
+                    const pct = h.sent / maxSent
+                    const isCurrentMonth = h.month === report.month
+                    return (
+                      <div key={h.month} style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:4, height:'100%', justifyContent:'flex-end' }} title={`${h.label}: ${h.sent.toLocaleString()} sent`}>
+                        <div style={{ fontSize:8, color: h.has_data ? (isCurrentMonth ? '#14b8a6' : 'rgba(148,163,184,0.5)') : 'rgba(148,163,184,0.15)', fontWeight: isCurrentMonth ? 700 : 400 }}>
+                          {h.has_data ? h.sent.toLocaleString() : '–'}
+                        </div>
+                        <div style={{ width:'100%', background: h.has_data ? (isCurrentMonth ? 'rgba(20,184,166,0.7)' : 'rgba(99,102,241,0.4)') : 'rgba(99,102,241,0.08)', borderRadius:'3px 3px 0 0', height: h.has_data ? `${Math.max(pct * 100, 3)}%` : '3%', transition:'height 0.3s' }} />
+                      </div>
+                    )
+                  })}
+                </div>
+                {/* Month labels */}
+                <div style={{ display:'flex', gap:6 }}>
+                  {hist.map((h: any) => (
+                    <div key={h.month} style={{ flex:1, textAlign:'center', fontSize:8, color: h.month === report.month ? '#14b8a6' : 'rgba(148,163,184,0.3)', fontWeight: h.month === report.month ? 700 : 400 }}>{h.label}</div>
+                  ))}
+                </div>
+                {/* Summary row */}
+                <div style={{ display:'flex', gap:24, marginTop:14, paddingTop:12, borderTop:'1px solid rgba(20,184,166,0.08)' }}>
+                  {[
+                    { label:'Total Sent (12mo)', val: hist.filter((h:any)=>h.has_data).reduce((s:number,h:any)=>s+h.sent,0).toLocaleString() },
+                    { label:'Avg / Month', val: (() => { const d=hist.filter((h:any)=>h.has_data); return d.length ? Math.round(d.reduce((s:number,h:any)=>s+h.sent,0)/d.length).toLocaleString() : '–' })() },
+                    { label:'Best Month', val: (() => { const d=hist.filter((h:any)=>h.has_data); if(!d.length) return '–'; const b=d.reduce((m:any,h:any)=>h.sent>m.sent?h:m,d[0]); return `${b.label} (${b.sent.toLocaleString()})` })() },
+                    { label:'Months w/ Data', val: `${hist.filter((h:any)=>h.has_data).length} / 12` },
+                  ].map(s => (
+                    <div key={s.label}>
+                      <div style={{ fontSize:9, color:'rgba(148,163,184,0.35)', textTransform:'uppercase' as const, letterSpacing:'0.06em', marginBottom:3 }}>{s.label}</div>
+                      <div style={{ fontSize:14, fontWeight:700, color:'#e2e8f0' }}>{s.val}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
+
           <p style={{ color:'rgba(148,163,184,0.2)', fontSize:11, textAlign:'center' as const }}>Generated {new Date(report.generated_at).toLocaleString()} · {report.domain} via HighLevel</p>
         </div>
       )}
@@ -5358,6 +5407,101 @@ function WorkflowImportPanel() {
   )
 }
 
+function WorkflowHistoryPanel() {
+  const [status, setStatus] = useState<string|null>(null)
+  const [loading, setLoading] = useState(false)
+  const [progress, setProgress] = useState('')
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]; if (!file) return
+    setLoading(true); setStatus('Parsing CSV…')
+    try {
+      const text = await file.text()
+      const lines = text.trim().split('\n')
+      const headers = lines[0].split(',').map((h: string) => h.replace(/"/g,'').trim())
+      const gi = (n: string) => headers.indexOf(n)
+      const idx = { date: gi('Execution Date'), id: gi('Campaign ID'), name: gi('Campaign Name'),
+        sent: gi('Sent'), opened: gi('Opened'), clicked: gi('Clicked'),
+        bounced: gi('Permanent Failures'), complained: gi('Complained'), unsubscribed: gi('Unsubscribed') }
+      if (idx.id < 0 || idx.sent < 0) { setStatus('Invalid CSV — expected GHL Workflow Campaign Stats export.'); setLoading(false); return }
+
+      // Group all rows by YYYY-MM month, then by campaign ID
+      const byMonth: Record<string, Record<string, any>> = {}
+      for (let i = 1; i < lines.length; i++) {
+        const cols = parseCSVLine(lines[i]); if (!cols.length) continue
+        const rawDate = cols[idx.date]?.replace(/"/g,'').trim(); if (!rawDate) continue
+        const m = rawDate.slice(0, 7) // YYYY-MM
+        const sid = cols[idx.id]?.replace(/"/g,'').trim(); if (!sid) continue
+        if (!byMonth[m]) byMonth[m] = {}
+        if (!byMonth[m][sid]) byMonth[m][sid] = { name: cols[idx.name]?.replace(/"/g,'').trim()||'', sent:0, opened:0, clicked:0, bounced:0, complained:0, unsubscribed:0 }
+        byMonth[m][sid].sent        += parseInt(cols[idx.sent]||'0')||0
+        byMonth[m][sid].opened      += parseInt(cols[idx.opened]||'0')||0
+        byMonth[m][sid].clicked     += parseInt(cols[idx.clicked]||'0')||0
+        byMonth[m][sid].bounced     += parseInt(cols[idx.bounced]||'0')||0
+        byMonth[m][sid].complained  += parseInt(cols[idx.complained]||'0')||0
+        byMonth[m][sid].unsubscribed+= parseInt(cols[idx.unsubscribed]||'0')||0
+      }
+
+      const months = Object.keys(byMonth).sort()
+      if (!months.length) { setStatus('No data found in this file.'); setLoading(false); return }
+      setStatus(`Found ${months.length} months (${months[0]} → ${months[months.length-1]}). Saving…`)
+
+      // Build CUMULATIVE snapshots — delta system needs snapshot[N] - snapshot[N-1] = monthly sends
+      const cumulative: Record<string, any> = {}
+      let saved = 0
+
+      for (const m of months) {
+        for (const [sid, stats] of Object.entries(byMonth[m])) {
+          if (!cumulative[sid]) cumulative[sid] = { name: (stats as any).name, sent:0, opened:0, clicked:0, bounced:0, complained:0, unsubscribed:0 }
+          const c = cumulative[sid]
+          c.sent        += (stats as any).sent
+          c.opened      += (stats as any).opened
+          c.clicked     += (stats as any).clicked
+          c.bounced     += (stats as any).bounced
+          c.complained  += (stats as any).complained
+          c.unsubscribed+= (stats as any).unsubscribed
+        }
+        const [y, mo] = m.split('-').map(Number)
+        const endDate = `${m}-${String(new Date(y, mo, 0).getDate()).padStart(2,'0')}`
+        const campaigns = Object.entries(cumulative)
+          .filter(([,v]) => (v as any).sent > 0)
+          .map(([source_id, v]) => ({ source_id, ...(v as any) }))
+
+        setProgress(`${m} (${months.indexOf(m)+1}/${months.length})`)
+        const r = await fetch('/api/reports/email-snapshot', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ snapshot_date: endDate, manual_campaigns: campaigns })
+        })
+        const d = await r.json()
+        if (d.ok) saved++
+      }
+
+      setStatus(`✓ Imported ${saved} monthly snapshots (${months[0]} → ${months[months.length-1]}). Regenerate the report to see 12-month history.`)
+    } catch(e:any) { setStatus('Error: '+e.message) }
+    setLoading(false); setProgress('')
+    if (fileRef.current) fileRef.current.value = ''
+  }
+
+  const card = { background:'rgba(15,20,35,0.7)', border:'1px solid rgba(20,184,166,0.15)', borderRadius:12, padding:'16px 18px', marginBottom:14 }
+
+  return (
+    <div style={card}>
+      <div style={{ fontSize:11, color:'#14b8a6', fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:8 }}>12-Month Workflow History</div>
+      <p style={{ fontSize:12, color:'rgba(148,163,184,0.5)', marginBottom:14, lineHeight:1.6 }}>
+        Upload one GHL Workflow Campaign Stats CSV containing all historical data. All months are auto-detected and saved — enabling the 12-month trend chart in the report.
+      </p>
+      <label style={{ display:'block', cursor: loading?'not-allowed':'pointer' }}>
+        <div style={{ width:'100%', padding:'9px 0', background:'linear-gradient(135deg,#0f766e,#14b8a6)', borderRadius:9, color:'white', fontWeight:600, fontSize:13, textAlign:'center', opacity:loading?0.5:1 }}>
+          {loading ? `Processing… ${progress}` : '📂 Upload Full History CSV'}
+        </div>
+        <input ref={fileRef} type="file" accept=".csv" onChange={handleFile} disabled={loading} style={{display:'none'}} />
+      </label>
+      {status && <p style={{ marginTop:10, fontSize:12, color: status.startsWith('✓')?'#14b8a6':status.startsWith('Error')?'#f43f5e':'rgba(148,163,184,0.7)', lineHeight:1.5 }}>{status}</p>}
+    </div>
+  )
+}
+
 // ── Settings View ─────────────────────────────────────────────────────────
 
 function SettingsView({ agents = [] }: { agents?: Agent[] }) {
@@ -5383,6 +5527,7 @@ function SettingsView({ agents = [] }: { agents?: Agent[] }) {
       <ApiKeysPanel />
       <EmailHealthBaselinePanel />
       <WorkflowImportPanel />
+      <WorkflowHistoryPanel />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
         {[
           { label: 'OPENAI BASE URL', value: openaiUrl, set: setOpenaiUrl, placeholder: 'https://api.openai.com/v1' },
