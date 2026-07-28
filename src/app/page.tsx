@@ -5406,18 +5406,18 @@ function WorkflowHistoryTable({ history, currentMonth }: { history: any[], curre
                     <td style={{ ...tdBase, color: isCurrent ? '#14b8a6' : '#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.05em', textTransform:'uppercase' as const }}>
                       {isOpen ? '▾' : '▸'} {h.label}{isCurrent ? '  ★' : ''}
                     </td>
-                    <td style={{ ...tdBase, color:'white', fontWeight:700 }}>{h.sent.toLocaleString()}</td>
-                    <td style={{ ...tdBase, color: h.openRate >= 25 ? '#10b981' : '#f59e0b', fontWeight:600 }}>{h.openRate.toFixed(1)}%</td>
-                    <td style={{ ...tdBase, color: h.clickRate >= 3 ? '#10b981' : '#f59e0b', fontWeight:600 }}>{h.clickRate.toFixed(1)}%</td>
+                    <td style={{ ...tdBase, color:'white', fontWeight:700 }}>{(h.sent||0).toLocaleString()}</td>
+                    <td style={{ ...tdBase, color: (h.openRate||0) >= 25 ? '#10b981' : '#f59e0b', fontWeight:600 }}>{(h.openRate??0).toFixed(1)}%</td>
+                    <td style={{ ...tdBase, color: (h.clickRate||0) >= 3 ? '#10b981' : '#f59e0b', fontWeight:600 }}>{(h.clickRate??0).toFixed(1)}%</td>
                     <td style={{ ...tdBase, color:'rgba(148,163,184,0.3)' }}>—</td>
                   </tr>
                   {/* Expanded campaign rows */}
                   {isOpen && (h.campaigns || []).map((c: any, ci: number) => (
                     <tr key={ci} style={{ borderBottom:'1px solid rgba(99,102,241,0.04)', background: isCurrent ? 'rgba(20,184,166,0.02)' : 'transparent' }}>
                       <td style={{ ...tdBase, color:'rgba(148,163,184,0.75)', paddingLeft:22, maxWidth:360, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' as const }} title={c.name}>{c.name}</td>
-                      <td style={{ ...tdBase, color:'rgba(255,255,255,0.85)', fontWeight:500 }}>{c.sent.toLocaleString()}</td>
-                      <td style={{ ...tdBase, color: c.openRate >= 25 ? '#10b981' : '#f59e0b' }}>{c.openRate.toFixed(1)}%</td>
-                      <td style={{ ...tdBase, color: c.clickRate >= 3 ? '#10b981' : '#f59e0b' }}>{c.clickRate.toFixed(1)}%</td>
+                      <td style={{ ...tdBase, color:'rgba(255,255,255,0.85)', fontWeight:500 }}>{(c.sent||0).toLocaleString()}</td>
+                      <td style={{ ...tdBase, color: (c.openRate||0) >= 25 ? '#10b981' : '#f59e0b' }}>{(c.openRate??0).toFixed(1)}%</td>
+                      <td style={{ ...tdBase, color: (c.clickRate||0) >= 3 ? '#10b981' : '#f59e0b' }}>{(c.clickRate??0).toFixed(1)}%</td>
                       <td style={{ ...tdBase, color: c.sent > 0 && (c.bounced / c.sent * 100) < 2 ? '#10b981' : '#f43f5e' }}>{c.sent > 0 ? (c.bounced / c.sent * 100).toFixed(2) : '0.00'}%</td>
                     </tr>
                   ))}
