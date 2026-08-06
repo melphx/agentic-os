@@ -3,7 +3,7 @@
 feedback sheet (Justin Discovery Calls, Rebekah in-homes, receptionist, widget).
 
 Auth: Google service account (CALL_FEEDBACK_SA_JSON) with spreadsheets.readonly.
-Sheet: CALL_FEEDBACK_SHEET_ID. Commands: ratings | feedback | summaries | trend | transcript.
+Sheet: CALL_FEEDBACK_SHEET_ID. Commands: ratings | feedback | trend.
 Echoes its query + date range, includes GHL IDs for joining to ghl-reader,
 excludes emails/phones/recording links, loud failure on any error (exit 1).
 NOTE: rows discuss named team members; reports built on this go ONLY to the
