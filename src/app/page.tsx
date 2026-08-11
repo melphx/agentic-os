@@ -5536,6 +5536,139 @@ function WorkflowHistoryPanel() {
   )
 }
 
+// ── MCD Context Sources Panel ──────────────────────────────────────────────
+
+interface McdContextSource {
+  id: number; label: string; url: string; doc_id: string; doc_type: string
+  tab_name: string; enabled: boolean; content_cache: string | null; cached_at: string | null
+  created_at: string
+}
+
+function McdContextSourcesPanel() {
+  const [sources, setSources] = useState<McdContextSource[]>([])
+  const [url, setUrl] = useState('')
+  const [label, setLabel] = useState('')
+  const [tab, setTab] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [refreshingId, setRefreshingId] = useState<number|null>(null)
+  const [msg, setMsg] = useState<{text:string;ok:boolean}|null>(null)
+
+  useEffect(() => { load() }, [])
+
+  async function load() {
+    const r = await fetch('/api/mcd/context-sources')
+    if (r.ok) { const d = await r.json(); setSources(d.sources || []) }
+  }
+
+  function flash(text: string, ok: boolean) {
+    setMsg({text, ok})
+    setTimeout(() => setMsg(null), 3500)
+  }
+
+  async function add() {
+    if (!url.trim() || !label.trim()) return
+    setAdding(true)
+    const r = await fetch('/api/mcd/context-sources', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: url.trim(), label: label.trim(), tab_name: tab.trim() })
+    })
+    const d = await r.json()
+    if (d.ok) {
+      flash(d.chars ? `✅ Added — ${d.chars.toLocaleString()} chars fetched` : `✅ Added (content pending)`, true)
+      setUrl(''); setLabel(''); setTab('')
+    } else {
+      flash(`❌ ${d.error}`, false)
+    }
+    setAdding(false); load()
+  }
+
+  async function refresh(src: McdContextSource) {
+    setRefreshingId(src.id)
+    const r = await fetch('/api/mcd/context-sources', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'refresh', id: src.id })
+    })
+    const d = await r.json()
+    d.ok ? flash(`✅ Refreshed — ${d.chars?.toLocaleString() || 0} chars`, true) : flash(`❌ ${d.error}`, false)
+    setRefreshingId(null); load()
+  }
+
+  async function toggle(src: McdContextSource) {
+    await fetch('/api/mcd/context-sources', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: src.id, enabled: !src.enabled })
+    })
+    load()
+  }
+
+  async function remove(id: number) {
+    await fetch(`/api/mcd/context-sources?id=${id}`, { method: 'DELETE' })
+    load()
+  }
+
+  const inputSt: React.CSSProperties = { background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:8, padding:'8px 10px', color:'white', fontSize:12, outline:'none', width:'100%', boxSizing:'border-box' }
+
+  return (
+    <div style={{ background:'rgba(15,20,35,0.8)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:20, marginBottom:16 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
+        <Layers size={14} color="#a5b4fc" />
+        <span style={{ color:'white', fontWeight:600, fontSize:14 }}>MCD Context Sources</span>
+      </div>
+      <p style={{ fontSize:12, color:'rgba(148,163,184,0.45)', marginBottom:14, lineHeight:1.6 }}>
+        Add Google Docs or Sheets that MCD should read as background context — no code changes needed.
+        Content is fetched and cached; use Refresh to re-pull after edits.
+      </p>
+
+      {/* Add form */}
+      <div style={{ display:'flex', flexDirection:'column', gap:8, marginBottom:14 }}>
+        <input value={label} onChange={e => setLabel(e.target.value)} placeholder="Label — e.g. 'Q3 Initiatives'" style={inputSt} />
+        <input value={url} onChange={e => setUrl(e.target.value)} placeholder="Google Doc or Sheet URL" style={inputSt} />
+        <input value={tab} onChange={e => setTab(e.target.value)} placeholder="Sheet tab name (optional, Sheets only)" style={inputSt} />
+        <motion.button whileHover={{ scale:1.01 }} whileTap={{ scale:0.98 }} onClick={add}
+          disabled={adding || !url.trim() || !label.trim()}
+          style={{ padding:'8px', background:'linear-gradient(135deg,#4338ca,#6366f1)', border:'none', borderRadius:8, color:'white', fontSize:12, fontWeight:600, cursor:'pointer', opacity:(!url.trim()||!label.trim())?0.45:1 }}>
+          {adding ? 'Adding…' : '+ Add Source'}
+        </motion.button>
+      </div>
+
+      {msg && <div style={{ padding:'6px 12px', borderRadius:8, background:msg.ok?'rgba(16,185,129,0.08)':'rgba(244,63,94,0.08)', border:`1px solid ${msg.ok?'rgba(16,185,129,0.2)':'rgba(244,63,94,0.2)'}`, color:msg.ok?'#10b981':'#f43f5e', fontSize:12, marginBottom:10 }}>{msg.text}</div>}
+
+      {sources.length === 0 && <p style={{ color:'rgba(148,163,184,0.3)', fontSize:12, textAlign:'center', margin:0 }}>No context sources yet.</p>}
+
+      {sources.map(src => (
+        <div key={src.id} style={{ padding:'10px 0', borderBottom:'1px solid rgba(99,102,241,0.07)', display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:10 }}>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <span style={{ color:src.enabled?'white':'rgba(148,163,184,0.4)', fontWeight:600, fontSize:13 }}>{src.label}</span>
+              <span style={{ fontSize:10, color:'rgba(148,163,184,0.3)', background:'rgba(99,102,241,0.08)', borderRadius:4, padding:'1px 6px' }}>{src.doc_type}{src.tab_name ? ` · ${src.tab_name}` : ''}</span>
+            </div>
+            <div style={{ fontSize:11, color:'rgba(148,163,184,0.3)', marginTop:2, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:320 }}>
+              {src.cached_at ? `${src.content_cache?.length?.toLocaleString() || 0} chars — ${new Date(src.cached_at).toLocaleDateString()}` : 'Not fetched yet'}
+            </div>
+          </div>
+          <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
+            {/* Toggle */}
+            <button onClick={() => toggle(src)} title={src.enabled?'Disable':'Enable'}
+              style={{ background:src.enabled?'rgba(16,185,129,0.15)':'rgba(99,102,241,0.08)', border:`1px solid ${src.enabled?'rgba(16,185,129,0.3)':'rgba(99,102,241,0.2)'}`, borderRadius:6, padding:'4px 8px', color:src.enabled?'#10b981':'rgba(148,163,184,0.5)', fontSize:11, cursor:'pointer' }}>
+              {src.enabled ? 'ON' : 'OFF'}
+            </button>
+            {/* Refresh */}
+            <button onClick={() => refresh(src)} disabled={refreshingId === src.id} title="Re-fetch from Google"
+              style={{ background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:6, padding:'4px 7px', color:'#a5b4fc', cursor:'pointer', opacity:refreshingId===src.id?0.5:1 }}>
+              <RefreshCw size={11} />
+            </button>
+            {/* Delete */}
+            <button onClick={() => remove(src.id)} title="Remove"
+              style={{ background:'none', border:'none', color:'rgba(244,63,94,0.4)', cursor:'pointer', padding:'4px' }}>
+              <Trash2 size={12} />
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ── Settings View ─────────────────────────────────────────────────────────
 
 function SettingsView({ agents = [] }: { agents?: Agent[] }) {
@@ -5559,6 +5692,7 @@ function SettingsView({ agents = [] }: { agents?: Agent[] }) {
       <WebhooksPanel />
       <DriveSyncPanel agents={agents} />
       <ApiKeysPanel />
+      <McdContextSourcesPanel />
       <EmailHealthBaselinePanel />
       <WorkflowImportPanel />
       <WorkflowHistoryPanel />

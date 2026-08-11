@@ -25,6 +25,8 @@ import {
   updateMcdConversationTitle,
   getMcdConversation,
   createMcdConversation,
+  getMcdContextSourcesEnabled,
+  ensureMcdContextSourcesTable,
 } from '@/lib/db'
 // getMcdMemoryBlock is used as fallback in getRelevantMemoriesBlock — keep import
 import { extractAndStoreMemory, getRelevantMemoriesBlock } from '@/lib/mcd-memory'
@@ -1217,7 +1219,20 @@ export async function POST(req: NextRequest) {
   ])
   const nonGHLContext = nonGHLChunks.join('\n\n---\n\n')
 
-  const systemPrompt = buildSystemPrompt(dc, nonGHLContext) + memoryBlock
+  // ── Inject user-defined context sources (Google Docs / Sheets) ─────────────
+  let contextSourcesBlock = ''
+  try {
+    ensureMcdContextSourcesTable()
+    const ctxSources = getMcdContextSourcesEnabled()
+    if (ctxSources.length > 0) {
+      const blocks = ctxSources.map(src =>
+        `### ${src.label} [context-source]\n${src.content_cache}`
+      ).join('\n\n---\n\n')
+      contextSourcesBlock = `\n\n---\n\n## Additional Context Sources\n\n${blocks}`
+    }
+  } catch { /* context sources table may not exist yet */ }
+
+  const systemPrompt = buildSystemPrompt(dc, nonGHLContext) + memoryBlock + contextSourcesBlock
 
   // Build initial messages
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [

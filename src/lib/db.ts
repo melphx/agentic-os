@@ -1597,3 +1597,78 @@ export function getMcdRecentMessages(
      WHERE conversation_id=? ORDER BY id DESC LIMIT ?`
   ).all(conversationId, limit).reverse() as Array<{ role: string; content: string }>
 }
+
+// ── MCD Context Sources ───────────────────────────────────────────────────
+// User-managed Google Docs / Sheets that get injected into MCD chat context.
+
+export interface McdContextSource {
+  id: number
+  label: string        // user-given name, e.g. "Existing Automations Doc"
+  url: string          // original Google URL pasted by user
+  doc_id: string       // extracted ID from URL
+  doc_type: string     // 'doc' | 'sheet'
+  tab_name: string     // sheet tab name (optional, '' for docs)
+  enabled: number      // 1 | 0
+  content_cache: string | null  // last fetched content
+  cached_at: string | null      // ISO timestamp of last fetch
+  created_at: string
+}
+
+export function ensureMcdContextSourcesTable() {
+  getDb().exec(`CREATE TABLE IF NOT EXISTS mcd_context_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    label TEXT NOT NULL,
+    url TEXT NOT NULL,
+    doc_id TEXT NOT NULL,
+    doc_type TEXT NOT NULL DEFAULT 'doc',
+    tab_name TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    content_cache TEXT,
+    cached_at TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`)
+}
+
+export function getMcdContextSources(): McdContextSource[] {
+  ensureMcdContextSourcesTable()
+  return getDb().prepare('SELECT * FROM mcd_context_sources ORDER BY created_at DESC').all() as McdContextSource[]
+}
+
+export function getMcdContextSourcesEnabled(): McdContextSource[] {
+  ensureMcdContextSourcesTable()
+  return getDb().prepare(
+    'SELECT * FROM mcd_context_sources WHERE enabled=1 AND content_cache IS NOT NULL ORDER BY created_at DESC'
+  ).all() as McdContextSource[]
+}
+
+export function addMcdContextSource(data: {
+  label: string; url: string; doc_id: string; doc_type: string; tab_name: string
+}): McdContextSource {
+  ensureMcdContextSourcesTable()
+  const info = getDb().prepare(
+    `INSERT INTO mcd_context_sources (label, url, doc_id, doc_type, tab_name) VALUES (?,?,?,?,?)`
+  ).run(data.label, data.url, data.doc_id, data.doc_type, data.tab_name)
+  return getDb().prepare('SELECT * FROM mcd_context_sources WHERE id=?').get(info.lastInsertRowid) as McdContextSource
+}
+
+export function updateMcdContextSourceCache(id: number, content: string) {
+  ensureMcdContextSourcesTable()
+  getDb().prepare(
+    `UPDATE mcd_context_sources SET content_cache=?, cached_at=datetime('now') WHERE id=?`
+  ).run(content, id)
+}
+
+export function toggleMcdContextSource(id: number, enabled: boolean) {
+  ensureMcdContextSourcesTable()
+  getDb().prepare('UPDATE mcd_context_sources SET enabled=? WHERE id=?').run(enabled ? 1 : 0, id)
+}
+
+export function updateMcdContextSourceLabel(id: number, label: string) {
+  ensureMcdContextSourcesTable()
+  getDb().prepare('UPDATE mcd_context_sources SET label=? WHERE id=?').run(label, id)
+}
+
+export function deleteMcdContextSource(id: number) {
+  ensureMcdContextSourcesTable()
+  getDb().prepare('DELETE FROM mcd_context_sources WHERE id=?').run(id)
+}
