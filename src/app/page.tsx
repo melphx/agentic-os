@@ -5551,6 +5551,7 @@ function McdContextSourcesPanel() {
   const [tab, setTab] = useState('')
   const [adding, setAdding] = useState(false)
   const [refreshingId, setRefreshingId] = useState<number|null>(null)
+  const [expandingId, setExpandingId] = useState<number|null>(null)
   const [msg, setMsg] = useState<{text:string;ok:boolean}|null>(null)
 
   useEffect(() => { load() }, [])
@@ -5591,6 +5592,23 @@ function McdContextSourcesPanel() {
     const d = await r.json()
     d.ok ? flash(`✅ Refreshed — ${d.chars?.toLocaleString() || 0} chars`, true) : flash(`❌ ${d.error}`, false)
     setRefreshingId(null); load()
+  }
+
+  async function expand(src: McdContextSource) {
+    setExpandingId(src.id)
+    const r = await fetch('/api/mcd/context-sources', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'expand', id: src.id })
+    })
+    const d = await r.json()
+    if (d.ok) {
+      d.added > 0
+        ? flash(`✅ Added ${d.added} linked source${d.added !== 1 ? 's' : ''}`, true)
+        : flash(`ℹ️ ${d.message || 'No new links found'}`, true)
+    } else {
+      flash(`❌ ${d.error}`, false)
+    }
+    setExpandingId(null); load()
   }
 
   async function toggle(src: McdContextSource) {
@@ -5652,6 +5670,13 @@ function McdContextSourcesPanel() {
               style={{ background:src.enabled?'rgba(16,185,129,0.15)':'rgba(99,102,241,0.08)', border:`1px solid ${src.enabled?'rgba(16,185,129,0.3)':'rgba(99,102,241,0.2)'}`, borderRadius:6, padding:'4px 8px', color:src.enabled?'#10b981':'rgba(148,163,184,0.5)', fontSize:11, cursor:'pointer' }}>
               {src.enabled ? 'ON' : 'OFF'}
             </button>
+            {/* Expand links — doc only */}
+            {src.doc_type === 'doc' && (
+              <button onClick={() => expand(src)} disabled={expandingId === src.id} title="Scan this doc for Google links and add them as sources"
+                style={{ background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:6, padding:'4px 7px', color:'#a5b4fc', cursor:'pointer', opacity:expandingId===src.id?0.5:1, fontSize:11 }}>
+                {expandingId === src.id ? '…' : '↗'}
+              </button>
+            )}
             {/* Refresh */}
             <button onClick={() => refresh(src)} disabled={refreshingId === src.id} title="Re-fetch from Google"
               style={{ background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.2)', borderRadius:6, padding:'4px 7px', color:'#a5b4fc', cursor:'pointer', opacity:refreshingId===src.id?0.5:1 }}>

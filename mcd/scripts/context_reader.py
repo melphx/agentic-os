@@ -74,6 +74,83 @@ def cmd_sheet(args):
     print("\n".join(lines))
 
 
+def cmd_links(args):
+    """Extract Google Doc/Sheet links from a Google Doc, output as JSON."""
+    import json
+    import re
+    from html.parser import HTMLParser
+    from urllib.parse import urlparse, parse_qs, unquote
+
+    sa = _sa()
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+
+    creds = service_account.Credentials.from_service_account_file(
+        sa, scopes=["https://www.googleapis.com/auth/drive.readonly"]
+    )
+    svc = build("drive", "v3", credentials=creds, cache_discovery=False)
+    raw = svc.files().export(fileId=args.id, mimeType="text/html").execute()
+    html_text = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
+
+    class LinkExtractor(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.links = []
+            self._href = None
+            self._text = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "a":
+                href = dict(attrs).get("href", "")
+                # Unwrap Google redirect: https://www.google.com/url?q=...
+                if "google.com/url" in href:
+                    qs = parse_qs(urlparse(href).query)
+                    href = qs.get("q", [href])[0]
+                href = unquote(href).split("?")[0].split("#")[0]
+                if "docs.google.com/document/d/" in href or \
+                   "docs.google.com/spreadsheets/d/" in href:
+                    self._href = href
+                    self._text = []
+
+        def handle_data(self, data):
+            if self._href:
+                self._text.append(data)
+
+        def handle_endtag(self, tag):
+            if tag == "a" and self._href:
+                self.links.append((self._href, "".join(self._text).strip()))
+                self._href = None
+                self._text = []
+
+    extractor = LinkExtractor()
+    extractor.feed(html_text)
+
+    seen = {}
+    doc_re   = re.compile(r"/document/d/([A-Za-z0-9_-]+)")
+    sheet_re = re.compile(r"/spreadsheets/d/([A-Za-z0-9_-]+)")
+
+    for href, text in extractor.links:
+        dm = doc_re.search(href)
+        sm = sheet_re.search(href)
+        if dm:
+            doc_id, doc_type = dm.group(1), "doc"
+        elif sm:
+            doc_id, doc_type = sm.group(1), "sheet"
+        else:
+            continue
+        if doc_id == args.id:   # skip self-reference
+            continue
+        if doc_id not in seen:
+            seen[doc_id] = {
+                "doc_id":   doc_id,
+                "doc_type": doc_type,
+                "name":     text or doc_id,
+                "url":      href,
+            }
+
+    print(json.dumps(list(seen.values())))
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Read a Google Doc or Sheet as plain text."
@@ -88,6 +165,10 @@ def main():
     s.add_argument("--id", required=True, help="Google Sheet ID")
     s.add_argument("--tab", default="", help="Tab/sheet name (optional)")
     s.set_defaults(fn=cmd_sheet)
+
+    lk = sub.add_parser("links", help="extract Google Doc/Sheet links from a Doc")
+    lk.add_argument("--id", required=True, help="Google Doc ID to scan")
+    lk.set_defaults(fn=cmd_links)
 
     a = ap.parse_args()
     try:

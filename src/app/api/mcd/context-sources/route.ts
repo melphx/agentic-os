@@ -26,13 +26,9 @@ function parseGoogleUrl(url: string): { doc_id: string; doc_type: 'doc' | 'sheet
   } catch { return null }
 }
 
-// ── Fetch content via Python context_reader ───────────────────────────────
-function fetchContent(docId: string, docType: 'doc' | 'sheet', tabName: string): Promise<{ content: string; ok: boolean; error?: string }> {
+// ── Run context_reader with arbitrary args, return stdout ─────────────────
+function runReader(args: string[]): Promise<{ stdout: string; ok: boolean; error?: string }> {
   return new Promise(resolve => {
-    const args = docType === 'doc'
-      ? ['doc',   '--id', docId]
-      : ['sheet', '--id', docId, ...(tabName ? ['--tab', tabName] : [])]
-
     const proc = spawn(VENV_PYTHON, [pathModule.join(SCRIPTS_DIR, 'context_reader.py'), ...args], {
       env: { ...process.env },
       timeout: 30_000,
@@ -41,14 +37,23 @@ function fetchContent(docId: string, docType: 'doc' | 'sheet', tabName: string):
     proc.stdout.on('data', d => { out += d.toString() })
     proc.stderr.on('data', d => { err += d.toString() })
     proc.on('close', code => {
-      if (code === 0 && out.trim()) {
-        resolve({ content: out.trim().slice(0, 20_000), ok: true })
-      } else {
-        resolve({ content: '', ok: false, error: err.slice(0, 500) || 'No output' })
-      }
+      code === 0 && out.trim()
+        ? resolve({ stdout: out.trim(), ok: true })
+        : resolve({ stdout: '', ok: false, error: err.slice(0, 500) || 'No output' })
     })
-    proc.on('error', e => resolve({ content: '', ok: false, error: e.message }))
+    proc.on('error', e => resolve({ stdout: '', ok: false, error: e.message }))
   })
+}
+
+// ── Fetch content via Python context_reader ───────────────────────────────
+async function fetchContent(docId: string, docType: 'doc' | 'sheet', tabName: string): Promise<{ content: string; ok: boolean; error?: string }> {
+  const args = docType === 'doc'
+    ? ['doc',   '--id', docId]
+    : ['sheet', '--id', docId, ...(tabName ? ['--tab', tabName] : [])]
+  const { stdout, ok, error } = await runReader(args)
+  return ok
+    ? { content: stdout.slice(0, 20_000), ok: true }
+    : { content: '', ok: false, error }
 }
 
 // ── GET — list all sources ────────────────────────────────────────────────
@@ -64,6 +69,39 @@ export async function POST(req: NextRequest) {
   if (error) return error
 
   const body = await req.json().catch(() => ({}))
+
+  // Expand action: scan a doc for embedded Google links, add each as a child source
+  if (body.action === 'expand' && body.id) {
+    const sources = getMcdContextSources()
+    const src = sources.find(s => s.id === body.id)
+    if (!src) return NextResponse.json({ error: 'Source not found' }, { status: 404 })
+    if (src.doc_type !== 'doc') return NextResponse.json({ error: 'Only Google Docs can be expanded' }, { status: 400 })
+
+    const { stdout, ok, error: fetchErr } = await runReader(['links', '--id', src.doc_id])
+    if (!ok) return NextResponse.json({ error: `Failed to scan links: ${fetchErr}` }, { status: 502 })
+
+    let links: Array<{ doc_id: string; doc_type: string; name: string; url: string }> = []
+    try { links = JSON.parse(stdout) } catch { return NextResponse.json({ error: 'Could not parse links output' }, { status: 502 }) }
+
+    if (links.length === 0) return NextResponse.json({ ok: true, added: 0, message: 'No Google Doc/Sheet links found in this document.' })
+
+    // Existing doc_ids to avoid duplicates
+    const existingIds = new Set(sources.map(s => s.doc_id))
+
+    let added = 0
+    for (const link of links) {
+      if (existingIds.has(link.doc_id)) continue
+      const childLabel = `${src.label} › ${link.name}`
+      const child = addMcdContextSource({ label: childLabel, url: link.url, doc_id: link.doc_id, doc_type: link.doc_type as 'doc' | 'sheet', tab_name: '' })
+      existingIds.add(link.doc_id)
+      added++
+      // Fetch content for each child (fire-and-forget errors)
+      const { content, ok: cOk } = await fetchContent(link.doc_id, link.doc_type as 'doc' | 'sheet', '')
+      if (cOk) updateMcdContextSourceCache(child.id, content)
+    }
+
+    return NextResponse.json({ ok: true, added, total: links.length })
+  }
 
   // Refresh action: re-fetch content for an existing source
   if (body.action === 'refresh' && body.id) {
