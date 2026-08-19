@@ -380,10 +380,9 @@ def rule_11_opp_stagnation():
     """Open opps stuck in same stage beyond threshold days."""
     _, loc = _cfg()
     justin_id   = _uid("JUSTIN")
-    rodrigo_id  = _uid("RODRIGO")
     rebekah_id  = _uid("REBEKAH")
     watched     = {uid: name for uid, name in [
-        (justin_id, "Justin"), (rodrigo_id, "Rodrigo"), (rebekah_id, "Rebekah")
+        (justin_id, "Justin"), (rebekah_id, "Rebekah")
     ] if uid}
     try:
         data = _get("/opportunities/search", {"location_id": loc, "status": "open", "limit": 100})
