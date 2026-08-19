@@ -1672,3 +1672,46 @@ export function deleteMcdContextSource(id: number) {
   ensureMcdContextSourcesTable()
   getDb().prepare('DELETE FROM mcd_context_sources WHERE id=?').run(id)
 }
+
+// ── GHL Monitor ────────────────────────────────────────────────────────────
+
+export interface GhlMonitorRun {
+  id: number
+  run_at: string
+  triggered_by: string   // 'cron' | 'manual'
+  status: string         // 'ok' | 'issues' | 'urgent' | 'error'
+  findings_json: string  // JSON blob
+  summary: string
+  duration_ms: number
+}
+
+export function ensureGhlMonitorTable() {
+  getDb().exec(`CREATE TABLE IF NOT EXISTS ghl_monitor_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_at TEXT NOT NULL DEFAULT (datetime('now')),
+    triggered_by TEXT NOT NULL DEFAULT 'manual',
+    status TEXT NOT NULL DEFAULT 'ok',
+    findings_json TEXT NOT NULL DEFAULT '[]',
+    summary TEXT NOT NULL DEFAULT '',
+    duration_ms INTEGER NOT NULL DEFAULT 0
+  )`)
+}
+
+export function saveGhlMonitorRun(run: Omit<GhlMonitorRun, 'id'>): GhlMonitorRun {
+  ensureGhlMonitorTable()
+  const r = getDb().prepare(
+    `INSERT INTO ghl_monitor_runs (run_at, triggered_by, status, findings_json, summary, duration_ms)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(run.run_at, run.triggered_by, run.status, run.findings_json, run.summary, run.duration_ms)
+  return getDb().prepare('SELECT * FROM ghl_monitor_runs WHERE id=?').get(r.lastInsertRowid) as GhlMonitorRun
+}
+
+export function getLatestGhlMonitorRun(): GhlMonitorRun | null {
+  ensureGhlMonitorTable()
+  return getDb().prepare('SELECT * FROM ghl_monitor_runs ORDER BY id DESC LIMIT 1').get() as GhlMonitorRun | null
+}
+
+export function getGhlMonitorHistory(limit = 10): GhlMonitorRun[] {
+  ensureGhlMonitorTable()
+  return getDb().prepare('SELECT * FROM ghl_monitor_runs ORDER BY id DESC LIMIT ?').all(limit) as GhlMonitorRun[]
+}

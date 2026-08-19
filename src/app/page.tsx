@@ -217,6 +217,7 @@ const NAV = [
   { id: 'hermes',    icon: <span style={{fontSize:16}}>⚡</span>, label: 'Hermes'    },
   { id: 'email-health', icon: <span style={{fontSize:14}}>📧</span>, label: 'Email Health' },
   { id: 'mcd-reports', icon: <span style={{fontSize:14}}>📊</span>, label: 'MCD Reports' },
+  { id: 'ghl-monitor', icon: <span style={{fontSize:14}}>🔍</span>, label: 'GHL Monitor' },
   { id: 'settings',   icon: <Settings size={18} />,        label: 'Settings'   },
 ]
 
@@ -5536,6 +5537,208 @@ function WorkflowHistoryPanel() {
   )
 }
 
+// ── GHL Monitor View ──────────────────────────────────────────────────────
+
+interface GhlFinding {
+  rule_id: number | string
+  title: string
+  status: 'ok' | 'warning' | 'urgent' | 'error' | 'skipped'
+  items: any[]
+  count: number
+  note?: string
+  error?: string
+}
+
+interface GhlRun {
+  id: number
+  run_at: string
+  triggered_by: string
+  status: string
+  findings_json: string
+  summary: string
+  duration_ms: number
+}
+
+function GhlMonitorView() {
+  const [run, setRun]         = useState<GhlRun | null>(null)
+  const [findings, setFindings] = useState<GhlFinding[]>([])
+  const [running, setRunning] = useState(false)
+  const [expanded, setExpanded] = useState<Set<number | string>>(new Set())
+
+  useEffect(() => { load() }, [])
+
+  async function load() {
+    const r = await fetch('/api/ghl-monitor')
+    if (r.ok) {
+      const d = await r.json()
+      if (d.run) {
+        setRun(d.run)
+        try { setFindings(JSON.parse(d.run.findings_json) || []) } catch {}
+      }
+    }
+  }
+
+  async function runNow() {
+    setRunning(true)
+    const r = await fetch('/api/ghl-monitor', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ triggered_by: 'manual' }) })
+    const d = await r.json()
+    if (d.ok && d.run) {
+      setRun(d.run)
+      try { setFindings(JSON.parse(d.run.findings_json) || []) } catch {}
+    }
+    setRunning(false)
+  }
+
+  function toggleExpand(id: number | string) {
+    setExpanded(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  const statusColor = (s: string) =>
+    s === 'urgent' ? '#f43f5e' : s === 'warning' ? '#f59e0b' : s === 'error' ? '#f97316' : s === 'skipped' ? 'rgba(148,163,184,0.3)' : '#10b981'
+
+  const statusBg = (s: string) =>
+    s === 'urgent' ? 'rgba(244,63,94,0.12)' : s === 'warning' ? 'rgba(245,158,11,0.1)' : s === 'error' ? 'rgba(249,115,22,0.1)' : s === 'skipped' ? 'rgba(148,163,184,0.05)' : 'rgba(16,185,129,0.08)'
+
+  const statusLabel = (s: string) =>
+    s === 'urgent' ? '🔴 URGENT' : s === 'warning' ? '🟡 Issues Found' : s === 'error' ? '⚠️ Error' : s === 'skipped' ? '— Skipped' : '🟢 All Clear'
+
+  const overallColor = run ? statusColor(run.status) : 'rgba(148,163,184,0.4)'
+
+  // Summary counts
+  const urgentCount  = findings.filter(f => f.status === 'urgent').length
+  const warningCount = findings.filter(f => f.status === 'warning').length
+  const okCount      = findings.filter(f => f.status === 'ok').length
+
+  return (
+    <div style={{ padding: 24, maxWidth: 780, height: '100%', overflowY: 'auto' }}>
+
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+        <div>
+          <h1 style={{ color: 'white', fontWeight: 700, fontSize: 22, margin: 0 }}>GHL Monitor</h1>
+          <p style={{ color: 'rgba(148,163,184,0.5)', fontSize: 12, margin: '4px 0 0' }}>
+            {run ? `Last run: ${new Date(run.run_at).toLocaleString('en-US', { timeZone: 'America/Phoenix' })} · ${run.duration_ms}ms` : 'Never run — click Run Now to start'}
+          </p>
+        </div>
+        <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} onClick={runNow} disabled={running}
+          style={{ background: running ? 'rgba(99,102,241,0.2)' : 'linear-gradient(135deg,#4338ca,#6366f1)', border: 'none', borderRadius: 10, padding: '9px 20px', color: 'white', fontWeight: 600, fontSize: 13, cursor: running ? 'not-allowed' : 'pointer', opacity: running ? 0.7 : 1 }}>
+          {running ? '⏳ Running…' : '▶ Run Now'}
+        </motion.button>
+      </div>
+
+      {/* Overall status banner */}
+      {run && (
+        <div style={{ background: statusBg(run.status), border: `1px solid ${overallColor}30`, borderRadius: 12, padding: '12px 18px', marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ color: overallColor, fontWeight: 700, fontSize: 14 }}>{statusLabel(run.status)}</span>
+          <div style={{ display: 'flex', gap: 16, fontSize: 12 }}>
+            {urgentCount > 0  && <span style={{ color: '#f43f5e' }}>{urgentCount} urgent</span>}
+            {warningCount > 0 && <span style={{ color: '#f59e0b' }}>{warningCount} warnings</span>}
+            {okCount > 0      && <span style={{ color: '#10b981' }}>{okCount} clear</span>}
+          </div>
+        </div>
+      )}
+
+      {/* No run yet */}
+      {!run && !running && (
+        <div style={{ background: 'rgba(15,20,35,0.7)', border: '1px solid rgba(99,102,241,0.12)', borderRadius: 14, padding: 40, textAlign: 'center' }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>🔍</div>
+          <p style={{ color: 'rgba(148,163,184,0.5)', fontSize: 14 }}>Click "Run Now" to run the first GHL Monitor check.</p>
+        </div>
+      )}
+
+      {/* Rule cards */}
+      {findings.map(f => {
+        const isOpen = expanded.has(f.rule_id)
+        const color  = statusColor(f.status)
+        const bg     = statusBg(f.status)
+        return (
+          <div key={f.rule_id} style={{ background: 'rgba(15,20,35,0.8)', border: `1px solid ${f.status !== 'ok' && f.status !== 'skipped' ? color + '40' : 'rgba(99,102,241,0.1)'}`, borderRadius: 12, marginBottom: 10, overflow: 'hidden' }}>
+            <div onClick={() => f.count > 0 && toggleExpand(f.rule_id)}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', cursor: f.count > 0 ? 'pointer' : 'default', background: f.status !== 'ok' && f.status !== 'skipped' ? bg : 'transparent' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 11, color, fontWeight: 700, minWidth: 28 }}>R{f.rule_id}</span>
+                <span style={{ color: 'white', fontSize: 13, fontWeight: 600 }}>{f.title}</span>
+                {f.note && <span style={{ fontSize: 11, color: 'rgba(148,163,184,0.4)', fontStyle: 'italic' }}>{f.note}</span>}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {f.count > 0 && (
+                  <span style={{ background: color + '20', border: `1px solid ${color}40`, borderRadius: 20, padding: '2px 10px', color, fontSize: 11, fontWeight: 700 }}>
+                    {f.count} {f.count === 1 ? 'item' : 'items'}
+                  </span>
+                )}
+                <span style={{ fontSize: 11, color }}>{statusLabel(f.status)}</span>
+                {f.count > 0 && <span style={{ color: 'rgba(148,163,184,0.4)', fontSize: 12 }}>{isOpen ? '▲' : '▼'}</span>}
+              </div>
+            </div>
+
+            {/* Expanded items */}
+            {isOpen && f.items.length > 0 && (
+              <div style={{ borderTop: `1px solid ${color}20`, padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {f.items.map((item: any, idx: number) => (
+                  <div key={idx} style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: '8px 12px', fontSize: 12 }}>
+                    {/* Rule-specific rendering */}
+                    {item.name !== undefined && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                        <span style={{ color: 'white', fontWeight: 600 }}>{item.name || 'Unknown'}</span>
+                        {item.email && <span style={{ color: 'rgba(148,163,184,0.6)' }}>{item.email}</span>}
+                        {item.flag && <span style={{ color: '#f59e0b' }}>{item.flag}</span>}
+                        {item.age_days !== undefined && <span style={{ color: item.age_days >= 7 ? '#f43f5e' : 'rgba(148,163,184,0.5)' }}>{item.age_days}d old</span>}
+                        {item.overdue_days !== undefined && <span style={{ color: '#f43f5e' }}>{item.overdue_days}d overdue</span>}
+                        {item.days_in_stage !== undefined && <span style={{ color: '#f59e0b' }}>{item.days_in_stage}d in "{item.stage}"</span>}
+                        {item.hours_waiting !== undefined && <span style={{ color: '#f59e0b' }}>{item.hours_waiting}h waiting</span>}
+                      </div>
+                    )}
+                    {item.contact_name !== undefined && !item.name && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: 'white', fontWeight: 600 }}>{item.contact_name}</span>
+                        {item.matched_phrase && <span style={{ color: '#f59e0b' }}>"{item.matched_phrase}"</span>}
+                        {item.hours_waiting !== undefined && <span style={{ color: '#f59e0b' }}>{item.hours_waiting}h waiting</span>}
+                        {item.message_preview && <span style={{ color: 'rgba(148,163,184,0.5)', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.message_preview}</span>}
+                      </div>
+                    )}
+                    {item.task !== undefined && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: 'white', fontWeight: 600 }}>{item.task}</span>
+                        {item.designer && <span style={{ color: '#a5b4fc' }}>{item.designer}</span>}
+                        {item.client_name && <span style={{ color: 'rgba(148,163,184,0.6)' }}>{item.client_name}</span>}
+                        {item.age_days !== undefined && <span style={{ color: '#f59e0b' }}>{item.age_days}d old</span>}
+                      </div>
+                    )}
+                    {item.employee_id !== undefined && (
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <span style={{ color: 'white', fontWeight: 600 }}>Employee: {item.employee_id}</span>
+                          <span style={{ color: '#f59e0b' }}>{item.task_count} overdue task{item.task_count !== 1 ? 's' : ''}</span>
+                        </div>
+                        {(item.tasks || []).map((t: any, ti: number) => (
+                          <div key={ti} style={{ fontSize: 11, color: 'rgba(148,163,184,0.6)', paddingLeft: 8 }}>
+                            • {t.task} ({t.overdue_days}d overdue)
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Error state */}
+            {f.status === 'error' && f.error && (
+              <div style={{ borderTop: '1px solid rgba(249,115,22,0.2)', padding: '8px 16px', fontSize: 11, color: '#f97316' }}>
+                {f.error}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ── MCD Context Sources Panel ──────────────────────────────────────────────
 
 interface McdContextSource {
@@ -6011,6 +6214,7 @@ export default function Page() {
       case 'analytics':  return <AnalyticsView />
       case 'email-health': return <EmailHealthReportView />
       case 'mcd-reports':  return <McdReportsView />
+      case 'ghl-monitor':  return <GhlMonitorView />
       case 'hermes':     return <HermesView messages={messages} onSend={handleSend} loading={chatLoading} />
       case 'projects':   return <ProjectsView agents={agents} onSelectAgent={a => { setSelectedAgent(a); setView('agents') }} />
       case 'triggers':   return <TriggersPanel agents={agents} />
