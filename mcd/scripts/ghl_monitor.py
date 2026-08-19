@@ -115,20 +115,24 @@ def _get(path, params=None, retries=3):
 
 
 def _get_all_pages(path, list_key, params=None, max_pages=20):
-    """Paginate through GHL results, return all items."""
+    """Paginate through GHL contacts/opps using cursor-based startAfterId."""
     params = dict(params or {})
     _, loc = _cfg()
     params.setdefault("locationId", loc)
-    items = []
     params["limit"] = 100
-    params["skip"] = 0
+    params.pop("skip", None)   # GHL rejects 'skip' on contacts endpoint
+    items = []
+    last_id = None
     for _ in range(max_pages):
+        if last_id:
+            params["startAfterId"] = last_id
         data = _get(path, params)
         batch = data.get(list_key, [])
         items.extend(batch)
-        total = data.get("total", data.get("count", len(items)))
-        params["skip"] += len(batch)
-        if not batch or params["skip"] >= total:
+        if not batch or len(batch) < 100:
+            break
+        last_id = batch[-1].get("id")
+        if not last_id:
             break
     return items
 
@@ -176,7 +180,7 @@ def rule_1_test_contacts():
     """Search contacts with 'test' in name."""
     _, loc = _cfg()
     try:
-        data = _get("/contacts/search", {"locationId": loc, "query": "test", "limit": 50})
+        data = _get("/contacts/", {"locationId": loc, "query": "test", "limit": 50})
         contacts = data.get("contacts", [])
         items = []
         for c in contacts:
@@ -237,8 +241,9 @@ def rule_3_missed_replies():
     """Conversations with unanswered inbound messages older than 24h."""
     _, loc = _cfg()
     try:
+        # GHL conversations/search does not accept 'status=open' — use 'unread' or no filter
         data = _get("/conversations/search", {
-            "locationId": loc, "status": "open", "limit": 100,
+            "locationId": loc, "limit": 100,
         })
         convos = data.get("conversations", [])
         items = []
@@ -275,7 +280,7 @@ def rule_4_negative_phrases():
     _, loc = _cfg()
     try:
         data = _get("/conversations/search", {
-            "locationId": loc, "status": "open", "limit": 100,
+            "locationId": loc, "limit": 100,
         })
         convos = data.get("conversations", [])
         items = []
@@ -296,6 +301,31 @@ def rule_4_negative_phrases():
         return {"rule_id": 4, "title": "Negative Sentiment Phrases", "status": "error", "error": str(e), "items": [], "count": 0}
 
 
+def _get_tasks(assigned_to=None, max_pages=10):
+    """Fetch open tasks via GHL tasks search endpoint."""
+    _, loc = _cfg()
+    items = []
+    page = 1
+    for _ in range(max_pages):
+        params = {"locationId": loc, "isCompleted": "false", "limit": 100, "page": page}
+        if assigned_to:
+            params["assignedTo"] = assigned_to
+        try:
+            data = _get("/tasks/search", params)
+        except RuntimeError:
+            # fallback: try without 'search'
+            try:
+                data = _get("/tasks/", {k: v for k, v in params.items() if k != "page"})
+            except:
+                break
+        batch = data.get("tasks", [])
+        items.extend(batch)
+        if not batch or len(batch) < 100:
+            break
+        page += 1
+    return items
+
+
 def rule_5_ava_tasks():
     """Check for any open tasks assigned to Ava — URGENT."""
     _, loc = _cfg()
@@ -304,8 +334,7 @@ def rule_5_ava_tasks():
         return {"rule_id": 5, "title": "Ava Has Tasks", "status": "skipped",
                 "note": "Set GHL_MONITOR_AVA_ID env var to enable this rule.", "items": [], "count": 0}
     try:
-        data = _get("/tasks/", {"locationId": loc, "assignedTo": ava_id, "isCompleted": "false", "limit": 50})
-        tasks = data.get("tasks", [])
+        tasks = _get_tasks(assigned_to=ava_id)
         items = [{"task": t.get("title"), "contact_id": t.get("contactId", ""),
                   "due": t.get("dueDate", ""), "id": t.get("id", "")} for t in tasks]
         return _finding(5, "Ava Has Tasks", items, urgent=True)
@@ -323,7 +352,7 @@ def rule_6_design_rendering():
         return {"rule_id": 6, "title": "Design Rendering Overdue", "status": "skipped",
                 "note": "Set GHL_MONITOR_REBEKAH_ID and/or GHL_MONITOR_NICOLE_ID to enable.", "items": [], "count": 0}
     try:
-        all_tasks = _get_all_pages("/tasks/", "tasks", {"locationId": loc, "isCompleted": "false"})
+        all_tasks = _get_tasks()
         items = []
         for t in all_tasks:
             if t.get("assignedTo") not in watched:
@@ -418,7 +447,7 @@ def rule_12_overdue_tasks():
     nicole_id  = _uid("NICOLE")
     exclude    = {uid for uid in [ava_id, rebekah_id, nicole_id] if uid}
     try:
-        all_tasks = _get_all_pages("/tasks/", "tasks", {"locationId": loc, "isCompleted": "false"})
+        all_tasks = _get_tasks()
         now = _now_phoenix().replace(tzinfo=None)
         items = []
         by_employee: dict = {}
