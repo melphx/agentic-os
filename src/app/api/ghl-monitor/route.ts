@@ -17,7 +17,7 @@ function runMonitor(mode = 'all'): Promise<{ data: any; ok: boolean; error?: str
   return new Promise(resolve => {
     const proc = spawn(VENV_PYTHON, [pathModule.join(SCRIPTS_DIR, 'ghl_monitor.py'), '--mode', mode], {
       env: { ...process.env },
-      timeout: 120_000,
+      timeout: 300_000,
     })
     let out = '', err = ''
     proc.stdout.on('data', d => { out += d.toString() })
