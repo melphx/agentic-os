@@ -579,11 +579,11 @@ def rule_14_ppc_leads():
         cutoff   = now - timedelta(hours=48)
 
         # Paginate recent contacts; stop once we're past the 48h window
-        # GHL sorts contacts oldest-first by default (sortOrder not supported).
-        # Use _get_all_pages to get all contacts, filter by dateAdded within 48h.
-        # PHR volume is small enough that this is fast.
+        # Use startAfter timestamp to only fetch contacts created in the last 48h
+        # (same approach as rule_1_test_contacts) — much faster than full pagination.
+        start_ts = int((now - timedelta(hours=48)).timestamp() * 1000)
         all_contacts = _get_all_pages("/contacts/", "contacts",
-                                      {"sortBy": "date_added"}, max_pages=50)
+                                      {"startAfter": start_ts}, max_pages=5)
         items   = []
         checked = 0
         for c in all_contacts:
