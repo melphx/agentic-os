@@ -483,6 +483,47 @@ def rule_12_overdue_tasks():
         return {"rule_id": 12, "title": "Employee Tasks Overdue", "status": "error", "error": str(e), "items": [], "count": 0}
 
 
+def rule_15_appointment_channels():
+    """Monthly: which channels/sources are booking Phone Consultations and In-Homes."""
+    _, loc = _cfg()
+    try:
+        # GHL reporting — appointments by source
+        data = _get("/reporting/appointments/", {
+            "locationId": loc, "limit": 100,
+        })
+        appts = data.get("appointments", data.get("data", []))
+        if not appts:
+            # Try alternate endpoint
+            data = _get("/calendars/events", {"locationId": loc, "limit": 100})
+            appts = data.get("events", [])
+
+        source_counts: dict = {}
+        for a in appts:
+            cal_name = (a.get("calendarId") or a.get("calendar", {}).get("name") or "Unknown").lower()
+            # Only care about phone consultations and in-homes
+            if not any(k in cal_name for k in ["phone", "in-home", "in home", "inhome", "consultation"]):
+                source = a.get("source") or a.get("attributionSource") or "Direct"
+                cat = "Other"
+            else:
+                source = a.get("source") or a.get("attributionSource") or "Direct"
+                cat = "Phone Consultation" if any(k in cal_name for k in ["phone", "consultation"]) else "In-Home"
+            key = f"{cat}|{source}"
+            source_counts[key] = source_counts.get(key, 0) + 1
+
+        items = [
+            {"category": k.split("|")[0], "source": k.split("|")[1], "count": v}
+            for k, v in sorted(source_counts.items(), key=lambda x: -x[1])
+            if k.split("|")[0] != "Other"
+        ]
+        status = "ok" if items else "skipped"
+        return {"rule_id": 15, "title": "Appointment Channel Breakdown", "status": status,
+                "items": items, "count": len(items),
+                "note": "No appointment data available" if not items else ""}
+    except Exception as e:
+        return {"rule_id": 15, "title": "Appointment Channel Breakdown", "status": "error",
+                "error": str(e), "items": [], "count": 0}
+
+
 def rule_14_ppc_leads():
     """PPC leads with no outbound reply or task within 24h of creation."""
     _, loc = _cfg()
@@ -522,70 +563,80 @@ def rule_14_ppc_leads():
         return {"rule_id": 14, "title": "PPC Leads Unworked", "status": "error", "error": str(e), "items": [], "count": 0}
 
 
+# ── Rule registry with frequency metadata ───────────────────────────────────
+
+# (fn, frequency) — 'weekly' runs every Monday, 'monthly' runs on 1st of month
+RULES = [
+    (rule_1_test_contacts,         "weekly"),
+    (rule_2_fake_emails,           "weekly"),
+    (rule_3_missed_replies,        "weekly"),
+    (rule_4_negative_phrases,      "weekly"),
+    (rule_5_ava_tasks,             "weekly"),
+    (rule_6_design_rendering,      "weekly"),
+    (rule_7_hard_bounces,          "weekly"),
+    (rule_11_opp_stagnation,       "weekly"),
+    (rule_12_overdue_tasks,        "weekly"),
+    (rule_14_ppc_leads,            "weekly"),
+    (rule_15_appointment_channels, "monthly"),
+]
+
 # ── Main ────────────────────────────────────────────────────────────────────
 
-def run_all():
+def run_all(mode: str = "all"):
+    """
+    mode: 'all' | 'weekly' | 'monthly'
+      all     — run every rule (manual Run Now)
+      weekly  — run only weekly-tagged rules (cron: every Monday)
+      monthly — run all rules (cron: 1st of month)
+    """
     start = time.time()
     findings = []
 
-    rules = [
-        rule_1_test_contacts,
-        rule_2_fake_emails,
-        rule_3_missed_replies,
-        rule_4_negative_phrases,
-        rule_5_ava_tasks,
-        rule_6_design_rendering,
-        rule_7_hard_bounces,
-        rule_11_opp_stagnation,
-        rule_12_overdue_tasks,
-        rule_14_ppc_leads,
-    ]
-
-    for fn in rules:
+    for fn, freq in RULES:
+        if mode == "weekly" and freq != "weekly":
+            continue  # skip monthly-only rules on weekly run
         try:
-            findings.append(fn())
+            result = fn()
+            result["frequency"] = freq   # attach frequency tag
+            findings.append(result)
         except Exception as e:
             findings.append({
-                "rule_id": fn.__name__,
-                "title": fn.__name__,
-                "status": "error",
-                "error": str(e),
-                "items": [],
-                "count": 0,
+                "rule_id": fn.__name__, "title": fn.__name__,
+                "status": "error", "error": str(e),
+                "items": [], "count": 0, "frequency": freq,
             })
 
-    # Overall status
     statuses = [f.get("status") for f in findings]
-    if "urgent" in statuses:
-        overall = "urgent"
-    elif "warning" in statuses:
-        overall = "issues"
-    elif "error" in statuses:
-        overall = "error"
-    else:
-        overall = "ok"
+    if "urgent" in statuses:       overall = "urgent"
+    elif "warning" in statuses:    overall = "issues"
+    elif "error" in statuses:      overall = "error"
+    else:                          overall = "ok"
 
-    # Summary text
     flagged = [f for f in findings if f.get("status") in ("warning", "urgent")]
     if flagged:
         parts = [f"{f['title']} ({f['count']})" for f in flagged]
         summary = f"GHL Monitor: {len(flagged)} rule(s) flagged — " + ", ".join(parts)
     else:
-        summary = "GHL Monitor: All clear ✅"
+        summary = f"GHL Monitor: All clear ✅ (mode: {mode})"
 
     result = {
-        "run_at": _now_phoenix().isoformat(),
-        "status": overall,
-        "summary": summary,
+        "run_at":      _now_phoenix().isoformat(),
+        "mode":        mode,
+        "status":      overall,
+        "summary":     summary,
         "duration_ms": int((time.time() - start) * 1000),
-        "findings": findings,
+        "findings":    findings,
     }
     print(json.dumps(result))
 
 
 if __name__ == "__main__":
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--mode", default="all", choices=["all", "weekly", "monthly"])
+    args = ap.parse_args()
     try:
-        run_all()
+        run_all(args.mode)
     except Exception as e:
         print(json.dumps({"error": str(e)}), file=sys.stderr)
         sys.exit(1)

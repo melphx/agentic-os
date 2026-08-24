@@ -1,4 +1,4 @@
-import { getSchedules, updateSchedule, saveMcdReport, markMcdReportDelivered } from '@/lib/db'
+import { getSchedules, updateSchedule, saveMcdReport, markMcdReportDelivered, getGhlMonitorConfig } from '@/lib/db'
 import { sendMcdEmail } from '@/lib/mcd-email'
 import { spawn } from 'child_process'
 import { writeFileSync } from 'fs'
@@ -62,6 +62,35 @@ export async function initScheduler() {
     console.log('[mcd-cron] Weekly report scheduled: Mon 07:30 America/Phoenix')
   } else {
     console.log('[mcd-cron] Weekly report DISABLED (set MCD_WEEKLY_ENABLED=true + MCD env vars)')
+  }
+
+  // GHL Monitor — weekly (Mon 07:45) and monthly (1st 07:45)
+  if (process.env.GHL_API_KEY && process.env.GHL_LOCATION_ID) {
+    const c = await getCron()
+    const internalUrl = process.env.INTERNAL_URL || 'http://localhost:3000'
+    const secret = process.env.JWT_SECRET || ''
+
+    async function triggerGhlMonitor(mode: string, triggeredBy: string) {
+      try {
+        const cfg = getGhlMonitorConfig()
+        if (mode === 'weekly'  && cfg.weekly_enabled  === 'false') return
+        if (mode === 'monthly' && cfg.monthly_enabled === 'false') return
+        console.log(`[ghl-monitor] Running ${mode} check...`)
+        await fetch(`${internalUrl}/api/ghl-monitor`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-internal-scheduler': secret },
+          body: JSON.stringify({ triggered_by: triggeredBy, mode }),
+        })
+      } catch (e: any) {
+        console.error('[ghl-monitor] Cron error:', e.message)
+      }
+    }
+
+    // Weekly: every Monday 07:45 Phoenix
+    c.schedule('45 7 * * 1', () => triggerGhlMonitor('weekly', 'cron-weekly'), { timezone: 'America/Phoenix' })
+    // Monthly: 1st of each month 07:45 Phoenix
+    c.schedule('45 7 1 * *', () => triggerGhlMonitor('monthly', 'cron-monthly'), { timezone: 'America/Phoenix' })
+    console.log('[ghl-monitor] Scheduled: weekly Mon 07:45 + monthly 1st 07:45 America/Phoenix')
   }
 }
 

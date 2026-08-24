@@ -5560,10 +5560,13 @@ interface GhlRun {
 }
 
 function GhlMonitorView() {
-  const [run, setRun]         = useState<GhlRun | null>(null)
+  const [run, setRun]           = useState<GhlRun | null>(null)
   const [findings, setFindings] = useState<GhlFinding[]>([])
-  const [running, setRunning] = useState(false)
+  const [running, setRunning]   = useState(false)
   const [expanded, setExpanded] = useState<Set<number | string>>(new Set())
+  const [weeklyOn, setWeeklyOn]   = useState(true)
+  const [monthlyOn, setMonthlyOn] = useState(true)
+  const [savingCfg, setSavingCfg] = useState(false)
 
   useEffect(() => { load() }, [])
 
@@ -5575,7 +5578,20 @@ function GhlMonitorView() {
         setRun(d.run)
         try { setFindings(JSON.parse(d.run.findings_json) || []) } catch {}
       }
+      if (d.config) {
+        if (d.config.weekly_enabled  !== undefined) setWeeklyOn(d.config.weekly_enabled  !== 'false')
+        if (d.config.monthly_enabled !== undefined) setMonthlyOn(d.config.monthly_enabled !== 'false')
+      }
     }
+  }
+
+  async function saveSchedule() {
+    setSavingCfg(true)
+    await fetch('/api/ghl-monitor', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'config', weekly_enabled: weeklyOn, monthly_enabled: monthlyOn })
+    })
+    setSavingCfg(false)
   }
 
   async function runNow() {
@@ -5642,6 +5658,31 @@ function GhlMonitorView() {
         </div>
       )}
 
+      {/* Schedule settings */}
+      <div style={{ background:'rgba(15,20,35,0.7)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:12, padding:'14px 18px', marginBottom:16, display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:12 }}>
+        <span style={{ color:'rgba(148,163,184,0.7)', fontSize:12, fontWeight:600 }}>AUTO-RUN SCHEDULE</span>
+        <div style={{ display:'flex', alignItems:'center', gap:16 }}>
+          <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer' }}>
+            <div onClick={() => setWeeklyOn(v => !v)}
+              style={{ width:36, height:20, borderRadius:10, background:weeklyOn?'#6366f1':'rgba(99,102,241,0.2)', position:'relative', transition:'background 0.2s', cursor:'pointer' }}>
+              <div style={{ position:'absolute', top:2, left:weeklyOn?18:2, width:16, height:16, borderRadius:8, background:'white', transition:'left 0.2s' }} />
+            </div>
+            <span style={{ color:'rgba(148,163,184,0.7)', fontSize:12 }}>Weekly (Mon 07:45)</span>
+          </label>
+          <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer' }}>
+            <div onClick={() => setMonthlyOn(v => !v)}
+              style={{ width:36, height:20, borderRadius:10, background:monthlyOn?'#6366f1':'rgba(99,102,241,0.2)', position:'relative', transition:'background 0.2s', cursor:'pointer' }}>
+              <div style={{ position:'absolute', top:2, left:monthlyOn?18:2, width:16, height:16, borderRadius:8, background:'white', transition:'left 0.2s' }} />
+            </div>
+            <span style={{ color:'rgba(148,163,184,0.7)', fontSize:12 }}>Monthly (1st 07:45)</span>
+          </label>
+          <motion.button whileHover={{ scale:1.02 }} whileTap={{ scale:0.97 }} onClick={saveSchedule} disabled={savingCfg}
+            style={{ background:'rgba(99,102,241,0.15)', border:'1px solid rgba(99,102,241,0.3)', borderRadius:8, padding:'5px 14px', color:'#a5b4fc', fontSize:12, fontWeight:600, cursor:'pointer' }}>
+            {savingCfg ? 'Saving…' : 'Save'}
+          </motion.button>
+        </div>
+      </div>
+
       {/* No run yet */}
       {!run && !running && (
         <div style={{ background: 'rgba(15,20,35,0.7)', border: '1px solid rgba(99,102,241,0.12)', borderRadius: 14, padding: 40, textAlign: 'center' }}>
@@ -5662,6 +5703,11 @@ function GhlMonitorView() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span style={{ fontSize: 11, color, fontWeight: 700, minWidth: 28 }}>R{f.rule_id}</span>
                 <span style={{ color: 'white', fontSize: 13, fontWeight: 600 }}>{f.title}</span>
+                {(f as any).frequency && (
+                  <span style={{ fontSize: 10, color: 'rgba(148,163,184,0.4)', background: 'rgba(99,102,241,0.08)', borderRadius: 4, padding: '1px 6px' }}>
+                    {(f as any).frequency}
+                  </span>
+                )}
                 {f.note && <span style={{ fontSize: 11, color: 'rgba(148,163,184,0.4)', fontStyle: 'italic' }}>{f.note}</span>}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

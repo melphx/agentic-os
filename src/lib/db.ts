@@ -1715,3 +1715,15 @@ export function getGhlMonitorHistory(limit = 10): GhlMonitorRun[] {
   ensureGhlMonitorTable()
   return getDb().prepare('SELECT * FROM ghl_monitor_runs ORDER BY id DESC LIMIT ?').all(limit) as GhlMonitorRun[]
 }
+
+// GHL Monitor config (schedule settings)
+export function getGhlMonitorConfig(): Record<string, string> {
+  getDb().exec(`CREATE TABLE IF NOT EXISTS ghl_monitor_config (key TEXT PRIMARY KEY, value TEXT NOT NULL)`)
+  const rows = getDb().prepare('SELECT key, value FROM ghl_monitor_config').all() as { key: string; value: string }[]
+  return Object.fromEntries(rows.map(r => [r.key, r.value]))
+}
+
+export function setGhlMonitorConfig(key: string, value: string) {
+  getDb().exec(`CREATE TABLE IF NOT EXISTS ghl_monitor_config (key TEXT PRIMARY KEY, value TEXT NOT NULL)`)
+  getDb().prepare('INSERT INTO ghl_monitor_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, value)
+}

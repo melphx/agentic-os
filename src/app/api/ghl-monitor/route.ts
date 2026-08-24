@@ -6,14 +6,16 @@ import {
   saveGhlMonitorRun,
   getLatestGhlMonitorRun,
   getGhlMonitorHistory,
+  getGhlMonitorConfig,
+  setGhlMonitorConfig,
 } from '@/lib/db'
 
 const SCRIPTS_DIR = process.env.MCD_SCRIPTS_DIR || '/root/agentic-os/mcd/scripts'
 const VENV_PYTHON = process.env.MCD_VENV_PYTHON  || '/root/agentic-os/mcd/venv/bin/python3'
 
-function runMonitor(): Promise<{ data: any; ok: boolean; error?: string }> {
+function runMonitor(mode = 'all'): Promise<{ data: any; ok: boolean; error?: string }> {
   return new Promise(resolve => {
-    const proc = spawn(VENV_PYTHON, [pathModule.join(SCRIPTS_DIR, 'ghl_monitor.py')], {
+    const proc = spawn(VENV_PYTHON, [pathModule.join(SCRIPTS_DIR, 'ghl_monitor.py'), '--mode', mode], {
       env: { ...process.env },
       timeout: 120_000,
     })
@@ -35,30 +37,38 @@ function runMonitor(): Promise<{ data: any; ok: boolean; error?: string }> {
   })
 }
 
-// GET — return latest run + recent history
+// GET — return latest run, history, or config
 export async function GET(req: NextRequest) {
   const { error } = await requireAuth(req)
   if (error) return error
 
   const action = req.nextUrl.searchParams.get('action')
-  if (action === 'history') {
-    return NextResponse.json({ runs: getGhlMonitorHistory(20) })
-  }
-  return NextResponse.json({ run: getLatestGhlMonitorRun() })
+  if (action === 'history') return NextResponse.json({ runs: getGhlMonitorHistory(20) })
+  if (action === 'config')  return NextResponse.json({ config: getGhlMonitorConfig() })
+  return NextResponse.json({ run: getLatestGhlMonitorRun(), config: getGhlMonitorConfig() })
 }
 
-// POST — trigger a new run
+// POST — trigger a run or save config
 export async function POST(req: NextRequest) {
   const { error } = await requireAuth(req)
   if (error) return error
 
   const body = await req.json().catch(() => ({}))
-  const triggeredBy = body.triggered_by || 'manual'
 
-  const { data, ok, error: runErr } = await runMonitor()
-  if (!ok) {
-    return NextResponse.json({ error: runErr }, { status: 502 })
+  // Save config
+  if (body.action === 'config') {
+    const { weekly_enabled, monthly_enabled } = body
+    if (typeof weekly_enabled === 'boolean') setGhlMonitorConfig('weekly_enabled', String(weekly_enabled))
+    if (typeof monthly_enabled === 'boolean') setGhlMonitorConfig('monthly_enabled', String(monthly_enabled))
+    return NextResponse.json({ ok: true })
   }
+
+  // Run monitor
+  const triggeredBy = body.triggered_by || 'manual'
+  const mode        = body.mode || 'all'
+
+  const { data, ok, error: runErr } = await runMonitor(mode)
+  if (!ok) return NextResponse.json({ error: runErr }, { status: 502 })
 
   const run = saveGhlMonitorRun({
     run_at:        data.run_at || new Date().toISOString(),
