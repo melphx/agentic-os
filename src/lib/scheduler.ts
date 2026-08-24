@@ -70,7 +70,7 @@ export async function initScheduler() {
     const internalUrl = process.env.INTERNAL_URL || 'http://localhost:3000'
     const secret = process.env.JWT_SECRET || ''
 
-    async function triggerGhlMonitor(mode: string, triggeredBy: string) {
+    const triggerGhlMonitor = async (mode: string, triggeredBy: string) => {
       try {
         const cfg = getGhlMonitorConfig()
         if (mode === 'weekly'  && cfg.weekly_enabled  === 'false') return
