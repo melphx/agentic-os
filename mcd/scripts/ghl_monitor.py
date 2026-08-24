@@ -495,17 +495,8 @@ def rule_15_appointment_channels():
         start_ts = int((now - timedelta(days=30)).timestamp() * 1000)
         date_label = f"{(now - timedelta(days=30)).strftime('%Y-%m-%d')} to {now.strftime('%Y-%m-%d')}"
 
-        # Step 1: resolve Lead Source Category field ID from custom field definitions
-        lead_src_field_id = None
-        try:
-            cf_data = _get("/custom-fields/", {"locationId": loc})
-            for field in (cf_data.get("customFields") or []):
-                fkey = str(field.get("key") or field.get("name") or "").lower()
-                if "lead_source_category" in fkey or "lead source category" in fkey:
-                    lead_src_field_id = field.get("id")
-                    break
-        except Exception:
-            pass
+        # Lead Source Category custom field ID (contact.lead_source_category)
+        lead_src_field_id = os.environ.get("GHL_LEAD_SOURCE_CATEGORY_ID", "EXNJj3ngt6IJwUsm5VaC")
 
         # Step 2: list calendars, classify phone-consultation and in-home ones
         cals_data  = _get("/calendars/", {"locationId": loc})
@@ -543,6 +534,8 @@ def rule_15_appointment_channels():
             return ""
 
         # Step 4: for each event, look up contact Lead Source Category
+        # Cap unique contact lookups at 60 to stay within timeout budget
+        MAX_LOOKUPS = 60
         source_counts: dict = {}
         seen_contacts: dict = {}  # cache contact lookups
         for ev in events:
@@ -553,10 +546,13 @@ def rule_15_appointment_channels():
             contact_id = ev.get("contactId") or ev.get("contact", {}).get("id")
             if contact_id:
                 if contact_id not in seen_contacts:
-                    try:
-                        seen_contacts[contact_id] = _get(f"/contacts/{contact_id}", {})
-                    except Exception:
-                        seen_contacts[contact_id] = {}
+                    if len(seen_contacts) < MAX_LOOKUPS:
+                        try:
+                            seen_contacts[contact_id] = _get(f"/contacts/{contact_id}", {})
+                        except Exception:
+                            seen_contacts[contact_id] = {}
+                    else:
+                        seen_contacts[contact_id] = {}  # skip lookup, count as unknown
                 ct = seen_contacts[contact_id]
                 source = _get_lead_source(ct) or ct.get("source") or ct.get("leadSource") or "Direct/Organic"
             source = (source or "Direct/Organic").strip()
