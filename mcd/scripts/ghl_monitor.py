@@ -534,8 +534,8 @@ def rule_15_appointment_channels():
                         # Use Lead Source Category custom field (PHR's attribution method)
                         lead_src = next(
                             (cf.get("value") for cf in (ct.get("customFields") or [])
-                             if (cf.get("key") or cf.get("name") or "").lower() in
-                                ("lead_source_category", "lead source category")),
+                             if str(cf.get("key") or cf.get("name") or "").lower()
+                             in ("contact.lead_source_category", "lead_source_category", "lead source category")),
                             None,
                         )
                         source = lead_src or ct.get("source") or ct.get("leadSource") or "Direct/Organic"
@@ -568,8 +568,8 @@ def rule_14_ppc_leads():
 
     def _is_ppc(contact):
         for cf in (contact.get("customFields") or []):
-            key   = (cf.get("key") or cf.get("name") or "").lower()
-            value = (cf.get("value") or "").strip().lower()
+            key   = str(cf.get("key") or cf.get("name") or "").lower()
+            value = str(cf.get("value") or "").strip().lower()
             if key == "utm_source" and value in PPC_UTM_VALUES:
                 return True
         return False
