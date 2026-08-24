@@ -169,9 +169,12 @@ def _days_since(iso_str):
 def _ok(rule_id, title):
     return {"rule_id": rule_id, "title": title, "status": "ok", "items": [], "count": 0}
 
-def _finding(rule_id, title, items, urgent=False):
+def _finding(rule_id, title, items, urgent=False, note=""):
     status = "urgent" if (urgent and items) else ("warning" if items else "ok")
-    return {"rule_id": rule_id, "title": title, "status": status, "items": items, "count": len(items)}
+    result = {"rule_id": rule_id, "title": title, "status": status, "items": items, "count": len(items)}
+    if note:
+        result["note"] = note
+    return result
 
 
 # ── Rules ───────────────────────────────────────────────────────────────────
@@ -487,78 +490,133 @@ def rule_15_appointment_channels():
     """Monthly: which channels/sources are booking Phone Consultations and In-Homes."""
     _, loc = _cfg()
     try:
-        # GHL reporting — appointments by source
-        data = _get("/reporting/appointments/", {
-            "locationId": loc, "limit": 100,
-        })
-        appts = data.get("appointments", data.get("data", []))
-        if not appts:
-            # Try alternate endpoint
-            data = _get("/calendars/events", {"locationId": loc, "limit": 100})
-            appts = data.get("events", [])
+        now = _now_phoenix()
+        end_ts   = int(now.timestamp() * 1000)
+        start_ts = int((now - timedelta(days=30)).timestamp() * 1000)
+        date_label = f"{(now - timedelta(days=30)).strftime('%Y-%m-%d')} to {now.strftime('%Y-%m-%d')}"
 
+        # Step 1: list calendars, classify phone-consultation and in-home ones
+        cals_data  = _get("/calendars/", {"locationId": loc})
+        calendars  = cals_data.get("calendars", [])
+        cal_types: dict = {}
+        for cal in calendars:
+            name = (cal.get("name") or "").lower()
+            if any(k in name for k in ["phone", "consultation", "discovery"]):
+                cal_types[cal["id"]] = "Phone Consultation"
+            elif any(k in name for k in ["in-home", "in home", "inhome", "design"]):
+                cal_types[cal["id"]] = "In-Home"
+
+        # Step 2: fetch events from matching calendars (or all if none matched)
+        events: list = []
+        target_ids = list(cal_types.keys()) or [None]
+        for cal_id in target_ids:
+            params: dict = {"locationId": loc, "startTime": start_ts, "endTime": end_ts}
+            if cal_id:
+                params["calendarId"] = cal_id
+            data = _get("/calendars/events", params)
+            for ev in data.get("events", []):
+                ev["_cat"] = cal_types.get(cal_id or ev.get("calendarId", ""), "Other")
+            events.extend(data.get("events", []))
+
+        # Step 3: for each event, look up contact source (batch-friendly — skip if no contactId)
         source_counts: dict = {}
-        for a in appts:
-            cal_name = (a.get("calendarId") or a.get("calendar", {}).get("name") or "Unknown").lower()
-            # Only care about phone consultations and in-homes
-            if not any(k in cal_name for k in ["phone", "in-home", "in home", "inhome", "consultation"]):
-                source = a.get("source") or a.get("attributionSource") or "Direct"
-                cat = "Other"
-            else:
-                source = a.get("source") or a.get("attributionSource") or "Direct"
-                cat = "Phone Consultation" if any(k in cal_name for k in ["phone", "consultation"]) else "In-Home"
+        for ev in events:
+            cat = ev.get("_cat", "Other")
+            if cat == "Other":
+                continue
+            # Source from event itself (usually blank) or fall back to contact lookup
+            source = (ev.get("source") or ev.get("attributionSource") or "").strip()
+            if not source:
+                contact_id = ev.get("contactId") or ev.get("contact", {}).get("id")
+                if contact_id:
+                    try:
+                        ct = _get(f"/contacts/{contact_id}", {})
+                        source = (ct.get("source") or ct.get("leadSource") or "Direct/Unknown").strip()
+                    except Exception:
+                        source = "Direct/Unknown"
+                else:
+                    source = "Direct/Unknown"
             key = f"{cat}|{source}"
             source_counts[key] = source_counts.get(key, 0) + 1
 
         items = [
             {"category": k.split("|")[0], "source": k.split("|")[1], "count": v}
             for k, v in sorted(source_counts.items(), key=lambda x: -x[1])
-            if k.split("|")[0] != "Other"
         ]
         status = "ok" if items else "skipped"
+        note = f"Past 30 days ({date_label})" if items else "No appointment data found for the past 30 days"
         return {"rule_id": 15, "title": "Appointment Channel Breakdown", "status": status,
-                "items": items, "count": len(items),
-                "note": "No appointment data available" if not items else ""}
+                "items": items, "count": len(items), "note": note}
     except Exception as e:
         return {"rule_id": 15, "title": "Appointment Channel Breakdown", "status": "error",
                 "error": str(e), "items": [], "count": 0}
 
 
 def rule_14_ppc_leads():
-    """PPC leads with no outbound reply or task within 24h of creation."""
+    """PPC leads created in the last 48h with no activity — detected via utm_source custom field."""
     _, loc = _cfg()
-    list_id = os.environ.get("GHL_MONITOR_PPC_LIST_ID", "").strip()
-    if not list_id:
-        return {"rule_id": 14, "title": "PPC Leads Unworked", "status": "skipped",
-                "note": "Set GHL_MONITOR_PPC_LIST_ID env var to enable this rule.", "items": [], "count": 0}
+
+    PPC_UTM_VALUES = {"fb_ad", "paid_search", "paid search", "adwords"}
+
+    def _is_ppc(contact):
+        for cf in (contact.get("customFields") or []):
+            key   = (cf.get("key") or cf.get("name") or "").lower()
+            value = (cf.get("value") or "").strip().lower()
+            if key == "utm_source" and value in PPC_UTM_VALUES:
+                return True
+        return False
+
     try:
-        data = _get(f"/contacts/smart_list/{list_id}", {"locationId": loc, "limit": 100})
-        contacts = data.get("contacts", [])
-        cutoff   = _now_phoenix().replace(tzinfo=None) - timedelta(hours=24)
-        items = []
-        for c in contacts:
-            created_str = c.get("dateAdded", "")
-            if not created_str:
-                continue
-            try:
-                created = datetime.strptime(created_str[:19], "%Y-%m-%dT%H:%M:%S")
-            except:
-                continue
-            if created < cutoff:
-                continue  # older than 24h, already handled
-            # Check for any outbound activity — use lastActivity or conversation flag
-            last_activity = c.get("lastActivity") or c.get("dateUpdated", "")
-            has_activity = last_activity and last_activity != created_str
-            if not has_activity:
+        now      = _now_phoenix().replace(tzinfo=None)
+        cutoff   = now - timedelta(hours=48)
+
+        # Paginate recent contacts; stop once we're past the 48h window
+        items   = []
+        page    = 1
+        checked = 0
+        done    = False
+        while not done:
+            data     = _get("/contacts/", {"locationId": loc, "limit": 100, "page": page,
+                                           "sortBy": "dateAdded", "sortOrder": "desc"})
+            contacts = data.get("contacts", [])
+            if not contacts:
+                break
+            for c in contacts:
+                created_str = c.get("dateAdded", "")
+                if not created_str:
+                    continue
+                try:
+                    created = datetime.strptime(created_str[:19], "%Y-%m-%dT%H:%M:%S")
+                except Exception:
+                    continue
+                if created < cutoff:
+                    done = True   # contacts are sorted newest-first; stop here
+                    break
+                checked += 1
+                if not _is_ppc(c):
+                    continue
+                # Flag if dateUpdated == dateAdded (no activity logged)
+                updated = (c.get("dateUpdated") or "").strip()[:19]
+                if updated and updated != created_str[:19]:
+                    continue  # has been touched
                 items.append({
-                    "name": c.get("contactName") or c.get("name"),
-                    "email": c.get("email", ""),
-                    "phone": c.get("phone", ""),
+                    "name":    c.get("contactName") or c.get("name") or "Unknown",
+                    "email":   c.get("email", ""),
+                    "phone":   c.get("phone", ""),
                     "created": created_str[:19],
-                    "source": c.get("source", ""),
+                    "utm_source": next(
+                        (cf.get("value") for cf in (c.get("customFields") or [])
+                         if (cf.get("key") or cf.get("name") or "").lower() == "utm_source"),
+                        "",
+                    ),
                     "id": c.get("id", ""),
                 })
-        return _finding(14, "PPC Leads Unworked", items, urgent=len(items) > 0)
+            page += 1
+            if page > 10:
+                break  # safety cap
+
+        note = f"Scanned {checked} contacts created in the last 48h"
+        return _finding(14, "PPC Leads Unworked", items, urgent=len(items) > 0, note=note)
     except Exception as e:
         return {"rule_id": 14, "title": "PPC Leads Unworked", "status": "error", "error": str(e), "items": [], "count": 0}
 
