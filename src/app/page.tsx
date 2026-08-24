@@ -5699,17 +5699,18 @@ function GhlMonitorView() {
         return (
           <div key={f.rule_id} style={{ background: 'rgba(15,20,35,0.8)', border: `1px solid ${f.status !== 'ok' && f.status !== 'skipped' ? color + '40' : 'rgba(99,102,241,0.1)'}`, borderRadius: 12, marginBottom: 10, overflow: 'hidden' }}>
             <div onClick={() => f.count > 0 && toggleExpand(f.rule_id)}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', cursor: f.count > 0 ? 'pointer' : 'default', background: f.status !== 'ok' && f.status !== 'skipped' ? bg : 'transparent' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ fontSize: 11, color, fontWeight: 700, minWidth: 28 }}>R{f.rule_id}</span>
-                <span style={{ color: 'white', fontSize: 13, fontWeight: 600 }}>{f.title}</span>
-                {(f as any).frequency && (
-                  <span style={{ fontSize: 10, color: 'rgba(148,163,184,0.4)', background: 'rgba(99,102,241,0.08)', borderRadius: 4, padding: '1px 6px' }}>
-                    {(f as any).frequency}
-                  </span>
-                )}
-                {f.note && <span style={{ fontSize: 11, color: 'rgba(148,163,184,0.4)', fontStyle: 'italic' }}>{f.note}</span>}
-              </div>
+              style={{ padding: '12px 16px', cursor: f.count > 0 ? 'pointer' : 'default', background: f.status !== 'ok' && f.status !== 'skipped' ? bg : 'transparent' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 11, color, fontWeight: 700, minWidth: 28 }}>R{f.rule_id}</span>
+                  <span style={{ color: 'white', fontSize: 13, fontWeight: 600 }}>{f.title}</span>
+                  {(f as any).frequency && (
+                    <span style={{ fontSize: 10, color: 'rgba(148,163,184,0.4)', background: 'rgba(99,102,241,0.08)', borderRadius: 4, padding: '1px 6px' }}>
+                      {(f as any).frequency}
+                    </span>
+                  )}
+                  {f.note && <span style={{ fontSize: 11, color: 'rgba(148,163,184,0.4)', fontStyle: 'italic' }}>{f.note}</span>}
+                </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 {f.count > 0 && (
                   <span style={{ background: color + '20', border: `1px solid ${color}40`, borderRadius: 20, padding: '2px 10px', color, fontSize: 11, fontWeight: 700 }}>
@@ -5719,6 +5720,12 @@ function GhlMonitorView() {
                 <span style={{ fontSize: 11, color }}>{statusLabel(f.status)}</span>
                 {f.count > 0 && <span style={{ color: 'rgba(148,163,184,0.4)', fontSize: 12 }}>{isOpen ? '▲' : '▼'}</span>}
               </div>
+              </div>
+              {(f as any).reason && (
+                <div style={{ fontSize: 11, color: 'rgba(148,163,184,0.5)', marginTop: 4, paddingLeft: 2 }}>
+                  {(f as any).reason}
+                </div>
+              )}
             </div>
 
             {/* Expanded items */}

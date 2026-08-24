@@ -166,14 +166,26 @@ def _days_since(iso_str):
     return 0
 
 
-def _ok(rule_id, title):
-    return {"rule_id": rule_id, "title": title, "status": "ok", "items": [], "count": 0}
+def _ok(rule_id, title, reason=""):
+    result = {"rule_id": rule_id, "title": title, "status": "ok", "items": [], "count": 0}
+    if reason:
+        result["reason"] = reason
+    return result
 
-def _finding(rule_id, title, items, urgent=False, note=""):
+def _finding(rule_id, title, items, urgent=False, note="", reason=""):
     status = "urgent" if (urgent and items) else ("warning" if items else "ok")
     result = {"rule_id": rule_id, "title": title, "status": status, "items": items, "count": len(items)}
     if note:
         result["note"] = note
+    if not reason:
+        # Auto-generate reason if not provided
+        if not items:
+            reason = "No issues found."
+        elif urgent and items:
+            reason = f"{len(items)} item(s) need immediate attention."
+        else:
+            reason = f"{len(items)} item(s) flagged for review."
+    result["reason"] = reason
     return result
 
 
@@ -199,7 +211,10 @@ def rule_1_test_contacts():
                 "id": c.get("id", ""),
             })
         urgent_count = sum(1 for i in items if i.get("age_days", 0) >= 7)
-        return _finding(1, '"Test" Contact Sweep', items, urgent=urgent_count > 0)
+        reason = (f"{len(items)} contact(s) with 'test' in the name — "
+                  f"oldest is {max((i.get('age_days',0) for i in items), default=0)}d old. Should be deleted."
+                  if items else "No contacts with 'test' in the name found.")
+        return _finding(1, '"Test" Contact Sweep', items, urgent=urgent_count > 0, reason=reason)
     except Exception as e:
         return {"rule_id": 1, "title": '"Test" Contact Sweep', "status": "error", "error": str(e), "items": [], "count": 0}
 
@@ -235,7 +250,9 @@ def rule_2_fake_emails():
                     "created": c.get("dateAdded", ""),
                     "id": c.get("id", ""),
                 })
-        return _finding(2, "Fake / Bad Email Detection", items)
+        reason = (f"{len(items)} contact(s) with bad or disposable email addresses in the last 7 days."
+                  if items else "No bad or disposable email addresses found in contacts from the past 7 days.")
+        return _finding(2, "Fake / Bad Email Detection", items, reason=reason)
     except Exception as e:
         return {"rule_id": 2, "title": "Fake / Bad Email Detection", "status": "error", "error": str(e), "items": [], "count": 0}
 
@@ -273,7 +290,9 @@ def rule_3_missed_replies():
                     "hours_waiting": round(age_h, 1),
                     "conversation_id": c.get("id", ""),
                 })
-        return _finding(3, "Missed Employee Replies", items)
+        reason = (f"{len(items)} inbound conversation(s) with no employee reply for over 24h."
+                  if items else "All inbound messages have been replied to within 24h.")
+        return _finding(3, "Missed Employee Replies", items, reason=reason)
     except Exception as e:
         return {"rule_id": 3, "title": "Missed Employee Replies", "status": "error", "error": str(e), "items": [], "count": 0}
 
@@ -299,7 +318,9 @@ def rule_4_negative_phrases():
                     "message_preview": (c.get("lastMessageBody") or "")[:80],
                     "conversation_id": c.get("id", ""),
                 })
-        return _finding(4, "Negative Sentiment Phrases", items)
+        reason = (f"{len(items)} inbound message(s) contain negative phrases like 'cancel', 'refund', or 'lawsuit'."
+                  if items else "No negative sentiment phrases detected in recent inbound conversations.")
+        return _finding(4, "Negative Sentiment Phrases", items, reason=reason)
     except Exception as e:
         return {"rule_id": 4, "title": "Negative Sentiment Phrases", "status": "error", "error": str(e), "items": [], "count": 0}
 
@@ -340,7 +361,9 @@ def rule_5_ava_tasks():
         tasks = _get_tasks(assigned_to=ava_id)
         items = [{"task": t.get("title"), "contact_id": t.get("contactId", ""),
                   "due": t.get("dueDate", ""), "id": t.get("id", "")} for t in tasks]
-        return _finding(5, "Ava Has Tasks", items, urgent=True)
+        reason = (f"Ava has {len(items)} open task(s) that need to be reassigned or completed."
+                  if items else "Ava has no open tasks assigned to her.")
+        return _finding(5, "Ava Has Tasks", items, urgent=True, reason=reason)
     except Exception as e:
         return {"rule_id": 5, "title": "Ava Has Tasks", "status": "error", "error": str(e), "items": [], "count": 0}
 
@@ -374,7 +397,9 @@ def rule_6_design_rendering():
                     "due": t.get("dueDate", ""),
                     "id": t.get("id", ""),
                 })
-        return _finding(6, "Design Rendering Overdue", items)
+        reason = (f"{len(items)} design rendering task(s) are 30+ days old and still open."
+                  if items else "No design rendering tasks older than 30 days.")
+        return _finding(6, "Design Rendering Overdue", items, reason=reason)
     except Exception as e:
         return {"rule_id": 6, "title": "Design Rendering Overdue", "status": "error", "error": str(e), "items": [], "count": 0}
 
@@ -403,7 +428,9 @@ def rule_7_hard_bounces():
                     "email_dnd_on": False,
                     "id": c.get("id", ""),
                 })
-        return _finding(7, "Hard Bounce / Email DND", items, urgent=len(items) > 5)
+        reason = (f"{len(items)} contact(s) have bounced emails but Email DND is not enabled — they may still receive emails."
+                  if items else "No contacts with bounced emails missing the DND flag.")
+        return _finding(7, "Hard Bounce / Email DND", items, urgent=len(items) > 5, reason=reason)
     except Exception as e:
         return {"rule_id": 7, "title": "Hard Bounce / Email DND", "status": "error", "error": str(e), "items": [], "count": 0}
 
@@ -437,7 +464,9 @@ def rule_11_opp_stagnation():
                 "assigned_to": watched.get(assigned, assigned),
                 "opp_id": o.get("id", ""),
             })
-        return _finding(11, "Opp Stage Stagnation", items)
+        reason = (f"{len(items)} opportunity/opportunities stuck in their pipeline stage beyond the expected window."
+                  if items else "All open opportunities are progressing within expected timeframes.")
+        return _finding(11, "Opp Stage Stagnation", items, reason=reason)
     except Exception as e:
         return {"rule_id": 11, "title": "Opp Stage Stagnation", "status": "error", "error": str(e), "items": [], "count": 0}
 
@@ -481,7 +510,9 @@ def rule_12_overdue_tasks():
         for emp, emp_tasks in by_employee.items():
             emp_tasks.sort(key=lambda x: x["overdue_days"], reverse=True)
             items.append({"employee_id": emp, "task_count": len(emp_tasks), "tasks": emp_tasks[:5]})
-        return _finding(12, "Employee Tasks Overdue", items)
+        reason = (f"{len(items)} employee(s) have tasks past their due date."
+                  if items else "No employee tasks are past their due date.")
+        return _finding(12, "Employee Tasks Overdue", items, reason=reason)
     except Exception as e:
         return {"rule_id": 12, "title": "Employee Tasks Overdue", "status": "error", "error": str(e), "items": [], "count": 0}
 
@@ -554,10 +585,14 @@ def rule_15_appointment_channels():
             {"category": k.split("|")[0], "source": k.split("|")[1], "count": v}
             for k, v in sorted(source_counts.items(), key=lambda x: -x[1])
         ]
+        dc_count = sum(i["count"] for i in items if i["category"] == "Phone Consultation")
+        ih_count = sum(i["count"] for i in items if i["category"] == "In-Home")
         status = "ok" if items else "skipped"
         note = f"Past 30 days ({date_label})" if items else "No completed appointments found in the last 30 days"
+        reason = (f"{dc_count} Discovery Call(s) and {ih_count} In-Home(s) completed in the last 30 days, broken down by lead source."
+                  if items else "No completed appointments with milestone dates found in the last 30 days.")
         return {"rule_id": 15, "title": "Appointment Channel Breakdown", "status": status,
-                "items": items, "count": len(items), "note": note}
+                "items": items, "count": len(items), "note": note, "reason": reason}
     except Exception as e:
         return {"rule_id": 15, "title": "Appointment Channel Breakdown", "status": "error",
                 "error": str(e), "items": [], "count": 0}
@@ -621,7 +656,9 @@ def rule_14_ppc_leads():
             })
 
         note = f"Scanned {checked} contacts created in the last 48h"
-        return _finding(14, "PPC Leads Unworked", items, urgent=len(items) > 0, note=note)
+        reason = (f"{len(items)} PPC lead(s) created in the last 48h with no outbound activity — need immediate follow-up."
+                  if items else f"All {checked} PPC leads from the last 48h have been contacted.")
+        return _finding(14, "PPC Leads Unworked", items, urgent=len(items) > 0, note=note, reason=reason)
     except Exception as e:
         return {"rule_id": 14, "title": "PPC Leads Unworked", "status": "error", "error": str(e), "items": [], "count": 0}
 
