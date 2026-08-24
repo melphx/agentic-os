@@ -587,9 +587,10 @@ def rule_14_ppc_leads():
         items   = []
         checked = 0
         for c in all_contacts:
-            created_str = c.get("dateAdded", "")
-            if not created_str:
+            created_raw = c.get("dateAdded", "")
+            if not created_raw:
                 continue
+            created_str = str(created_raw).strip()
             try:
                 created = datetime.strptime(created_str[:19], "%Y-%m-%dT%H:%M:%S")
             except Exception:
@@ -599,7 +600,8 @@ def rule_14_ppc_leads():
             checked += 1
             if not _is_ppc(c):
                 continue
-            updated = (c.get("dateUpdated") or "").strip()[:19]
+            updated_raw = c.get("dateUpdated") or ""
+            updated = str(updated_raw).strip()[:19] if updated_raw else ""
             if updated and updated != created_str[:19]:
                 continue  # has been touched
             items.append({
