@@ -531,11 +531,19 @@ def rule_15_appointment_channels():
                 if contact_id:
                     try:
                         ct = _get(f"/contacts/{contact_id}", {})
-                        source = (ct.get("source") or ct.get("leadSource") or "Direct/Unknown").strip()
+                        # Use Lead Source Category custom field (PHR's attribution method)
+                        lead_src = next(
+                            (cf.get("value") for cf in (ct.get("customFields") or [])
+                             if (cf.get("key") or cf.get("name") or "").lower() in
+                                ("lead_source_category", "lead source category")),
+                            None,
+                        )
+                        source = lead_src or ct.get("source") or ct.get("leadSource") or "Direct/Organic"
+                        source = source.strip() or "Direct/Organic"
                     except Exception:
-                        source = "Direct/Unknown"
+                        source = "Direct/Organic"
                 else:
-                    source = "Direct/Unknown"
+                    source = "Direct/Organic"
             key = f"{cat}|{source}"
             source_counts[key] = source_counts.get(key, 0) + 1
 
