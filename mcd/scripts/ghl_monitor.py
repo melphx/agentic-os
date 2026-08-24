@@ -487,84 +487,75 @@ def rule_12_overdue_tasks():
 
 
 def rule_15_appointment_channels():
-    """Monthly: which channels/sources are booking Phone Consultations and In-Homes."""
+    """Monthly: which Lead Source Categories are booking Phone Consultations and In-Homes.
+    Uses milestone custom fields (same as MCD report) — no calendar API needed.
+      phone_consultation_completed = FTRzrWq5rcMHyvt9SDMu
+      in_home_completed            = aTSynoN4I29sd3Etxhif
+      lead_source_category         = EXNJj3ngt6IJwUsm5VaC
+    """
     _, loc = _cfg()
     try:
-        now = _now_phoenix()
-        end_ts   = int(now.timestamp() * 1000)
-        start_ts = int((now - timedelta(days=30)).timestamp() * 1000)
-        date_label = f"{(now - timedelta(days=30)).strftime('%Y-%m-%d')} to {now.strftime('%Y-%m-%d')}"
+        now   = _now_phoenix().replace(tzinfo=None)
+        start = now - timedelta(days=30)
+        date_label = f"{start.strftime('%Y-%m-%d')} to {now.strftime('%Y-%m-%d')}"
 
-        # Lead Source Category custom field ID (contact.lead_source_category)
-        lead_src_field_id = os.environ.get("GHL_LEAD_SOURCE_CATEGORY_ID", "EXNJj3ngt6IJwUsm5VaC")
+        DC_FIELD  = os.environ.get("GHL_DC_COMPLETED_FIELD_ID",    "FTRzrWq5rcMHyvt9SDMu")
+        IH_FIELD  = os.environ.get("GHL_IH_COMPLETED_FIELD_ID",    "aTSynoN4I29sd3Etxhif")
+        SRC_FIELD = os.environ.get("GHL_LEAD_SOURCE_CATEGORY_ID",  "EXNJj3ngt6IJwUsm5VaC")
 
-        # Step 2: list calendars, classify phone-consultation and in-home ones
-        cals_data  = _get("/calendars/", {"locationId": loc})
-        calendars  = cals_data.get("calendars", [])
-        cal_types: dict = {}
-        for cal in calendars:
-            name = (cal.get("name") or "").lower()
-            if any(k in name for k in ["phone", "consultation", "discovery"]):
-                cal_types[cal["id"]] = "Phone Consultation"
-            elif any(k in name for k in ["in-home", "in home", "inhome", "design"]):
-                cal_types[cal["id"]] = "In-Home"
+        def _field_val(contact, field_id):
+            for cf in (contact.get("customFields") or []):
+                if cf.get("id") == field_id:
+                    return cf.get("value")
+            return None
 
-        # Step 3: fetch events from matching calendars (or all if none matched)
-        events: list = []
-        target_ids = list(cal_types.keys()) or [None]
-        for cal_id in target_ids:
-            params: dict = {"locationId": loc, "startTime": start_ts, "endTime": end_ts}
-            if cal_id:
-                params["calendarId"] = cal_id
-            data = _get("/calendars/events", params)
-            for ev in data.get("events", []):
-                ev["_cat"] = cal_types.get(cal_id or ev.get("calendarId", ""), "Other")
-            events.extend(data.get("events", []))
+        def _in_window(val):
+            """Return True if a milestone date value falls within the last 30 days."""
+            if val is None:
+                return False
+            s = str(val).strip()
+            # Epoch ms
+            if s.isdigit() and len(s) > 10:
+                try:
+                    dt = datetime.utcfromtimestamp(int(s) / 1000)
+                    return start <= dt <= now
+                except Exception:
+                    return False
+            # ISO date string YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS
+            try:
+                dt = datetime.strptime(s[:10], "%Y-%m-%d")
+                return start.date() <= dt.date() <= now.date()
+            except Exception:
+                return False
 
-        def _get_lead_source(ct):
-            """Extract Lead Source Category from a contact record."""
-            for cf in (ct.get("customFields") or []):
-                # Match by resolved field ID (most reliable)
-                if lead_src_field_id and cf.get("id") == lead_src_field_id:
-                    return str(cf.get("value") or "").strip()
-                # Fallback: match by key/name
-                fkey = str(cf.get("key") or cf.get("name") or "").lower()
-                if "lead_source_category" in fkey or "lead source category" in fkey:
-                    return str(cf.get("value") or "").strip()
-            return ""
-
-        # Step 4: for each event, look up contact Lead Source Category
-        # Cap unique contact lookups at 60 to stay within timeout budget
-        MAX_LOOKUPS = 60
         source_counts: dict = {}
-        seen_contacts: dict = {}  # cache contact lookups
-        for ev in events:
-            cat = ev.get("_cat", "Other")
-            if cat == "Other":
+
+        # Paginate all contacts and filter by milestone dates on our side
+        start_ts = int(start.timestamp() * 1000)
+        contacts = _get_all_pages("/contacts/", "contacts",
+                                  {"startAfter": start_ts}, max_pages=20)
+
+        for c in contacts:
+            dc_val = _field_val(c, DC_FIELD)
+            ih_val = _field_val(c, IH_FIELD)
+            dc_hit = _in_window(dc_val)
+            ih_hit = _in_window(ih_val)
+            if not dc_hit and not ih_hit:
                 continue
-            source = ""
-            contact_id = ev.get("contactId") or ev.get("contact", {}).get("id")
-            if contact_id:
-                if contact_id not in seen_contacts:
-                    if len(seen_contacts) < MAX_LOOKUPS:
-                        try:
-                            seen_contacts[contact_id] = _get(f"/contacts/{contact_id}", {})
-                        except Exception:
-                            seen_contacts[contact_id] = {}
-                    else:
-                        seen_contacts[contact_id] = {}  # skip lookup, count as unknown
-                ct = seen_contacts[contact_id]
-                source = _get_lead_source(ct) or ct.get("source") or ct.get("leadSource") or "Direct/Organic"
-            source = (source or "Direct/Organic").strip()
-            key = f"{cat}|{source}"
-            source_counts[key] = source_counts.get(key, 0) + 1
+            source = str(_field_val(c, SRC_FIELD) or "Direct/Organic").strip() or "Direct/Organic"
+            if dc_hit:
+                key = f"Phone Consultation|{source}"
+                source_counts[key] = source_counts.get(key, 0) + 1
+            if ih_hit:
+                key = f"In-Home|{source}"
+                source_counts[key] = source_counts.get(key, 0) + 1
 
         items = [
             {"category": k.split("|")[0], "source": k.split("|")[1], "count": v}
             for k, v in sorted(source_counts.items(), key=lambda x: -x[1])
         ]
         status = "ok" if items else "skipped"
-        note = f"Past 30 days ({date_label})" if items else "No appointment data found for the past 30 days"
+        note = f"Past 30 days ({date_label})" if items else "No completed appointments found in the last 30 days"
         return {"rule_id": 15, "title": "Appointment Channel Breakdown", "status": status,
                 "items": items, "count": len(items), "note": note}
     except Exception as e:
