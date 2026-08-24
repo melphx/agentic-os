@@ -495,7 +495,19 @@ def rule_15_appointment_channels():
         start_ts = int((now - timedelta(days=30)).timestamp() * 1000)
         date_label = f"{(now - timedelta(days=30)).strftime('%Y-%m-%d')} to {now.strftime('%Y-%m-%d')}"
 
-        # Step 1: list calendars, classify phone-consultation and in-home ones
+        # Step 1: resolve Lead Source Category field ID from custom field definitions
+        lead_src_field_id = None
+        try:
+            cf_data = _get("/custom-fields/", {"locationId": loc})
+            for field in (cf_data.get("customFields") or []):
+                fkey = str(field.get("key") or field.get("name") or "").lower()
+                if "lead_source_category" in fkey or "lead source category" in fkey:
+                    lead_src_field_id = field.get("id")
+                    break
+        except Exception:
+            pass
+
+        # Step 2: list calendars, classify phone-consultation and in-home ones
         cals_data  = _get("/calendars/", {"locationId": loc})
         calendars  = cals_data.get("calendars", [])
         cal_types: dict = {}
@@ -506,7 +518,7 @@ def rule_15_appointment_channels():
             elif any(k in name for k in ["in-home", "in home", "inhome", "design"]):
                 cal_types[cal["id"]] = "In-Home"
 
-        # Step 2: fetch events from matching calendars (or all if none matched)
+        # Step 3: fetch events from matching calendars (or all if none matched)
         events: list = []
         target_ids = list(cal_types.keys()) or [None]
         for cal_id in target_ids:
@@ -518,32 +530,36 @@ def rule_15_appointment_channels():
                 ev["_cat"] = cal_types.get(cal_id or ev.get("calendarId", ""), "Other")
             events.extend(data.get("events", []))
 
-        # Step 3: for each event, look up contact source (batch-friendly — skip if no contactId)
+        def _get_lead_source(ct):
+            """Extract Lead Source Category from a contact record."""
+            for cf in (ct.get("customFields") or []):
+                # Match by resolved field ID (most reliable)
+                if lead_src_field_id and cf.get("id") == lead_src_field_id:
+                    return str(cf.get("value") or "").strip()
+                # Fallback: match by key/name
+                fkey = str(cf.get("key") or cf.get("name") or "").lower()
+                if "lead_source_category" in fkey or "lead source category" in fkey:
+                    return str(cf.get("value") or "").strip()
+            return ""
+
+        # Step 4: for each event, look up contact Lead Source Category
         source_counts: dict = {}
+        seen_contacts: dict = {}  # cache contact lookups
         for ev in events:
             cat = ev.get("_cat", "Other")
             if cat == "Other":
                 continue
-            # Source from event itself (usually blank) or fall back to contact lookup
-            source = (ev.get("source") or ev.get("attributionSource") or "").strip()
-            if not source:
-                contact_id = ev.get("contactId") or ev.get("contact", {}).get("id")
-                if contact_id:
+            source = ""
+            contact_id = ev.get("contactId") or ev.get("contact", {}).get("id")
+            if contact_id:
+                if contact_id not in seen_contacts:
                     try:
-                        ct = _get(f"/contacts/{contact_id}", {})
-                        # Use Lead Source Category custom field (PHR's attribution method)
-                        lead_src = next(
-                            (cf.get("value") for cf in (ct.get("customFields") or [])
-                             if str(cf.get("key") or cf.get("name") or "").lower()
-                             in ("contact.lead_source_category", "lead_source_category", "lead source category")),
-                            None,
-                        )
-                        source = lead_src or ct.get("source") or ct.get("leadSource") or "Direct/Organic"
-                        source = source.strip() or "Direct/Organic"
+                        seen_contacts[contact_id] = _get(f"/contacts/{contact_id}", {})
                     except Exception:
-                        source = "Direct/Organic"
-                else:
-                    source = "Direct/Organic"
+                        seen_contacts[contact_id] = {}
+                ct = seen_contacts[contact_id]
+                source = _get_lead_source(ct) or ct.get("source") or ct.get("leadSource") or "Direct/Organic"
+            source = (source or "Direct/Organic").strip()
             key = f"{cat}|{source}"
             source_counts[key] = source_counts.get(key, 0) + 1
 
