@@ -5767,6 +5767,13 @@ function GhlMonitorView() {
                         ))}
                       </div>
                     )}
+                    {item.category !== undefined && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ color: '#a5b4fc', fontWeight: 600, fontSize: 11 }}>{item.category}</span>
+                        <span style={{ color: 'white' }}>{item.source || 'Unknown'}</span>
+                        <span style={{ color: '#f59e0b', fontWeight: 700 }}>{item.count} booked</span>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

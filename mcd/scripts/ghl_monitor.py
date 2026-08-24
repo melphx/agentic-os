@@ -571,49 +571,41 @@ def rule_14_ppc_leads():
         cutoff   = now - timedelta(hours=48)
 
         # Paginate recent contacts; stop once we're past the 48h window
+        # GHL sorts contacts oldest-first by default (sortOrder not supported).
+        # Use _get_all_pages to get all contacts, filter by dateAdded within 48h.
+        # PHR volume is small enough that this is fast.
+        all_contacts = _get_all_pages("/contacts/", "contacts",
+                                      {"sortBy": "date_added"}, max_pages=50)
         items   = []
-        page    = 1
         checked = 0
-        done    = False
-        while not done:
-            data     = _get("/contacts/", {"locationId": loc, "limit": 100, "page": page,
-                                           "sortBy": "dateAdded", "sortOrder": "desc"})
-            contacts = data.get("contacts", [])
-            if not contacts:
-                break
-            for c in contacts:
-                created_str = c.get("dateAdded", "")
-                if not created_str:
-                    continue
-                try:
-                    created = datetime.strptime(created_str[:19], "%Y-%m-%dT%H:%M:%S")
-                except Exception:
-                    continue
-                if created < cutoff:
-                    done = True   # contacts are sorted newest-first; stop here
-                    break
-                checked += 1
-                if not _is_ppc(c):
-                    continue
-                # Flag if dateUpdated == dateAdded (no activity logged)
-                updated = (c.get("dateUpdated") or "").strip()[:19]
-                if updated and updated != created_str[:19]:
-                    continue  # has been touched
-                items.append({
-                    "name":    c.get("contactName") or c.get("name") or "Unknown",
-                    "email":   c.get("email", ""),
-                    "phone":   c.get("phone", ""),
-                    "created": created_str[:19],
-                    "utm_source": next(
-                        (cf.get("value") for cf in (c.get("customFields") or [])
-                         if (cf.get("key") or cf.get("name") or "").lower() == "utm_source"),
-                        "",
-                    ),
-                    "id": c.get("id", ""),
-                })
-            page += 1
-            if page > 10:
-                break  # safety cap
+        for c in all_contacts:
+            created_str = c.get("dateAdded", "")
+            if not created_str:
+                continue
+            try:
+                created = datetime.strptime(created_str[:19], "%Y-%m-%dT%H:%M:%S")
+            except Exception:
+                continue
+            if created < cutoff:
+                continue  # too old
+            checked += 1
+            if not _is_ppc(c):
+                continue
+            updated = (c.get("dateUpdated") or "").strip()[:19]
+            if updated and updated != created_str[:19]:
+                continue  # has been touched
+            items.append({
+                "name":    c.get("contactName") or c.get("name") or "Unknown",
+                "email":   c.get("email", ""),
+                "phone":   c.get("phone", ""),
+                "created": created_str[:19],
+                "utm_source": next(
+                    (cf.get("value") for cf in (c.get("customFields") or [])
+                     if (cf.get("key") or cf.get("name") or "").lower() == "utm_source"),
+                    "",
+                ),
+                "id": c.get("id", ""),
+            })
 
         note = f"Scanned {checked} contacts created in the last 48h"
         return _finding(14, "PPC Leads Unworked", items, urgent=len(items) > 0, note=note)
