@@ -76,11 +76,37 @@ export async function initScheduler() {
         if (mode === 'weekly'  && cfg.weekly_enabled  === 'false') return
         if (mode === 'monthly' && cfg.monthly_enabled === 'false') return
         console.log(`[ghl-monitor] Running ${mode} check...`)
-        await fetch(`${internalUrl}/api/ghl-monitor`, {
+        const res = await fetch(`${internalUrl}/api/ghl-monitor`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-internal-scheduler': secret },
           body: JSON.stringify({ triggered_by: triggeredBy, mode }),
         })
+        // Forward results to N8N email webhook if configured
+        const n8nWebhook = process.env.GHL_MONITOR_N8N_WEBHOOK
+        if (n8nWebhook && res.ok) {
+          try {
+            const result = await res.json() as any
+            const run = result.run
+            if (run) {
+              const findings = JSON.parse(run.findings_json || '[]')
+              await fetch(n8nWebhook, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  run_at:       run.run_at,
+                  status:       run.status,
+                  summary:      run.summary,
+                  duration_ms:  run.duration_ms,
+                  triggered_by: run.triggered_by,
+                  findings,
+                }),
+              })
+              console.log('[ghl-monitor] Results forwarded to N8N email webhook')
+            }
+          } catch (e: any) {
+            console.error('[ghl-monitor] N8N webhook error:', e.message)
+          }
+        }
       } catch (e: any) {
         console.error('[ghl-monitor] Cron error:', e.message)
       }

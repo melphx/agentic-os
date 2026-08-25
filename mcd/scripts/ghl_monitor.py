@@ -290,8 +290,8 @@ def rule_3_missed_replies():
                     "hours_waiting": round(age_h, 1),
                     "conversation_id": c.get("id", ""),
                 })
-        reason = (f"{len(items)} inbound conversation(s) with no employee reply for over 24h."
-                  if items else "All inbound messages have been replied to within 24h.")
+        reason = (f"{len(items)} inbound conversation(s) with no employee reply for over 24h (checked last 100 conversations)."
+                  if items else "All inbound messages replied to within 24h (checked last 100 conversations).")
         return _finding(3, "Missed Employee Replies", items, reason=reason)
     except Exception as e:
         return {"rule_id": 3, "title": "Missed Employee Replies", "status": "error", "error": str(e), "items": [], "count": 0}
@@ -472,12 +472,13 @@ def rule_11_opp_stagnation():
 
 
 def rule_12_overdue_tasks():
-    """All open tasks past their due date (excluding Ava, Rebekah/Nicole design tasks)."""
+    """Open tasks past due date OR open with no due date for 7+ days (excluding Ava, Rebekah/Nicole design tasks)."""
     _, loc = _cfg()
     ava_id     = _uid("AVA")
     rebekah_id = _uid("REBEKAH")
     nicole_id  = _uid("NICOLE")
     exclude    = {uid for uid in [ava_id, rebekah_id, nicole_id] if uid}
+    PENDING_THRESHOLD_DAYS = 15  # flag no-due-date tasks open longer than this
     try:
         all_tasks = _get_tasks()
         now = _now_phoenix().replace(tzinfo=None)
@@ -490,28 +491,60 @@ def rule_12_overdue_tasks():
                 if t.get("assignedTo") in {rebekah_id, nicole_id}:
                     continue
             due_str = t.get("dueDate", "")
-            if not due_str:
-                continue
-            try:
-                due_dt = datetime.strptime(due_str[:10], "%Y-%m-%d")
-                overdue_days = (now - due_dt).days
-            except:
-                continue
-            if overdue_days < 1:
-                continue
             emp = t.get("assignedTo") or "Unassigned"
-            by_employee.setdefault(emp, []).append({
-                "task": t.get("title"),
-                "due": due_str[:10],
-                "overdue_days": overdue_days,
-                "contact_id": t.get("contactId", ""),
-                "id": t.get("id", ""),
-            })
+            if due_str:
+                # Check for overdue tasks (has due date, past due)
+                try:
+                    due_dt = datetime.strptime(due_str[:10], "%Y-%m-%d")
+                    overdue_days = (now - due_dt).days
+                except:
+                    continue
+                if overdue_days < 1:
+                    continue
+                by_employee.setdefault(emp, []).append({
+                    "task": t.get("title"),
+                    "due": due_str[:10],
+                    "overdue_days": overdue_days,
+                    "status": "overdue",
+                    "contact_id": t.get("contactId", ""),
+                    "id": t.get("id", ""),
+                })
+            else:
+                # Check for pending tasks (no due date, open too long)
+                created_str = t.get("dateAdded", "") or t.get("createdAt", "")
+                if not created_str:
+                    continue
+                try:
+                    created_dt = datetime.strptime(created_str[:10], "%Y-%m-%d")
+                    open_days = (now - created_dt).days
+                except:
+                    continue
+                if open_days < PENDING_THRESHOLD_DAYS:
+                    continue
+                by_employee.setdefault(emp, []).append({
+                    "task": t.get("title"),
+                    "due": "No due date",
+                    "overdue_days": open_days,
+                    "status": "pending_no_due_date",
+                    "contact_id": t.get("contactId", ""),
+                    "id": t.get("id", ""),
+                })
+        overdue_count = 0
+        pending_count = 0
         for emp, emp_tasks in by_employee.items():
             emp_tasks.sort(key=lambda x: x["overdue_days"], reverse=True)
+            overdue_count  += sum(1 for t in emp_tasks if t.get("status") == "overdue")
+            pending_count  += sum(1 for t in emp_tasks if t.get("status") == "pending_no_due_date")
             items.append({"employee_id": emp, "task_count": len(emp_tasks), "tasks": emp_tasks[:5]})
-        reason = (f"{len(items)} employee(s) have tasks past their due date."
-                  if items else "No employee tasks are past their due date.")
+        if items:
+            parts = []
+            if overdue_count:
+                parts.append(f"{overdue_count} task(s) past their due date")
+            if pending_count:
+                parts.append(f"{pending_count} task(s) open 15+ days with no due date set")
+            reason = f"{len(items)} employee(s) flagged — {' and '.join(parts)}."
+        else:
+            reason = "No overdue tasks and no tasks left open without a due date for more than 15 days."
         return _finding(12, "Employee Tasks Overdue", items, reason=reason)
     except Exception as e:
         return {"rule_id": 12, "title": "Employee Tasks Overdue", "status": "error", "error": str(e), "items": [], "count": 0}
