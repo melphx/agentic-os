@@ -79,5 +79,22 @@ export async function POST(req: NextRequest) {
     duration_ms:   data.duration_ms || 0,
   })
 
+  // Forward to N8N email webhook (fire-and-forget)
+  const n8nWebhook = process.env.GHL_MONITOR_N8N_WEBHOOK
+  if (n8nWebhook) {
+    fetch(n8nWebhook, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        run_at:       run.run_at,
+        status:       run.status,
+        summary:      run.summary,
+        duration_ms:  run.duration_ms,
+        triggered_by: run.triggered_by,
+        findings:     data.findings || [],
+      }),
+    }).catch((e: any) => console.error('[ghl-monitor] N8N webhook error:', e.message))
+  }
+
   return NextResponse.json({ ok: true, run })
 }
