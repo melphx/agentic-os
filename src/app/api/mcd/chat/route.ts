@@ -51,7 +51,15 @@ function spawnPython(
          'GSC_SITE_URL','GSC_SA_JSON',
          'GTM_ACCOUNT_ID','GTM_CONTAINER_ID','GTM_SA_JSON',
          'INITIATIVES_DOC_ID','INITIATIVES_SA_JSON',
-         'CALL_FEEDBACK_SHEET_ID','CALL_FEEDBACK_SA_JSON'].includes(k)
+         'CALL_FEEDBACK_SHEET_ID','CALL_FEEDBACK_SA_JSON',
+         'SPEND_SHEET_ID','SPEND_SA_JSON',
+         'SURVEY_SHEET_ID','SURVEY_SA_JSON',
+         'FIREFLIES_API_KEY',
+         'GOOGLE_ADS_DEVELOPER_TOKEN','GOOGLE_ADS_CUSTOMER_ID',
+         'GOOGLE_ADS_LOGIN_CUSTOMER_ID','GOOGLE_ADS_IMPERSONATE',
+         'GOOGLE_ADS_SA_JSON','GOOGLE_ADS_CLIENT_ID',
+         'GOOGLE_ADS_CLIENT_SECRET','GOOGLE_ADS_REFRESH_TOKEN',
+         'GOOGLE_ADS_API_VERSION'].includes(k)
       )
     ) as NodeJS.ProcessEnv
 
@@ -747,6 +755,10 @@ async function fetchNonGHLData(message: string, dc: ReturnType<typeof buildDateC
   const wantsInit   = /initiative|priorit|focus|jeremy|goal|project|quarter/i.test(message)
   const wantsWP     = /wordpress|blog|post|content|publish|rank.?math/i.test(message)
   const wantsGTM    = /\bgtm\b|tag manager|trigger|pixel|tracking/i.test(message)
+  const wantsSpend  = /\bspend\b|budget|marketing cost|ad cost|monthly spend|how much.*spend|spend.*month|channel.*cost|cost.*channel/i.test(message)
+  const wantsGAds   = /google ads|gads|\bppc\b|paid search|ad campaign|ad group|\broas\b|\bcpc\b|google ad spend/i.test(message)
+  const wantsSurvey = /survey|client satisfaction|design client survey|\bnps\b|client.*feedback|feedback.*client|client.*rating/i.test(message)
+  const wantsFF     = /fireflies|meeting transcript|\btranscript\b|meeting recording|proposal meeting|in.?home.*meeting|meeting.*notes/i.test(message)
   const isGeneral   = /focus|today|summary|overview|how.?are|status|update|brief|this week|week|morning/i.test(message)
 
   const tasks: Array<{ label: string; fn: () => Promise<string> }> = []
@@ -765,6 +777,18 @@ async function fetchNonGHLData(message: string, dc: ReturnType<typeof buildDateC
 
   if (wantsGTM)
     tasks.push({ label: 'GTM', fn: () => callPython('gtm_client.py', []) })
+
+  if (wantsSpend)
+    tasks.push({ label: 'SPEND', fn: () => callPython('spend_client.py', ['months']) })
+
+  if (wantsGAds)
+    tasks.push({ label: 'GADS', fn: () => callPython('gads_client.py', ['status']) })
+
+  if (wantsSurvey)
+    tasks.push({ label: 'SURVEY', fn: () => callPython('survey_client.py', ['ranked']) })
+
+  if (wantsFF)
+    tasks.push({ label: 'FIREFLIES', fn: () => callPython('fireflies_client.py', ['meetings', '--from', dc.lastMondayStr, '--to', dc.todayStr, '--type', 'all']) })
 
   if (tasks.length === 0) return []
 
@@ -1162,7 +1186,55 @@ Method 2 — Pipeline opportunity count (fallback if tag filter fails or returns
   Call ghl_search_opportunities for Pipeline #01 (JvgkifSKMnS7tzI65pqK) AND Pipeline #02 (V2dwMtKIiCz6f7saVAhS).
   Filter by date range (date/endDate in MM-DD-YYYY format). Count total open opportunities created that week across both pipelines.
   This is reliable because every new lead gets an opportunity created in one of these two pipelines.
-  Do NOT count Pipeline #03+ opportunities — those are downstream of the initial lead entry.`
+  Do NOT count Pipeline #03+ opportunities — those are downstream of the initial lead entry.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MARKETING SPEND (spend_client.py)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Source: Google Sheet — PHR marketing spend tracker (read-only).
+Pre-fetched as SPEND DATA when spend/budget questions are asked.
+Data: monthly totals by channel (Google Ads, LSA, Angi, etc.).
+When SPEND DATA is in context: read the rows directly — each has channel, amount, month.
+Commands if you need more detail:
+  months → all months + totals
+  spend --month YYYY-MM → per-channel breakdown for one month
+  mapping → channel-to-category mapping
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+GOOGLE ADS (gads_client.py)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Source: Google Ads API — PHR's ad account (read-only).
+Pre-fetched as GADS DATA when Google Ads/PPC questions are asked.
+Data: account status, active campaigns, impression/click/spend metrics.
+When GADS DATA is in context: summarise campaign health — active count, total spend, top performers.
+Commands:
+  status → account health and active campaign count
+  campaigns --from YYYY-MM-DD --to YYYY-MM-DD → campaign-level metrics
+  spend --from YYYY-MM-DD --to YYYY-MM-DD → daily spend totals
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DESIGN CLIENT SURVEY (survey_client.py)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Source: Google Sheet — PHR Design Client Survey responses (read-only).
+Pre-fetched as SURVEY DATA when survey/client satisfaction questions are asked.
+Data: ranked questions by average score, verbatim comments.
+When SURVEY DATA is in context: report scores per question; flag anything below 4.0/5.0.
+Commands:
+  ranked → all questions ranked by avg score
+  verbatims → open-ended client comments
+  summary → one-line overall summary
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FIREFLIES MEETING TRANSCRIPTS (fireflies_client.py)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Source: Fireflies.ai API — PHR meeting recordings (read-only).
+Pre-fetched as FIREFLIES DATA (last week's meetings) when transcript questions are asked.
+Data: meeting list with title, date, attendees, duration, and AI summary.
+When FIREFLIES DATA is in context: list meetings found; summarise key decisions and action items.
+Commands:
+  meetings --from YYYY-MM-DD --to YYYY-MM-DD --type [proposal|inhome|all] → meeting list
+  monthly --month YYYY-MM --type [...] → monthly rollup
+  transcript --id MEETING_ID → full transcript text (use for deep dives)`
 
   const nonGHL = nonGHLContext.trim()
     ? `\n\nPRE-FETCHED DATA (use directly — do not say you don't have it):\n${nonGHLContext}`
@@ -1246,6 +1318,10 @@ export async function POST(req: NextRequest) {
   if (nonGHLContext.includes('GA4'))         sourcesHit.add('GA4')
   if (nonGHLContext.includes('GSC'))         sourcesHit.add('GSC')
   if (nonGHLContext.includes('INITIATIVES')) sourcesHit.add('INITIATIVES')
+  if (nonGHLContext.includes('SPEND'))       sourcesHit.add('SPEND')
+  if (nonGHLContext.includes('GADS'))        sourcesHit.add('GADS')
+  if (nonGHLContext.includes('SURVEY'))      sourcesHit.add('SURVEY')
+  if (nonGHLContext.includes('FIREFLIES'))   sourcesHit.add('FIREFLIES')
   // SEO Utils badge is added dynamically in the tool loop when seo_* tools fire
 
   // ── OpenAI tool-calling loop (max 3 rounds) ──────────────────────────

@@ -8,7 +8,7 @@ Echoes its query + date range, includes GHL IDs for joining to ghl-reader,
 excludes emails/phones/recording links, loud failure on any error (exit 1).
 NOTE: rows discuss named team members; reports built on this go ONLY to the
 private MCD Reports space (Sensitive Output Rule)."""
-import argparse, json, os, sys, urllib.request, urllib.parse
+import argparse, json, os, re, sys, urllib.request, urllib.parse
 from datetime import datetime, date, timedelta
 
 TABS = {
@@ -273,6 +273,183 @@ def cmd_trend(args):
     _envelope("trend", {"tab": args.tab, "weeks": args.weeks}, weeks, gaps=[DATE_NOTE])
 
 
+
+# ---------------------------------------------------------------- in-home assessment
+IN_HOME_TAB_HINT = "rebekah"
+_SECTIONS = ("Summary of the Call", "Summary of the In-Home Evaluation", "Strengths Observed",
+             "Areas for Improvement", "Customer Profile", "Recommendations for PHR Team",
+             "Potential Recommendations for PHR Team", "Follow-up Action Items")
+
+
+def _strip_html(t):
+    """The analysis cells are HTML. Flatten to readable text without losing structure."""
+    import html as _html
+    t = re.sub(r"(?i)</(p|div|li|h[1-6])>", "\n", t or "")
+    t = re.sub(r"(?i)<br\s*/?>", "\n", t)
+    t = re.sub(r"<[^>]+>", "", t)
+    t = _html.unescape(t)
+    t = re.sub(r"[ \t]+", " ", t)
+    t = re.sub(r"\n{3,}", "\n\n", t)
+    return t.strip()
+
+
+def _mdy(v):
+    """This tab stores Date Added as M/D/Y. Also accept ISO and Y/M/D so a format change does not
+    silently drop rows (that failure has bitten this project twice)."""
+    t = str(v or "").strip()
+    if not t:
+        return None
+    m = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})", t)
+    if m:
+        y, mo, d = m.group(1), m.group(2), m.group(3)
+    else:
+        m = re.match(r"^(\d{4})/(\d{1,2})/(\d{1,2})", t)
+        if m:
+            y, mo, d = m.group(1), m.group(2), m.group(3)
+        else:
+            m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})", t)
+            if not m:
+                return None
+            mo, d, y = m.group(1), m.group(2), m.group(3)
+    try:
+        return "%s-%02d-%02d" % (y, int(mo), int(d))
+    except ValueError:
+        return None
+
+
+def _footer(text):
+    """Parse the DATA_START footer: Overall Rating / Book Offered / Book Accepted."""
+    out = {}
+    tail = text.split("DATA_START")[-1] if "DATA_START" in text else ""
+    for key, pat in (("rating", r"Overall Rating:\s*([0-9.]+)"),
+                     ("book_offered", r"Book Offered:\s*([A-Za-z/]+)"),
+                     ("book_accepted", r"Book Accepted:\s*([A-Za-z/]+)")):
+        m = re.search(pat, tail, re.I)
+        if m:
+            out[key] = m.group(1).strip()
+    return out
+
+
+def _sections(text):
+    """Split the flattened analysis into its named sections."""
+    found, positions = {}, []
+    for name in _SECTIONS:
+        i = text.find(name)
+        if i >= 0:
+            positions.append((i, name))
+    positions.sort()
+    for k, (i, name) in enumerate(positions):
+        end = positions[k + 1][0] if k + 1 < len(positions) else len(text)
+        body = text[i + len(name):end].lstrip(" :\n")
+        body = body.split("DATA_START")[0].strip()
+        if body:
+            found[name] = body
+    return found
+
+
+def cmd_inhome(args):
+    """A month of Rebekah's in-home evaluations: metrics plus the FULL evaluator write-ups.
+
+    Deliberately does its own fetch rather than using _load_tab, because _load_tab reads only
+    A/D/H/I and truncates the analysis to 1800 chars, while this needs the whole write-up
+    (mean 4,944 chars) plus transcript presence and the book columns.
+    """
+    tab = TABS["rebekah"]
+    cols = _batch_get([f"{tab}!A2:A", f"{tab}!D2:D", f"{tab}!F2:F", f"{tab}!G2:G",
+                       f"{tab}!H2:H", f"{tab}!I2:I", f"{tab}!J2:J", f"{tab}!K2:K"])
+    names, dates, trans, analy, rates, ghls, bo, ba = cols
+
+    def at(c, i):
+        return (c[i] if i < len(c) else "") or ""
+
+    n = max(len(x) for x in cols) if cols else 0
+    picked, all_dates, unparsed = [], [], 0
+    for i in range(n):
+        raw_date = at(dates, i)
+        d = _mdy(raw_date)
+        if not d:
+            if str(raw_date).strip():
+                unparsed += 1
+            continue
+        all_dates.append(d)
+        if args.month and not d.startswith(args.month):
+            continue
+        raw_an = at(analy, i)
+        flat = _strip_html(raw_an)
+        foot = _footer(raw_an)
+        rating = foot.get("rating") or str(at(rates, i)).strip().replace("/5", "")
+        try:
+            rating = float(rating)
+        except (TypeError, ValueError):
+            rating = None
+        rec = {
+            "label": "in-home on %s" % d,
+            "date": d,
+            "sheet_row": i + 2,
+            "ghl_id": at(ghls, i).strip() or None,
+            "rating": rating,
+            "book_offered": at(bo, i).strip() or foot.get("book_offered") or None,
+            "book_accepted": at(ba, i).strip() or foot.get("book_accepted") or None,
+            "has_transcript": len(at(trans, i)) > 200,
+            "analysis_chars": len(flat),
+        }
+        if not args.metrics_only:
+            rec["sections"] = _sections(flat)
+        picked.append(rec)
+    picked.sort(key=lambda x: x["date"])
+
+    rated = [p["rating"] for p in picked if p["rating"] is not None]
+    offered = [p for p in picked if (p["book_offered"] or "").lower() in ("yes", "no")]
+    yes = [p for p in offered if (p["book_offered"] or "").lower() == "yes"]
+    acc = [p for p in picked if (p["book_accepted"] or "").lower() in ("yes", "no")]
+    acc_yes = [p for p in acc if (p["book_accepted"] or "").lower() == "yes"]
+    extra = {"aggregate": {
+        "appointments": len(picked),
+        "mean_rating": round(sum(rated) / len(rated), 2) if rated else None,
+        "rating_range": [min(rated), max(rated)] if rated else None,
+        "with_transcript": sum(1 for p in picked if p["has_transcript"]),
+        "book_offered_tracked": len(offered),
+        "book_offered_yes": len(yes),
+        "book_accepted_tracked": len(acc),
+        "book_accepted_yes": len(acc_yes)}}
+
+    gaps = [DATE_NOTE]
+    if len(picked) < 12:
+        gaps.append("VOLUME: %d in-home evaluations for %s. This tab averages about 6 a month "
+                    "across 2026, so treat a monthly view as a QUALITATIVE themes review, not "
+                    "statistics. Do NOT publish a rating trend or call any change significant."
+                    % (len(picked), args.month or "all time"))
+    if extra["aggregate"]["book_offered_tracked"] < len(picked):
+        gaps.append("Book Offered / Book Accepted are filled on only %d of %d rows here (10 of 51 "
+                    "tab-wide). Where blank it means NOT RECORDED, never No."
+                    % (extra["aggregate"]["book_offered_tracked"], len(picked)))
+    if extra["aggregate"]["with_transcript"] < len(picked):
+        gaps.append("Transcripts exist for %d of %d of these (13 of 51 tab-wide, essentially only "
+                    "since late July). The evaluator write-up is present on every row and is the "
+                    "reliable basis; transcripts are for deep dives only."
+                    % (extra["aggregate"]["with_transcript"], len(picked)))
+    if unparsed:
+        gaps.append("%d row(s) had an unreadable Date Added and were skipped." % unparsed)
+    gaps.append("Ratings cluster very high (many 4.8 and 5.0), so the mean is a weak signal. Read "
+                "'Areas for Improvement' across the month for the real coaching material.")
+    gaps.append("The evaluator scores against PHR's own in-home SOP: entry protocol, framing the "
+                "Early Estimator, offering the free remodeling book, asking the closing question, "
+                "booking the Video Proposal Review, 3D renderings, in-house craftsmen. That makes "
+                "this a genuine rubric, unlike the Fireflies summaries used for proposal reviews.")
+    gaps.append("CONSULTANT ATTRIBUTION WARNING: this tab is NAMED after Rebekah but she is "
+                "NOT named as the consultant in any of the 51 analyses. 43 of 51 say only "
+                "the consultant; the ones that do name a person say Landon, Nicole, Justin, "
+                "Ben or Chris. These in-homes are run by MULTIPLE consultants, so this data "
+                "CANNOT be used to judge how Rebekah specifically is doing. For Rebekah, use "
+                "the Fireflies proposal reviews, where the host email confirms she ran them. "
+                "Report in-home findings as TEAM-level SOP adherence, never as one person "
+                "performance.")
+    gaps.append("Never print the homeowner's name; refer to an appointment by its label.")
+    if all_dates:
+        gaps.append("Tab covers %s to %s; newest row %s. Check staleness before reporting a "
+                    "'past month'." % (min(all_dates), max(all_dates), max(all_dates)))
+    _envelope("inhome", {"tab": "rebekah", "month": args.month}, picked, gaps=gaps, extra=extra)
+
 def main():
     p = argparse.ArgumentParser(description="Call feedback sheet reader (read-only)")
     sub = p.add_subparsers(dest="command", required=True)
@@ -286,6 +463,11 @@ def main():
         if name == "summaries":
             sp.add_argument("--head", type=int, default=400)
             sp.add_argument("--improv", type=int, default=500)
+    sp = sub.add_parser("inhome", help="a month of Rebekah in-home evaluations")
+    sp.add_argument("--month", default=None, help="YYYY-MM; omit for all rows")
+    sp.add_argument("--metrics-only", dest="metrics_only", action="store_true",
+                    help="omit the analysis sections, return metrics only")
+
     sp = sub.add_parser("trend")
     sp.add_argument("--weeks", type=int, default=8)
     sp.add_argument("--tab", choices=list(TABS), default="justin")
@@ -298,7 +480,8 @@ def main():
     args = p.parse_args()
     try:
         {"ratings": cmd_ratings, "feedback": cmd_feedback, "trend": cmd_trend,
-         "transcript": cmd_transcript, "summaries": cmd_summaries}[args.command](args)
+         "transcript": cmd_transcript, "summaries": cmd_summaries,
+         "inhome": cmd_inhome}[args.command](args)
     except CFError as e:
         _die(e)
     except Exception as e:

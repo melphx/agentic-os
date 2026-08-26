@@ -413,6 +413,10 @@ async function callMcdConnector(name: string, args: string[]): Promise<string> {
     initiatives:  { script: 'initiatives_client.py',   venv: true  },
     calls:        { script: 'calls_client.py',         venv: true  },
     'sales-sheet':{ script: 'sales_sheet_client.py',   venv: true  },
+    spend:        { script: 'spend_client.py',         venv: false },
+    gads:         { script: 'gads_client.py',          venv: false },
+    survey:       { script: 'survey_client.py',        venv: false },
+    fireflies:    { script: 'fireflies_client.py',     venv: false },
   }
 
   const cfg = map[name]

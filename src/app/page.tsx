@@ -1374,6 +1374,10 @@ const SOURCE_COLORS: Record<string, { bg: string; color: string; border: string 
   SEO:         { bg: 'rgba(168,85,247,0.1)',  color: '#c084fc', border: 'rgba(168,85,247,0.25)' },
   CALLS:       { bg: 'rgba(249,115,22,0.1)',  color: '#fb923c', border: 'rgba(249,115,22,0.25)' },
   INITIATIVES: { bg: 'rgba(236,72,153,0.1)',  color: '#f472b6', border: 'rgba(236,72,153,0.25)' },
+  SPEND:       { bg: 'rgba(20,184,166,0.1)',  color: '#2dd4bf', border: 'rgba(20,184,166,0.25)' },
+  GADS:        { bg: 'rgba(250,204,21,0.1)',  color: '#fcd34d', border: 'rgba(250,204,21,0.25)' },
+  SURVEY:      { bg: 'rgba(244,63,94,0.1)',   color: '#fb7185', border: 'rgba(244,63,94,0.25)'  },
+  FIREFLIES:   { bg: 'rgba(139,92,246,0.1)',  color: '#a78bfa', border: 'rgba(139,92,246,0.25)' },
 }
 
 // Inline bold/code renderer used in table cells and paragraph text
