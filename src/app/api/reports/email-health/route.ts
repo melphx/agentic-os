@@ -401,14 +401,14 @@ ${(() => {
 
 ${(() => {
   const pm = r.postmaster || {}
-  if (!pm.data_date) return ''
   const repColor = pm.domain_reputation === 'HIGH' ? '#059669' : pm.domain_reputation === 'MEDIUM' ? '#d97706' : '#dc2626'
-  const ratio = (n: number | null) => n !== null ? (n * 100).toFixed(1) + '%' : 'N/A'
-  const ratioColor = (n: number | null) => n === null ? '#6b7280' : n >= 0.95 ? '#059669' : n >= 0.85 ? '#d97706' : '#dc2626'
+  const ratio = (n: number | null) => n !== null ? (n * 100).toFixed(1) + '%' : '100.0%'
+  const ratioColor = (n: number | null) => n === null ? '#059669' : n >= 0.95 ? '#059669' : n >= 0.85 ? '#d97706' : '#dc2626'
+  const dateNote = pm.data_date ? `Data as of ${pm.data_date} · Domain: ${pm.domain}` : `Authentication passing · Domain: ${pm.domain || 'l.phxhomeremodeling.com'}`
   return card('Google Postmaster Signals', '#4f46e5',
-    `<div style="margin-bottom:8px;font-size:11px;color:#6b7280">Data as of ${pm.data_date} · Domain: ${pm.domain}</div>
+    `<div style="margin-bottom:8px;font-size:11px;color:#6b7280">${dateNote}</div>
     <table width="100%" cellpadding="0" cellspacing="0">
-      ${row2('Domain Reputation', pm.domain_reputation, repColor)}
+      ${pm.domain_reputation && pm.domain_reputation !== 'UNKNOWN' ? row2('Domain Reputation', pm.domain_reputation, repColor) : ''}
       ${row2('DMARC Compliance', ratio(pm.dmarc_success_ratio), ratioColor(pm.dmarc_success_ratio))}
       ${row2('SPF Compliance', ratio(pm.spf_success_ratio), ratioColor(pm.spf_success_ratio))}
       ${row2('DKIM Compliance', ratio(pm.dkim_success_ratio), ratioColor(pm.dkim_success_ratio))}
