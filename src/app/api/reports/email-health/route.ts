@@ -583,6 +583,10 @@ export async function GET(req: NextRequest) {
     const cached = getEmailHealthReport(month)
     if (!cached) return NextResponse.json({ error: 'No report found for this month — generate it first' }, { status: 404 })
     const report = JSON.parse(cached.report_json)
+    // Always inject fresh postmaster data when sending — cached JSON may predate the integration
+    if (!report.postmaster?.data_date) {
+      try { report.postmaster = await fetchPostmasterData() } catch {}
+    }
     const subject = `Email Health Report — ${report.month_label || month}`
     const html = buildReportHTML(report)
     try {
