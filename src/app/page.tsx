@@ -4357,10 +4357,10 @@ function EmailHealthReportView() {
           {Array.isArray(report.analysis?.actions_new_contacts) && report.analysis.actions_new_contacts.length > 0 && (
           <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
             <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:12 }}>Actions To Take — New Leads Added &amp; Emailed in {report.month_label?.split(' ')[0]} ({report.new_leads?.mailed?.toLocaleString()} contacts)</div>
-            {report.analysis.actions_new_contacts.map((a:string,i:number)=>(
+            {report.analysis.actions_new_contacts.map((a:any,i:number)=>(
               <div key={i} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid rgba(99,102,241,0.06)', alignItems:'flex-start' }}>
-                <span style={{ flexShrink:0, marginTop:1 }}><ActionBadge level="medium" /></span>
-                <span style={{ color:'rgba(148,163,184,0.75)', fontSize:13, lineHeight:1.55 }}>{a}</span>
+                <span style={{ flexShrink:0, marginTop:1 }}><ActionBadge level={a?.priority||"medium"} /></span>
+                <span style={{ color:'rgba(148,163,184,0.75)', fontSize:13, lineHeight:1.55 }}>{typeof a === 'string' ? a : a.text}</span>
               </div>
             ))}
           </div>
@@ -4370,10 +4370,10 @@ function EmailHealthReportView() {
           {Array.isArray(report.analysis?.actions_existing_contacts) && report.analysis.actions_existing_contacts.length > 0 && (
           <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
             <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:12 }}>Actions To Take — Existing Contacts Emailed in {report.month_label?.split(' ')[0]} ({report.existing?.mailed?.toLocaleString()} contacts)</div>
-            {report.analysis.actions_existing_contacts.map((a:string,i:number)=>(
+            {report.analysis.actions_existing_contacts.map((a:any,i:number)=>(
               <div key={i} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid rgba(99,102,241,0.06)', alignItems:'flex-start' }}>
-                <span style={{ flexShrink:0, marginTop:1 }}><ActionBadge level="high" /></span>
-                <span style={{ color:'rgba(148,163,184,0.75)', fontSize:13, lineHeight:1.55 }}>{a}</span>
+                <span style={{ flexShrink:0, marginTop:1 }}><ActionBadge level={a?.priority||"high"} /></span>
+                <span style={{ color:'rgba(148,163,184,0.75)', fontSize:13, lineHeight:1.55 }}>{typeof a === 'string' ? a : a.text}</span>
               </div>
             ))}
           </div>
@@ -4383,10 +4383,10 @@ function EmailHealthReportView() {
           {Array.isArray(report.analysis?.actions_maintenance) && report.analysis.actions_maintenance.length > 0 && (
           <div style={{ background:'rgba(15,20,35,0.9)', border:'1px solid rgba(99,102,241,0.12)', borderRadius:14, padding:'16px 20px', marginBottom:12 }}>
             <div style={{ color:'#a5b4fc', fontWeight:700, fontSize:10, letterSpacing:'0.08em', textTransform:'uppercase' as const, marginBottom:12 }}>Maintenance</div>
-            {report.analysis.actions_maintenance.map((a:string,i:number)=>(
+            {report.analysis.actions_maintenance.map((a:any,i:number)=>(
               <div key={i} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid rgba(99,102,241,0.06)', alignItems:'flex-start' }}>
-                <span style={{ flexShrink:0, marginTop:1 }}><ActionBadge level="low" /></span>
-                <span style={{ color:'rgba(148,163,184,0.75)', fontSize:13, lineHeight:1.55 }}>{a}</span>
+                <span style={{ flexShrink:0, marginTop:1 }}><ActionBadge level={a?.priority||"low"} /></span>
+                <span style={{ color:'rgba(148,163,184,0.75)', fontSize:13, lineHeight:1.55 }}>{typeof a === 'string' ? a : a.text}</span>
               </div>
             ))}
           </div>
@@ -4676,21 +4676,21 @@ ${Array.isArray(report.analysis?.problems)&&report.analysis.problems.length?`
 
 <!-- ACTIONS -->
 <div class="card"><div class="title">Actions — New Contacts</div>
-  ${(report.analysis?.actions_new_contacts||[]).map((a:string)=>`
+  ${(report.analysis?.actions_new_contacts||[]).map((a:any)=>`
     <div style="padding:8px 0;border-bottom:1px solid rgba(99,102,241,.06)">
-      <span style="color:rgba(148,163,184,.8);font-size:13px">• ${a}</span>
+      <span style="color:rgba(148,163,184,.8);font-size:13px">• ${typeof a === 'string' ? a : a.text}</span>
     </div>`).join('')}
 </div>
 <div class="card"><div class="title">Actions — Existing Contacts</div>
-  ${(report.analysis?.actions_existing_contacts||[]).map((a:string)=>`
+  ${(report.analysis?.actions_existing_contacts||[]).map((a:any)=>`
     <div style="padding:8px 0;border-bottom:1px solid rgba(99,102,241,.06)">
-      <span style="color:rgba(148,163,184,.8);font-size:13px">• ${a}</span>
+      <span style="color:rgba(148,163,184,.8);font-size:13px">• ${typeof a === 'string' ? a : a.text}</span>
     </div>`).join('')}
 </div>
 <div class="card"><div class="title">Actions — Maintenance</div>
-  ${(report.analysis?.actions_maintenance||[]).map((a:string)=>`
+  ${(report.analysis?.actions_maintenance||[]).map((a:any)=>`
     <div style="padding:8px 0;border-bottom:1px solid rgba(99,102,241,.06)">
-      <span style="color:rgba(148,163,184,.8);font-size:13px">• ${a}</span>
+      <span style="color:rgba(148,163,184,.8);font-size:13px">• ${typeof a === 'string' ? a : a.text}</span>
     </div>`).join('')}
 </div>
 
