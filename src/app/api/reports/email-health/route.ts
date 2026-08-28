@@ -3,6 +3,7 @@ import OpenAI from 'openai'
 import {
   getEmailHealthBaseline, getAllEmailHealthBaselines, saveEmailHealthBaseline,
   saveEmailHealthReport, getEmailHealthReport, getClosestSnapshot, getAllSnapshots,
+  getGoogleOAuth, getPostmasterOAuth, savePostmasterTokens,
 } from '@/lib/db'
 
 const client = new OpenAI({
@@ -119,6 +120,63 @@ function monthLabel(month: string) {
   return new Date(parseInt(y), parseInt(m) - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
 }
 
+// ── Postmaster helper (reuses OAuth stored in DB — no internal HTTP) ─────────
+async function fetchPostmasterData(): Promise<{
+  domain: string; domain_reputation: string; spam_rate: number | null;
+  dkim_success_ratio: number | null; spf_success_ratio: number | null;
+  dmarc_success_ratio: number | null; data_date: string | null;
+  ip_reputations: any[]; delivery_errors: any[]; error?: string;
+}> {
+  const fallback = { domain: '', domain_reputation: 'UNKNOWN', spam_rate: null, dkim_success_ratio: null, spf_success_ratio: null, dmarc_success_ratio: null, data_date: null, ip_reputations: [], delivery_errors: [] }
+  try {
+    const pm = getPostmasterOAuth()
+    if (!pm?.refresh_token) return { ...fallback, error: 'Postmaster not connected' }
+
+    let token = pm.access_token
+    if (!token || pm.expires_at <= Date.now() + 300000) {
+      const creds = getGoogleOAuth()
+      if (!creds) return { ...fallback, error: 'No Google credentials' }
+      const res = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: pm.refresh_token, client_id: creds.client_id, client_secret: creds.client_secret }),
+      })
+      const data = await res.json() as Record<string, any>
+      if (!data.access_token) return { ...fallback, error: 'Token refresh failed' }
+      savePostmasterTokens(pm.refresh_token, data.access_token, Date.now() + (data.expires_in || 3600) * 1000)
+      token = data.access_token
+    }
+
+    const pmDomain = process.env.POSTMASTER_DOMAIN || process.env.GHL_DOMAIN || 'l.phxhomeremodeling.com'
+    const headers = { Authorization: `Bearer ${token}` }
+    const today = new Date()
+    const dates = Array.from({ length: 5 }, (_, i) => {
+      const d = new Date(today); d.setDate(d.getDate() - i)
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+    })
+    const statsResults = await Promise.all(dates.map(async date => {
+      const url = `https://gmailpostmastertools.googleapis.com/v1/domains/${encodeURIComponent(pmDomain)}/trafficStats/${date.replace(/-/g,'')}`
+      const res = await fetch(url, { headers, signal: AbortSignal.timeout(8000) })
+      if (!res.ok) return null
+      return await res.json() as Record<string, any>
+    }))
+    const latestStats = statsResults.find(s => s !== null) as Record<string, any> | null
+    return {
+      domain:              pmDomain,
+      domain_reputation:   latestStats?.domainReputation || 'UNKNOWN',
+      spam_rate:           latestStats?.userReportedSpamRatioHistory?.[0]?.spamRatio || latestStats?.spamRateHistory?.[0]?.spamRate || null,
+      dkim_success_ratio:  latestStats?.dkimSuccessRatio  ?? null,
+      spf_success_ratio:   latestStats?.spfSuccessRatio   ?? null,
+      dmarc_success_ratio: latestStats?.dmarcSuccessRatio ?? null,
+      data_date:           latestStats ? dates[statsResults.indexOf(latestStats)] : null,
+      ip_reputations:      latestStats?.ipReputations     || [],
+      delivery_errors:     latestStats?.deliveryErrors    || [],
+    }
+  } catch (e: any) {
+    return { ...fallback, error: e.message }
+  }
+}
+
 // ── Server-side HTML builder for email delivery ───────────────────────────
 function buildReportHTML(r: any): string {
   const sc   = r.strict_score >= 800 ? '#059669' : r.strict_score >= 650 ? '#0891b2' : r.strict_score >= 500 ? '#d97706' : r.strict_score >= 300 ? '#dc2626' : '#991b1b'
@@ -182,9 +240,21 @@ function buildReportHTML(r: any): string {
     ).join('')
   })()
 
-  // Bullet list helper
-  const bullets = (items: string[], color: string) => (Array.isArray(items) && items.length)
-    ? items.map(i=>`<tr><td style="padding:4px 0;vertical-align:top"><span style="color:${color};font-weight:700;font-size:14px;line-height:1">•</span></td><td style="padding:4px 0 4px 8px;font-size:13px;color:#374151;line-height:1.6">${i}</td></tr>`).join('')
+  // Priority badge
+  const priorityBadge = (p: string) => {
+    const c: Record<string,string> = { high: '#dc2626', medium: '#d97706', low: '#6b7280' }
+    const bg: Record<string,string> = { high: '#fef2f2', medium: '#fffbeb', low: '#f9fafb' }
+    const col = c[p] || '#6b7280'; const bgCol = bg[p] || '#f9fafb'
+    return `<span style="font-size:9px;font-weight:700;text-transform:uppercase;background:${bgCol};color:${col};border:1px solid ${col}40;border-radius:3px;padding:1px 5px;margin-left:6px;vertical-align:middle">${p}</span>`
+  }
+
+  // Bullet list helper — handles both string[] and {text, priority}[]
+  const bullets = (items: any[], color: string) => (Array.isArray(items) && items.length)
+    ? items.map(i => {
+        const text = typeof i === 'string' ? i : (i.text || '')
+        const priority = typeof i === 'object' && i.priority ? i.priority : null
+        return `<tr><td style="padding:4px 0;vertical-align:top"><span style="color:${color};font-weight:700;font-size:14px;line-height:1">•</span></td><td style="padding:4px 0 4px 8px;font-size:13px;color:#374151;line-height:1.6">${text}${priority ? priorityBadge(priority) : ''}</td></tr>`
+      }).join('')
     : ''
 
   return `<!DOCTYPE html>
@@ -231,7 +301,7 @@ ${summaryHtml ? card('Executive Summary', '#0891b2', summaryHtml) : ''}
 ${Array.isArray(an.problems)&&an.problems.length ? card('⚠️ Problems Costing You Revenue', '#dc2626',
   an.problems.map((p:any)=>`
     <div style="padding:10px 0;border-bottom:1px solid #fef2f2">
-      <div style="font-size:13px;font-weight:700;color:#111827;margin-bottom:3px">${p.title||''}</div>
+      <div style="font-size:13px;font-weight:700;color:#111827;margin-bottom:3px">${p.title||''}${p.priority ? priorityBadge(p.priority) : ''}</div>
       <div style="font-size:12px;color:#374151;line-height:1.6">${p.description||''}</div>
     </div>`).join('')
 ) : ''}
@@ -286,6 +356,67 @@ ${lst.total ? card('List Health — Live Snapshot', '#d97706',
   </table>`
 ) : ''}
 
+${(() => {
+  const mx = r.provider_matrix
+  const pr = r.providers || {}
+  const scn = pr.scanned || 0
+  if (!scn) return ''
+  const prov = (n: number) => scn > 0 ? (n/scn*100).toFixed(1)+'%' : '0%'
+  const provRow = (label: string, data: any, total: number) => {
+    if (!data || !total) return ''
+    const atRisk = (data.slipping||0) + (data.never_engaged||0)
+    const atRiskPct = total > 0 ? (atRisk/total*100).toFixed(0) : '0'
+    const riskColor = parseInt(atRiskPct) >= 50 ? '#dc2626' : parseInt(atRiskPct) >= 30 ? '#d97706' : '#059669'
+    return `<tr>
+      <td style="padding:9px 10px;border-bottom:1px solid #f3f4f6;font-size:13px;font-weight:600;color:#111827">${label}</td>
+      <td style="padding:9px 10px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#374151;text-align:right">${num(total)} (${prov(total)})</td>
+      <td style="padding:9px 10px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#059669;font-weight:700;text-align:right">${num(data.green||0)}</td>
+      <td style="padding:9px 10px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#d97706;font-weight:700;text-align:right">${num(data.slipping||0)}</td>
+      <td style="padding:9px 10px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#dc2626;font-weight:700;text-align:right">${num(data.never_engaged||0)}</td>
+      <td style="padding:9px 10px;border-bottom:1px solid #f3f4f6;font-size:12px;color:${riskColor};font-weight:700;text-align:right">${atRiskPct}% at risk</td>
+    </tr>`
+  }
+  const thStyle = 'font-size:10px;font-weight:700;text-transform:uppercase;color:#6b7280;padding:8px 10px;text-align:right;border-bottom:2px solid #e5e7eb'
+  return card('Provider Health Matrix — Live Snapshot', '#0891b2',
+    `<table style="width:100%;border-collapse:collapse">
+      <tr style="background:#f9fafb">
+        <th style="font-size:10px;font-weight:700;text-transform:uppercase;color:#6b7280;padding:8px 10px;text-align:left;border-bottom:2px solid #e5e7eb">Provider</th>
+        <th style="${thStyle}">Total</th>
+        <th style="${thStyle}">Active</th>
+        <th style="${thStyle}">Slipping</th>
+        <th style="${thStyle}">Never Engaged</th>
+        <th style="${thStyle}">Risk</th>
+      </tr>
+      ${mx ? provRow('Gmail', mx.google, pr.google||0) : ''}
+      ${mx ? provRow('Microsoft', mx.microsoft, pr.microsoft||0) : ''}
+      ${mx ? provRow('Yahoo', mx.yahoo, pr.yahoo||0) : ''}
+      ${mx ? provRow('Other', mx.other, pr.other||0) : ''}
+      <tr style="background:#f9fafb">
+        <td style="padding:8px 10px;font-size:12px;font-weight:700;color:#374151">Total Scanned</td>
+        <td colspan="5" style="padding:8px 10px;font-size:12px;color:#6b7280;text-align:right">${num(scn)} contacts</td>
+      </tr>
+    </table>`
+  )
+})()}
+
+${(() => {
+  const pm = r.postmaster || {}
+  if (!pm.data_date || pm.domain_reputation === 'UNKNOWN') return ''
+  const repColor = pm.domain_reputation === 'HIGH' ? '#059669' : pm.domain_reputation === 'MEDIUM' ? '#d97706' : '#dc2626'
+  const ratio = (n: number | null) => n !== null ? (n * 100).toFixed(1) + '%' : 'N/A'
+  const ratioColor = (n: number | null) => n === null ? '#6b7280' : n >= 0.95 ? '#059669' : n >= 0.85 ? '#d97706' : '#dc2626'
+  return card('Google Postmaster Signals', '#4f46e5',
+    `<div style="margin-bottom:8px;font-size:11px;color:#6b7280">Data as of ${pm.data_date} · Domain: ${pm.domain}</div>
+    <table width="100%" cellpadding="0" cellspacing="0">
+      ${row2('Domain Reputation', pm.domain_reputation, repColor)}
+      ${row2('DMARC Compliance', ratio(pm.dmarc_success_ratio), ratioColor(pm.dmarc_success_ratio))}
+      ${row2('SPF Compliance', ratio(pm.spf_success_ratio), ratioColor(pm.spf_success_ratio))}
+      ${row2('DKIM Compliance', ratio(pm.dkim_success_ratio), ratioColor(pm.dkim_success_ratio))}
+      ${pm.spam_rate !== null ? row2('Spam Rate (User Reported)', (pm.spam_rate * 100).toFixed(4) + '%', pm.spam_rate < 0.001 ? '#059669' : '#dc2626') : ''}
+    </table>`
+  )
+})()}
+
 ${Array.isArray(an.actions_new_contacts)&&an.actions_new_contacts.length ? card('Actions — New Contacts', '#0891b2',
   `<table cellpadding="0" cellspacing="0" style="width:100%">${bullets(an.actions_new_contacts,'#0891b2')}</table>`
 ) : ''}
@@ -297,6 +428,99 @@ ${Array.isArray(an.actions_existing_contacts)&&an.actions_existing_contacts.leng
 ${Array.isArray(an.actions_maintenance)&&an.actions_maintenance.length ? card('Maintenance Actions', '#6b7280',
   `<table cellpadding="0" cellspacing="0" style="width:100%">${bullets(an.actions_maintenance,'#6b7280')}</table>`
 ) : ''}
+
+${(() => {
+  const trend = r.score_trend
+  if (!Array.isArray(trend) || trend.length < 2) return ''
+  const chartW = 620, chartH = 130, padL = 8, padR = 8, padT = 18, padB = 28
+  const innerW = chartW - padL - padR
+  const innerH = chartH - padT - padB
+  const n = trend.length
+  const slotW = innerW / n
+  const barW = Math.max(8, Math.floor(slotW * 0.65))
+  const bars = trend.map((t: any, i: number) => {
+    const x = padL + i * slotW + (slotW - barW) / 2
+    const h = Math.max(4, Math.round((t.strict_score / 999) * innerH))
+    const y = padT + innerH - h
+    const c = t.strict_score >= 800 ? '#059669' : t.strict_score >= 650 ? '#0891b2' : t.strict_score >= 500 ? '#d97706' : '#dc2626'
+    const isLast = i === n - 1
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW}" height="${h.toFixed(1)}" rx="3" fill="${c}" opacity="${isLast ? '1' : '0.55'}"/>
+<text x="${(x + barW/2).toFixed(1)}" y="${(y - 4).toFixed(1)}" text-anchor="middle" font-size="9" fill="${c}" font-weight="${isLast ? '700' : '400'}" font-family="Arial,sans-serif">${t.strict_score}</text>
+<text x="${(x + barW/2).toFixed(1)}" y="${(padT + innerH + 16).toFixed(1)}" text-anchor="middle" font-size="9" fill="${isLast ? '#111827' : '#9ca3af'}" font-weight="${isLast ? '700' : '400'}" font-family="Arial,sans-serif">${t.label}</text>`
+  }).join('\n')
+  return card('12-Month Score Trend', '#6366f1',
+    `<svg width="100%" viewBox="0 0 ${chartW} ${chartH}" xmlns="http://www.w3.org/2000/svg" style="display:block;overflow:visible">
+      <line x1="${padL}" y1="${padT + innerH}" x2="${chartW - padR}" y2="${padT + innerH}" stroke="#e5e7eb" stroke-width="1"/>
+      ${bars}
+    </svg>`
+  )
+})()}
+
+${(() => {
+  const mom = r.mom_comparison
+  if (!mom) return ''
+  const num = (n: number) => (n||0).toLocaleString()
+  const arrow = (d: number) => d > 0 ? '↑' : d < 0 ? '↓' : '→'
+  const arrowColor = (d: number, higherIsBetter = true) => d === 0 ? '#6b7280' : ((d > 0) === higherIsBetter ? '#059669' : '#dc2626')
+  const momRow = (label: string, prev: string, curr: string, delta: number, suffix = '', higherIsBetter = true) =>
+    `<tr>
+      <td style="padding:7px 0;border-bottom:1px solid #f3f4f6;font-size:13px;color:#374151">${label}</td>
+      <td style="padding:7px 0;border-bottom:1px solid #f3f4f6;font-size:13px;color:#9ca3af;text-align:center">${prev}${suffix}</td>
+      <td style="padding:7px 0;border-bottom:1px solid #f3f4f6;font-size:13px;font-weight:700;color:#111827;text-align:center">${curr}${suffix}</td>
+      <td style="padding:7px 0;border-bottom:1px solid #f3f4f6;font-size:13px;font-weight:700;color:${arrowColor(delta, higherIsBetter)};text-align:right">${arrow(delta)} ${Math.abs(delta)}${suffix}</td>
+    </tr>`
+  const th = (t: string, align = 'left') => `<th style="font-size:10px;font-weight:700;text-transform:uppercase;color:#6b7280;padding:8px 0;text-align:${align};border-bottom:2px solid #e5e7eb">${t}</th>`
+  return card(`Month-over-Month vs ${mom.prev_month_label}`, '#7c3aed',
+    `<table width="100%" cellpadding="0" cellspacing="0">
+      <tr style="background:#f9fafb">
+        ${th('Metric')}${th('Prior','center')}${th('This Month','center')}${th('Change','right')}
+      </tr>
+      ${momRow('Health Score',   String(mom.strict_score.prev), String(mom.strict_score.curr), mom.strict_score.delta)}
+      ${momRow('Open Rate',      mom.open_rate.prev.toFixed(2),  mom.open_rate.curr.toFixed(2),  mom.open_rate.delta,  '%')}
+      ${momRow('Click Rate',     mom.click_rate.prev.toFixed(2), mom.click_rate.curr.toFixed(2), mom.click_rate.delta, '%')}
+      ${momRow('Emails Delivered', num(mom.delivered.prev), num(mom.delivered.curr), mom.delivered.delta)}
+      ${momRow('Engaged 90d',    num(mom.engaged_90d.prev), num(mom.engaged_90d.curr), mom.engaged_90d.delta)}
+    </table>`
+  )
+})()}
+
+${(() => {
+  const ips = r.postmaster?.ip_reputations
+  if (!Array.isArray(ips) || !ips.length) return ''
+  const repColor = (rep: string) => rep === 'HIGH' ? '#059669' : rep === 'MEDIUM' ? '#d97706' : '#dc2626'
+  const thS = 'font-size:10px;font-weight:700;text-transform:uppercase;color:#6b7280;padding:8px 10px;border-bottom:2px solid #e5e7eb'
+  return card('IP Reputation — Google Postmaster', '#4f46e5',
+    `<table width="100%" cellpadding="0" cellspacing="0">
+      <tr style="background:#f9fafb">
+        <th style="${thS};text-align:left">IP Address</th>
+        <th style="${thS};text-align:right">Reputation</th>
+      </tr>
+      ${ips.map((ip: any) => `<tr>
+        <td style="padding:7px 10px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#374151;font-family:monospace">${ip.ipAddress||ip.ip||'Unknown'}</td>
+        <td style="padding:7px 10px;border-bottom:1px solid #f3f4f6;font-size:13px;font-weight:700;color:${repColor(ip.reputation||'')};text-align:right">${ip.reputation||'Unknown'}</td>
+      </tr>`).join('')}
+    </table>`
+  )
+})()}
+
+${(() => {
+  const errs = r.postmaster?.delivery_errors
+  if (!Array.isArray(errs) || !errs.length) return ''
+  const errLabel: Record<string,string> = {
+    MAIL_ERROR: 'Mail Error', RATE_LIMIT_EXCEEDED: 'Rate Limit Exceeded',
+    SUSPECTED_SPAM: 'Suspected Spam', ENCRYPTED_MESSAGES_EASIER: 'Encryption Issue',
+    CERTIFICATE_ISSUE: 'Certificate Issue', IP_IN_DNSBLOCKLIST: 'IP in DNS Blocklist',
+    DOMAIN_IN_DNSBLOCKLIST: 'Domain in DNS Blocklist', BAD_ATTACHMENT: 'Bad Attachment',
+  }
+  return card('⚠️ Delivery Errors — Google Postmaster', '#dc2626',
+    `<table width="100%" cellpadding="0" cellspacing="0">
+      ${errs.map((e: any) => `<tr>
+        <td style="padding:7px 0;border-bottom:1px solid #f3f4f6;font-size:13px;color:#374151">${errLabel[e.errorType]||e.errorType}</td>
+        <td style="padding:7px 0;border-bottom:1px solid #f3f4f6;font-size:13px;font-weight:700;color:#dc2626;text-align:right">${((e.errorRatio||0)*100).toFixed(3)}%</td>
+      </tr>`).join('')}
+    </table>`
+  )
+})()}
 
 ${workflowTable(wf, 'Workflow Campaign Details — ' + r.month_label, r.workflows_are_monthly ? '📅 Monthly' : 'All-time cumulative')}
 ${workflowTable(awf, 'Annual Workflow Campaign Details', '📅 ' + (r.workflow_history_label||'12-Month Total'))}
@@ -456,8 +680,21 @@ export async function POST(req: NextRequest) {
   const prevMonth = prevDate.toISOString().slice(0, 7)
   const prevBaseline = getEmailHealthBaseline(prevMonth)
 
+  // Score trend — last 12 months of baselines for chart
+  const allBaselines = getAllEmailHealthBaselines()
+  const scoreTrend = (allBaselines as any[])
+    .filter((b: any) => b.month <= month)
+    .sort((a: any, b: any) => a.month.localeCompare(b.month))
+    .slice(-12)
+    .map((b: any) => ({
+      month: b.month,
+      label: new Date(b.month + '-15').toLocaleString('default', { month: 'short' }),
+      strict_score:  b.strict_score,
+      relaxed_score: b.relaxed_score,
+    }))
+
   try {
-    // ── Fetch live list data + workflow campaigns from GHL ──────────────────
+    // ── Fetch live list data + workflow campaigns from GHL + Postmaster ────
     const [
       total,
       green, red, catchall, suspicious, freeEmail, notFound, bouncedTag, spamTag,
@@ -465,6 +702,12 @@ export async function POST(req: NextRequest) {
       google, microsoft, yahoo, otherProvider,
       workflows,
       greenAndSlipping, greenAndNeverEngaged, slippingAndNeverEngaged,
+      postmaster,
+      // Provider × engagement matrix (4 providers × 3 tiers = 12 calls)
+      gGreen, gSlipping, gNeverEngaged,
+      msGreen, msSlipping, msNeverEngaged,
+      yhGreen, yhSlipping, yhNeverEngaged,
+      otGreen, otSlipping, otNeverEngaged,
     ] = await Promise.all([
       getTotalContacts(apiKey, locationId),
       countByTag(apiKey, locationId, 'hti status = green (send responsibly)'),
@@ -486,6 +729,23 @@ export async function POST(req: NextRequest) {
       countByAllTags(apiKey, locationId, 'hti status = green (send responsibly)',      'hti engagement check = slipping'),
       countByAllTags(apiKey, locationId, 'hti status = green (send responsibly)',      'hti engagement check = never engaged'),
       countByAllTags(apiKey, locationId, 'hti engagement check = slipping',            'hti engagement check = never engaged'),
+      fetchPostmasterData(),
+      // Google
+      countByAllTags(apiKey, locationId, 'hti email provider check = is google',                   'hti status = green (send responsibly)'),
+      countByAllTags(apiKey, locationId, 'hti email provider check = is google',                   'hti engagement check = slipping'),
+      countByAllTags(apiKey, locationId, 'hti email provider check = is google',                   'hti engagement check = never engaged'),
+      // Microsoft
+      countByAllTags(apiKey, locationId, 'hti email provider check = is microsoft',               'hti status = green (send responsibly)'),
+      countByAllTags(apiKey, locationId, 'hti email provider check = is microsoft',               'hti engagement check = slipping'),
+      countByAllTags(apiKey, locationId, 'hti email provider check = is microsoft',               'hti engagement check = never engaged'),
+      // Yahoo
+      countByAllTags(apiKey, locationId, 'hti email provider check = is yahoo',                   'hti status = green (send responsibly)'),
+      countByAllTags(apiKey, locationId, 'hti email provider check = is yahoo',                   'hti engagement check = slipping'),
+      countByAllTags(apiKey, locationId, 'hti email provider check = is yahoo',                   'hti engagement check = never engaged'),
+      // Other
+      countByAllTags(apiKey, locationId, 'hti email provider check = is other email provider',    'hti status = green (send responsibly)'),
+      countByAllTags(apiKey, locationId, 'hti email provider check = is other email provider',    'hti engagement check = slipping'),
+      countByAllTags(apiKey, locationId, 'hti email provider check = is other email provider',    'hti engagement check = never engaged'),
     ])
 
     // Deduplicate engagement segments using priority: neverEngaged > slipping > green
@@ -582,6 +842,17 @@ Other: ${otherProvider.toLocaleString()} (${pct(otherProvider, scanned)}%)
 QUALITY FLAGS:
 Catchall: ${catchall.toLocaleString()} | Suspicious: ${suspicious.toLocaleString()} | Free email: ${freeEmail.toLocaleString()}
 Invalid/Not found: ${notFound.toLocaleString()} | Bounced: ${bouncedTag.toLocaleString()} | Spam risk: ${spamTag.toLocaleString()}
+
+EMAIL PROVIDERS (live snapshot):
+Gmail: ${google.toLocaleString()} (${pct(google, scanned)}%) | Microsoft: ${microsoft.toLocaleString()} (${pct(microsoft, scanned)}%) | Yahoo: ${yahoo.toLocaleString()} (${pct(yahoo, scanned)}%) | Other: ${otherProvider.toLocaleString()} (${pct(otherProvider, scanned)}%)
+${postmaster.data_date ? `
+GOOGLE POSTMASTER (${postmaster.data_date}):
+Domain: ${postmaster.domain}
+Domain Reputation: ${postmaster.domain_reputation}
+DMARC Compliance: ${postmaster.dmarc_success_ratio !== null ? (postmaster.dmarc_success_ratio * 100).toFixed(1) + '%' : 'N/A'}
+SPF Compliance: ${postmaster.spf_success_ratio !== null ? (postmaster.spf_success_ratio * 100).toFixed(1) + '%' : 'N/A'}
+DKIM Compliance: ${postmaster.dkim_success_ratio !== null ? (postmaster.dkim_success_ratio * 100).toFixed(1) + '%' : 'N/A'}
+Spam Rate (user-reported): ${postmaster.spam_rate !== null ? (postmaster.spam_rate * 100).toFixed(4) + '%' : 'N/A'}` : 'GOOGLE POSTMASTER: Not connected or no data available'}
 `
 
     const completion = await client.chat.completions.create({
@@ -612,13 +883,13 @@ Return valid JSON only.`,
 
 - good_news: array of 5-7 strings — each citing specific numbers. Cover: relaxed score, score improvement, new contact open/click rates, domain health, DMARC, bounce rate, spam rate, any positive trend vs prior month.
 
-- problems: array of {title, description} objects — 3-4 items. ONLY from mailed contacts. Include exact counts. Examples: "${existingNotClick.toLocaleString()} existing contacts didn't click", "${liabilities.toLocaleString()} mailed contacts haven't engaged in 90+ days", new contacts who didn't open/click.
+- problems: array of {title, description, priority} objects — 3-4 items. priority is "high" (direct deliverability/revenue impact) or "medium" (engagement concern). ONLY from mailed contacts. Include exact counts.
 
-- actions_new_contacts: array of 5-7 detailed action strings. Be specific with counts from the data (${newNotOpen} didn't open, ${newNotClick} didn't click). Mirror HTI style: reach out to the X who didn't open, verify emails, drive clicks, weekly cadence, content tips, thank-you page instructions.
+- actions_new_contacts: array of 5-7 {text, priority} objects. priority is "high", "medium", or "low". Be specific with counts (${newNotOpen} didn't open, ${newNotClick} didn't click). Mirror HTI style.
 
-- actions_existing_contacts: array of 6-8 detailed action strings. Be specific with counts. Mirror HTI style: DRIVE THE CLICK campaign for ${existingNotClick.toLocaleString()} who haven't clicked, IS THIS GOOD-BYE re-engagement campaign for ${liabilities.toLocaleString()} contacts not engaged in 90+ days, weekly email cadence, content strategies.
+- actions_existing_contacts: array of 6-8 {text, priority} objects. priority is "high", "medium", or "low". Be specific with counts. DRIVE THE CLICK for ${existingNotClick.toLocaleString()}, IS THIS GOOD-BYE for ${liabilities.toLocaleString()} at-risk contacts.
 
-- actions_maintenance: array of 2-3 ongoing best practice strings.
+- actions_maintenance: array of 2-3 {text, priority} objects. priority is "medium" or "low".
 - analyst_note: 1-2 sentences — the single most important insight from this month's actual sends.
 
 Data:\n${dataCtx}`,
@@ -882,6 +1153,30 @@ Data:\n${dataCtx}`,
 
       // Providers (live snapshot)
       providers: { google, microsoft, yahoo, other: otherProvider, scanned },
+
+      // Provider × engagement matrix
+      provider_matrix: {
+        google:    { total: google,        green: gGreen,  slipping: gSlipping,  never_engaged: gNeverEngaged  },
+        microsoft: { total: microsoft,     green: msGreen, slipping: msSlipping, never_engaged: msNeverEngaged },
+        yahoo:     { total: yahoo,         green: yhGreen, slipping: yhSlipping, never_engaged: yhNeverEngaged },
+        other:     { total: otherProvider, green: otGreen, slipping: otSlipping, never_engaged: otNeverEngaged },
+      },
+
+      // Google Postmaster signals (live, last 5 days)
+      postmaster,
+
+      // Score trend (last 12 months of baselines)
+      score_trend: scoreTrend,
+
+      // Month-over-month comparison
+      mom_comparison: prevBaseline ? {
+        strict_score: { curr: strictScore,           prev: prevBaseline.strict_score,  delta: scoreDelta ?? 0 },
+        open_rate:    { curr: baseline.open_rate,    prev: prevBaseline.open_rate,     delta: parseFloat((baseline.open_rate  - prevBaseline.open_rate).toFixed(2))  },
+        click_rate:   { curr: baseline.click_rate,   prev: prevBaseline.click_rate,    delta: parseFloat((baseline.click_rate - prevBaseline.click_rate).toFixed(2)) },
+        delivered:    { curr: baseline.delivered,    prev: prevBaseline.delivered,     delta: baseline.delivered    - prevBaseline.delivered    },
+        engaged_90d:  { curr: baseline.engaged_90d,  prev: prevBaseline.engaged_90d,   delta: baseline.engaged_90d  - prevBaseline.engaged_90d  },
+        prev_month_label: monthLabel(prevMonth),
+      } : null,
 
       // Workflow campaign details
       workflows: workflowsWithDeltas,
