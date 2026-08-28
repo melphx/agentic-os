@@ -150,7 +150,7 @@ async function fetchPostmasterData(): Promise<{
     const pmDomain = process.env.POSTMASTER_DOMAIN || process.env.GHL_DOMAIN || 'l.phxhomeremodeling.com'
     const headers = { Authorization: `Bearer ${token}` }
     const today = new Date()
-    const dates = Array.from({ length: 5 }, (_, i) => {
+    const dates = Array.from({ length: 10 }, (_, i) => {
       const d = new Date(today); d.setDate(d.getDate() - i)
       return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
     })
@@ -401,7 +401,7 @@ ${(() => {
 
 ${(() => {
   const pm = r.postmaster || {}
-  if (!pm.data_date || pm.domain_reputation === 'UNKNOWN') return ''
+  if (!pm.data_date) return ''
   const repColor = pm.domain_reputation === 'HIGH' ? '#059669' : pm.domain_reputation === 'MEDIUM' ? '#d97706' : '#dc2626'
   const ratio = (n: number | null) => n !== null ? (n * 100).toFixed(1) + '%' : 'N/A'
   const ratioColor = (n: number | null) => n === null ? '#6b7280' : n >= 0.95 ? '#059669' : n >= 0.85 ? '#d97706' : '#dc2626'
