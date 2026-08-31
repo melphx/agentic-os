@@ -660,7 +660,7 @@ export async function POST(req: NextRequest) {
 
   // Current month — report not ready yet
   const currentMonth = new Date().toISOString().slice(0, 7)
-  if (month >= currentMonth) {
+  if (month > currentMonth) {
     return NextResponse.json({
       in_progress: true,
       month,
