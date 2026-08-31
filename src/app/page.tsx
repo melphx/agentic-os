@@ -4118,7 +4118,7 @@ function EmailHealthReportView() {
       const r = await fetch('/api/reports/email-health?action=baselines')
       const d = await r.json()
       const months = ((d.baselines || []) as any[])
-        .filter((b: any) => b.month < currentMonth)
+        .filter((b: any) => b.month <= currentMonth)
         .map((b: any) => ({
           month: b.month,
           label: new Date(b.month + '-15').toLocaleString('default', { month: 'long', year: 'numeric' }),
