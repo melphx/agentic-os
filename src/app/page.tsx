@@ -5708,6 +5708,11 @@ function GhlMonitorView() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span style={{ fontSize: 11, color, fontWeight: 700, minWidth: 28 }}>R{f.rule_id}</span>
                   <span style={{ color: 'white', fontSize: 13, fontWeight: 600 }}>{f.title}</span>
+                  {(f as any).category === 'needs_attention' && (
+                    <span style={{ fontSize: 10, fontWeight: 700, background: 'rgba(251,146,60,0.15)', color: '#fb923c', border: '1px solid rgba(251,146,60,0.3)', borderRadius: 4, padding: '1px 7px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Needs Attention
+                    </span>
+                  )}
                   {(f as any).frequency && (
                     <span style={{ fontSize: 10, color: 'rgba(148,163,184,0.4)', background: 'rgba(99,102,241,0.08)', borderRadius: 4, padding: '1px 6px' }}>
                       {(f as any).frequency}
@@ -5739,7 +5744,7 @@ function GhlMonitorView() {
                   <div key={idx} style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: '8px 12px', fontSize: 12 }}>
                     {/* Rule-specific rendering */}
                     {item.name !== undefined && (
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
                         <span style={{ color: 'white', fontWeight: 600 }}>{item.name || 'Unknown'}</span>
                         {item.email && <span style={{ color: 'rgba(148,163,184,0.6)' }}>{item.email}</span>}
                         {item.flag && <span style={{ color: '#f59e0b' }}>{item.flag}</span>}
@@ -5747,6 +5752,7 @@ function GhlMonitorView() {
                         {item.overdue_days !== undefined && <span style={{ color: '#f43f5e' }}>{item.overdue_days}d overdue</span>}
                         {item.days_in_stage !== undefined && <span style={{ color: '#f59e0b' }}>{item.days_in_stage}d in "{item.stage}"</span>}
                         {item.hours_waiting !== undefined && <span style={{ color: '#f59e0b' }}>{item.hours_waiting}h waiting</span>}
+                        {item.ghl_url && <a href={item.ghl_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: '#6366f1', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 4, padding: '2px 7px', textDecoration: 'none', whiteSpace: 'nowrap' }}>Open in GHL →</a>}
                       </div>
                     )}
                     {item.contact_name !== undefined && !item.name && (

@@ -96,5 +96,21 @@ export async function POST(req: NextRequest) {
     }).catch((e: any) => console.error('[ghl-monitor] N8N webhook error:', e.message))
   }
 
+  // Hassan notification — fire when test contacts are found
+  const hassanWebhook = process.env.GHL_MONITOR_HASSAN_WEBHOOK
+  const testFinding = (data.findings || []).find((f: any) => f.rule_id === 1 && f.notify_hassan && f.count > 0)
+  if (hassanWebhook && testFinding) {
+    fetch(hassanWebhook, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        run_at:   run.run_at,
+        count:    testFinding.count,
+        contacts: testFinding.items,
+        message:  `GHL Monitor found ${testFinding.count} contact(s) with "test" in the name. Please review and delete any that are not real contacts.`,
+      }),
+    }).catch((e: any) => console.error('[ghl-monitor] Hassan webhook error:', e.message))
+  }
+
   return NextResponse.json({ ok: true, run })
 }

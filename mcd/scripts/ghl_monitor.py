@@ -166,6 +166,13 @@ def _days_since(iso_str):
     return 0
 
 
+def _contact_url(contact_id, loc):
+    """Build a direct GHL contact link."""
+    if not contact_id or not loc:
+        return ""
+    return f"https://app.gohighlevel.com/v2/location/{loc}/contacts/detail/{contact_id}"
+
+
 def _ok(rule_id, title, reason=""):
     result = {"rule_id": rule_id, "title": title, "status": "ok", "items": [], "count": 0}
     if reason:
@@ -202,19 +209,25 @@ def rule_1_test_contacts():
             name = (c.get("contactName") or c.get("name") or "").lower()
             if "test" not in name:
                 continue
+            cid = c.get("id", "")
             items.append({
                 "name": c.get("contactName") or c.get("name"),
                 "email": c.get("email", ""),
                 "assigned_to": c.get("assignedTo", ""),
                 "created": c.get("dateAdded", ""),
                 "age_days": _days_since(c.get("dateAdded", "")),
-                "id": c.get("id", ""),
+                "id": cid,
+                "ghl_url": _contact_url(cid, loc),
             })
         urgent_count = sum(1 for i in items if i.get("age_days", 0) >= 7)
         reason = (f"{len(items)} contact(s) with 'test' in the name — "
                   f"oldest is {max((i.get('age_days',0) for i in items), default=0)}d old. Should be deleted."
                   if items else "No contacts with 'test' in the name found.")
-        return _finding(1, '"Test" Contact Sweep', items, urgent=urgent_count > 0, reason=reason)
+        result = _finding(1, '"Test" Contact Sweep', items, urgent=urgent_count > 0, reason=reason)
+        result["category"] = "needs_attention"
+        if items:
+            result["notify_hassan"] = True
+        return result
     except Exception as e:
         return {"rule_id": 1, "title": '"Test" Contact Sweep', "status": "error", "error": str(e), "items": [], "count": 0}
 
@@ -242,13 +255,15 @@ def rule_2_fake_emails():
                 elif domain in TYPO_DOMAINS:
                     flag = f"likely typo domain ({domain})"
             if flag:
+                cid = c.get("id", "")
                 items.append({
                     "name": c.get("contactName") or c.get("name"),
                     "email": email,
                     "flag": flag,
                     "assigned_to": c.get("assignedTo", ""),
                     "created": c.get("dateAdded", ""),
-                    "id": c.get("id", ""),
+                    "id": cid,
+                    "ghl_url": _contact_url(cid, loc),
                 })
         reason = (f"{len(items)} contact(s) with bad or disposable email addresses in the last 7 days."
                   if items else "No bad or disposable email addresses found in contacts from the past 7 days.")
@@ -360,7 +375,8 @@ def rule_5_ava_tasks():
     try:
         tasks = _get_tasks(assigned_to=ava_id)
         items = [{"task": t.get("title"), "contact_id": t.get("contactId", ""),
-                  "due": t.get("dueDate", ""), "id": t.get("id", "")} for t in tasks]
+                  "due": t.get("dueDate", ""), "id": t.get("id", ""),
+                  "ghl_url": _contact_url(t.get("contactId", ""), loc)} for t in tasks]
         reason = (f"Ava has {len(items)} open task(s) that need to be reassigned or completed."
                   if items else "Ava has no open tasks assigned to her.")
         return _finding(5, "Ava Has Tasks", items, urgent=True, reason=reason)
@@ -389,13 +405,15 @@ def rule_6_design_rendering():
             age = _days_since(t.get("dateAdded") or t.get("createdAt", ""))
             if age >= 30:
                 contact = t.get("contact", {}) or {}
+                cid = t.get("contactId", "")
                 items.append({
                     "task": t.get("title"),
                     "designer": "Rebekah" if t.get("assignedTo") == rebekah_id else "Nicole",
-                    "client_name": contact.get("name") or t.get("contactId", ""),
+                    "client_name": contact.get("name") or cid,
                     "age_days": age,
                     "due": t.get("dueDate", ""),
                     "id": t.get("id", ""),
+                    "ghl_url": _contact_url(cid, loc),
                 })
         reason = (f"{len(items)} design rendering task(s) are 30+ days old and still open."
                   if items else "No design rendering tasks older than 30 days.")
@@ -421,12 +439,14 @@ def rule_7_hard_bounces():
             dnd_settings = c.get("dndSettings", {}) or {}
             email_dnd = dnd or dnd_settings.get("email", {}).get("status") == "active"
             if not email_dnd:
+                cid = c.get("id", "")
                 items.append({
                     "name": c.get("contactName") or c.get("name"),
                     "email": c.get("email", ""),
                     "bounced": True,
                     "email_dnd_on": False,
-                    "id": c.get("id", ""),
+                    "id": cid,
+                    "ghl_url": _contact_url(cid, loc),
                 })
         reason = (f"{len(items)} contact(s) have bounced emails but Email DND is not enabled — they may still receive emails."
                   if items else "No contacts with bounced emails missing the DND flag.")
@@ -456,13 +476,16 @@ def rule_11_opp_stagnation():
             age = _days_since(o.get("lastStageChangeAt") or o.get("dateAdded", ""))
             if age < window:
                 continue
+            oid = o.get("id", "")
+            cid = o.get("contactId", "")
             items.append({
                 "name": o.get("name") or o.get("contactName", "Unknown"),
                 "stage": o.get("pipelineStage") or o.get("status"),
                 "days_in_stage": age,
                 "threshold_days": window,
                 "assigned_to": watched.get(assigned, assigned),
-                "opp_id": o.get("id", ""),
+                "opp_id": oid,
+                "ghl_url": _contact_url(cid, loc) if cid else "",
             })
         reason = (f"{len(items)} opportunity/opportunities stuck in their pipeline stage beyond the expected window."
                   if items else "All open opportunities are progressing within expected timeframes.")
@@ -675,6 +698,7 @@ def rule_14_ppc_leads():
             updated = str(updated_raw).strip()[:19] if updated_raw else ""
             if updated and updated != created_str[:19]:
                 continue  # has been touched
+            cid = c.get("id", "")
             items.append({
                 "name":    c.get("contactName") or c.get("name") or "Unknown",
                 "email":   c.get("email", ""),
@@ -685,7 +709,8 @@ def rule_14_ppc_leads():
                      if (cf.get("key") or cf.get("name") or "").lower() == "utm_source"),
                     "",
                 ),
-                "id": c.get("id", ""),
+                "id": cid,
+                "ghl_url": _contact_url(cid, loc),
             })
 
         note = f"Scanned {checked} contacts created in the last 48h"
