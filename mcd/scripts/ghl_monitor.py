@@ -299,11 +299,13 @@ def rule_3_missed_replies():
                 except:
                     pass
             if age_h >= cutoff_hours:
+                cid = c.get("contactId", "")
                 items.append({
                     "contact_name": c.get("contactName") or c.get("fullName", "Unknown"),
                     "last_message_preview": (c.get("lastMessageBody") or "")[:80],
                     "hours_waiting": round(age_h, 1),
                     "conversation_id": c.get("id", ""),
+                    "ghl_url": _contact_url(cid, loc),
                 })
         reason = (f"{len(items)} inbound conversation(s) with no employee reply for over 24h (checked last 100 conversations)."
                   if items else "All inbound messages replied to within 24h (checked last 100 conversations).")
@@ -327,11 +329,13 @@ def rule_4_negative_phrases():
                 continue
             matched = next((p for p in NEGATIVE_PHRASES if p in body), None)
             if matched:
+                cid = c.get("contactId", "")
                 items.append({
                     "contact_name": c.get("contactName") or c.get("fullName", "Unknown"),
                     "matched_phrase": matched,
                     "message_preview": (c.get("lastMessageBody") or "")[:80],
                     "conversation_id": c.get("id", ""),
+                    "ghl_url": _contact_url(cid, loc),
                 })
         reason = (f"{len(items)} inbound message(s) contain negative phrases like 'cancel', 'refund', or 'lawsuit'."
                   if items else "No negative sentiment phrases detected in recent inbound conversations.")
