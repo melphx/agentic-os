@@ -1,6 +1,7 @@
 'use client'
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import SchemaToolView from '@/components/schema-tool/SchemaToolView'
 import {
   LayoutDashboard, Bot, ListTodo, Terminal as TerminalIcon,
   Settings, Send, ChevronLeft, Play, RefreshCw, LogOut,
@@ -3879,7 +3880,7 @@ function McdReportsView() {
   const [pollTimer, setPollTimer]   = useState<ReturnType<typeof setInterval> | null>(null)
   const [sendingEmail, setSendingEmail] = useState(false)
   const [emailMsg, setEmailMsg]     = useState('')
-  const [activeTab, setActiveTab]   = useState<'reports' | 'chat'>('reports')
+  const [activeTab, setActiveTab]   = useState<'reports' | 'chat' | 'schema'>('reports')
 
   const fetchReports = async () => {
     try {
@@ -3994,6 +3995,10 @@ function McdReportsView() {
               style={{ padding: '4px 12px', borderRadius: 6, border: 'none', background: activeTab === 'chat' ? 'rgba(99,102,241,0.25)' : 'transparent', color: activeTab === 'chat' ? '#a5b4fc' : 'rgba(148,163,184,0.5)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
               💬 Ask MCD
             </button>
+            <button onClick={() => setActiveTab('schema')}
+              style={{ padding: '4px 12px', borderRadius: 6, border: 'none', background: activeTab === 'schema' ? 'rgba(99,102,241,0.25)' : 'transparent', color: activeTab === 'schema' ? '#a5b4fc' : 'rgba(148,163,184,0.5)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+              🧩 Schema
+            </button>
           </div>
           <button
             onClick={handleSendEmail}
@@ -4022,7 +4027,11 @@ function McdReportsView() {
         </div>
       )}
 
-      {activeTab === 'chat' ? (
+      {activeTab === 'schema' ? (
+        <div style={{ height: 'calc(100vh - 56px)', display: 'flex', flexDirection: 'column' }}>
+          <SchemaToolView />
+        </div>
+      ) : activeTab === 'chat' ? (
         <div style={{ flex: 1, height: 'calc(100% - 56px)', display: 'flex', flexDirection: 'column' }}>
           <McdChatView />
         </div>
