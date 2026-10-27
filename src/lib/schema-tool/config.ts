@@ -6,7 +6,8 @@
  *   SCHEMA_TOOL_WP_APP_PASSWORD  WordPress Application Password for that user
  *   SCHEMA_TOOL_PROD_ORIGIN      Production origin used in HFCM snippet names (default https://phxhomeremodeling.com)
  *
- *   ANTHROPIC_API_KEY            If set, the assistant uses Claude (SCHEMA_TOOL_ANTHROPIC_MODEL)
+ *   ANTHROPIC_API_KEY            If set, the assistant uses Claude (SCHEMA_TOOL_ANTHROPIC_MODEL). Sent as Bearer.
+ *   ANTHROPIC_WORKSPACE_ID       Needed only if the key isn't scoped to a workspace (Console → Workspaces → ID)
  *   OPENAI_API_KEY               Otherwise falls back to OpenAI (SCHEMA_TOOL_OPENAI_MODEL || OPENAI_MODEL)
  */
 

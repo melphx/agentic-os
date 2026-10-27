@@ -42,7 +42,8 @@ SCHEMA_TOOL_WP_USER=schemabot
 SCHEMA_TOOL_WP_APP_PASSWORD=<WordPress application password>
 # optional
 SCHEMA_TOOL_PROD_ORIGIN=https://phxhomeremodeling.com
-ANTHROPIC_API_KEY=<Claude API key>            # if set, the assistant uses Claude
+ANTHROPIC_API_KEY=<Claude API key, e.g. sk-ant-usr-… from platform.claude.com/settings/keys>
+ANTHROPIC_WORKSPACE_ID=<wrkspc_… — only if the key isn't scoped to a workspace>
 SCHEMA_TOOL_ANTHROPIC_MODEL=claude-sonnet-4-5
 # otherwise it uses the existing OPENAI_API_KEY (SCHEMA_TOOL_OPENAI_MODEL || OPENAI_MODEL)
 ```

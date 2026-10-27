@@ -243,13 +243,24 @@ async function runOpenAI(history: Turn[], ctx: Ctx, model: string): Promise<stri
   return 'I stopped after several steps without finishing. Try narrowing the request.'
 }
 
+/** Personal / service-account keys (sk-ant-usr-…) use Bearer auth; unscoped keys also need a workspace ID. */
+function anthropicHeaders(): Record<string, string> {
+  const h: Record<string, string> = {
+    Authorization: `Bearer ${process.env.ANTHROPIC_API_KEY || ''}`,
+    'anthropic-version': '2023-06-01',
+    'content-type': 'application/json',
+  }
+  if (process.env.ANTHROPIC_WORKSPACE_ID) h['anthropic-workspace-id'] = process.env.ANTHROPIC_WORKSPACE_ID
+  return h
+}
+
 async function runAnthropic(history: Turn[], ctx: Ctx, model: string): Promise<string> {
   const messages: any[] = history.map(h => ({ role: h.role, content: h.content }))
   const tools = TOOLS.map(t => ({ name: t.name, description: t.description, input_schema: t.parameters }))
   for (let i = 0; i < 10; i++) {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY || '', 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      headers: anthropicHeaders(),
       body: JSON.stringify({ model, max_tokens: 4096, system: systemPrompt(), tools, messages }),
     })
     const data: any = await res.json()
