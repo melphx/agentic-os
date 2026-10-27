@@ -219,6 +219,7 @@ const NAV = [
   { id: 'email-health', icon: <span style={{fontSize:14}}>📧</span>, label: 'Email Health' },
   { id: 'mcd-reports', icon: <span style={{fontSize:14}}>📊</span>, label: 'MCD Reports' },
   { id: 'ghl-monitor', icon: <span style={{fontSize:14}}>🔍</span>, label: 'GHL Monitor' },
+  { id: 'schema',      icon: <span style={{fontSize:14}}>🧩</span>, label: 'Schema' },
   { id: 'settings',   icon: <Settings size={18} />,        label: 'Settings'   },
 ]
 
@@ -3880,7 +3881,7 @@ function McdReportsView() {
   const [pollTimer, setPollTimer]   = useState<ReturnType<typeof setInterval> | null>(null)
   const [sendingEmail, setSendingEmail] = useState(false)
   const [emailMsg, setEmailMsg]     = useState('')
-  const [activeTab, setActiveTab]   = useState<'reports' | 'chat' | 'schema'>('reports')
+  const [activeTab, setActiveTab]   = useState<'reports' | 'chat'>('reports')
 
   const fetchReports = async () => {
     try {
@@ -3995,10 +3996,6 @@ function McdReportsView() {
               style={{ padding: '4px 12px', borderRadius: 6, border: 'none', background: activeTab === 'chat' ? 'rgba(99,102,241,0.25)' : 'transparent', color: activeTab === 'chat' ? '#a5b4fc' : 'rgba(148,163,184,0.5)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
               💬 Ask MCD
             </button>
-            <button onClick={() => setActiveTab('schema')}
-              style={{ padding: '4px 12px', borderRadius: 6, border: 'none', background: activeTab === 'schema' ? 'rgba(99,102,241,0.25)' : 'transparent', color: activeTab === 'schema' ? '#a5b4fc' : 'rgba(148,163,184,0.5)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
-              🧩 Schema
-            </button>
           </div>
           <button
             onClick={handleSendEmail}
@@ -4027,11 +4024,7 @@ function McdReportsView() {
         </div>
       )}
 
-      {activeTab === 'schema' ? (
-        <div style={{ height: 'calc(100vh - 56px)', display: 'flex', flexDirection: 'column' }}>
-          <SchemaToolView />
-        </div>
-      ) : activeTab === 'chat' ? (
+      {activeTab === 'chat' ? (
         <div style={{ flex: 1, height: 'calc(100% - 56px)', display: 'flex', flexDirection: 'column' }}>
           <McdChatView />
         </div>
@@ -6294,6 +6287,7 @@ export default function Page() {
       case 'email-health': return <EmailHealthReportView />
       case 'mcd-reports':  return <McdReportsView />
       case 'ghl-monitor':  return <GhlMonitorView />
+      case 'schema':       return <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}><SchemaToolView /></div>
       case 'hermes':     return <HermesView messages={messages} onSend={handleSend} loading={chatLoading} />
       case 'projects':   return <ProjectsView agents={agents} onSelectAgent={a => { setSelectedAgent(a); setView('agents') }} />
       case 'triggers':   return <TriggersPanel agents={agents} />

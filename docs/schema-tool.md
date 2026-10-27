@@ -1,6 +1,6 @@
-# Schema Tool (MCD → 🧩 Schema)
+# Schema Tool (🧩 Schema in the sidebar)
 
-A tab inside **MCD Reports** for reading and changing the site's JSON-LD schema
+A sidebar page for reading and changing the site's JSON-LD schema
 (Header Footer Code Manager snippets) on the WordPress site that runs the
 `phr-schema/v1` API (staging for now).
 
@@ -26,7 +26,7 @@ parse as JSON, and a change is refused if the snippet changed on the site since 
 src/lib/schema-tool/        config, WordPress client, SQLite store, engine, changesets, page check, AI agent
 src/app/api/schema-tool/    status, snippets, snippets/[id], chat, changesets, changesets/[id], page-check
 src/components/schema-tool/ SchemaToolView (UI), ChangesetCard (+ review drawer), ui primitives
-src/app/page.tsx            +1 import, +1 tab button, +1 render branch in McdReportsView
+src/app/page.tsx            +1 import, +1 sidebar NAV item, +1 case in mainContent()
 ```
 
 Database: four new tables in the existing SQLite DB (`schema_tool_changesets`,
@@ -44,7 +44,7 @@ SCHEMA_TOOL_WP_APP_PASSWORD=<WordPress application password>
 SCHEMA_TOOL_PROD_ORIGIN=https://phxhomeremodeling.com
 ANTHROPIC_API_KEY=<Claude API key, e.g. sk-ant-usr-… from platform.claude.com/settings/keys>
 ANTHROPIC_WORKSPACE_ID=<wrkspc_… — only if the key isn't scoped to a workspace>
-SCHEMA_TOOL_ANTHROPIC_MODEL=claude-sonnet-4-5
+SCHEMA_TOOL_ANTHROPIC_MODEL=claude-sonnet-5-5
 # otherwise it uses the existing OPENAI_API_KEY (SCHEMA_TOOL_OPENAI_MODEL || OPENAI_MODEL)
 ```
 

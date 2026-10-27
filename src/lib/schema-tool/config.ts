@@ -40,7 +40,7 @@ export type AiProvider = 'anthropic' | 'openai' | 'none'
 
 export function getAiProvider(): { provider: AiProvider; model: string } {
   if (process.env.ANTHROPIC_API_KEY) {
-    return { provider: 'anthropic', model: process.env.SCHEMA_TOOL_ANTHROPIC_MODEL || 'claude-sonnet-4-5' }
+    return { provider: 'anthropic', model: process.env.SCHEMA_TOOL_ANTHROPIC_MODEL || 'claude-sonnet-5-5' }
   }
   if (process.env.OPENAI_API_KEY) {
     return { provider: 'openai', model: process.env.SCHEMA_TOOL_OPENAI_MODEL || process.env.OPENAI_MODEL || 'gpt-5.4-mini' }

@@ -46,7 +46,12 @@ export default function SchemaToolView() {
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: T.bg, color: T.text, fontFamily: 'Inter, sans-serif', minHeight: 0 }}>
       <GlobalStyle />
       {/* Sub-header */}
-      <div style={{ padding: '10px 22px', borderBottom: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', gap: 12, background: 'rgba(12,17,30,0.9)', flexWrap: 'wrap' }}>
+      <div style={{ padding: '12px 22px', borderBottom: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', gap: 12, background: T.panel, flexWrap: 'wrap', position: 'sticky', top: 0, zIndex: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginRight: 6 }}>
+          <span style={{ fontSize: 16 }}>🧩</span>
+          <span style={{ color: 'white', fontWeight: 700, fontSize: 15 }}>Schema</span>
+          <span style={{ fontSize: 10, color: 'rgba(148,163,184,0.5)', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.15)', padding: '1px 7px', borderRadius: 10 }}>JSON-LD · HFCM snippets</span>
+        </div>
         <div style={{ display: 'flex', background: 'rgba(99,102,241,0.08)', border: `1px solid ${T.border}`, borderRadius: 9, padding: 2 }}>
           {tabs.map(t => (
             <button key={t.id} onClick={() => setTab(t.id)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit', background: tab === t.id ? 'rgba(99,102,241,0.25)' : 'transparent', color: tab === t.id ? T.accent : 'rgba(148,163,184,0.6)' }}>
