@@ -253,19 +253,29 @@ function AssistantPanel({ onReview, aiReady, draft }: { onReview: (id: number) =
       ? { ...x, changesets: x.changesets.map(y => y.id === c.id ? c : y) } : x))
   }, [])
 
-  // Ctrl/⌘+Enter applies the newest staged changeset (fast path for bulk work)
-  const lastProposed = useMemo(() => {
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      const cs = (msgs[i].changesets || []).filter(c => c.status === 'proposed')
-      if (cs.length) return cs[cs.length - 1]
+  // Everything in this chat that is waiting (or failed and can be retried). Ctrl/⌘+Enter applies all of it.
+  const ready = useMemo(() => {
+    const seen = new Set<number>(), out: CsSummary[] = []
+    for (const m of msgs) for (const c of m.changesets || []) {
+      if (seen.has(c.id) || c.running) continue
+      seen.add(c.id)
+      if (['proposed', 'failed', 'partial'].indexOf(c.status) >= 0) out.push(c)
     }
-    return null
+    return out.sort((a, b) => a.id - b.id)
   }, [msgs])
-  const applyLatest = async () => {
-    if (!lastProposed) return
-    await api(`/api/schema-tool/changesets/${lastProposed.id}`, { action: 'apply' })
-    setMsgs(m => m.map(x => ({ ...x, changesets: x.changesets?.map(c => c.id === lastProposed.id ? { ...c, status: 'applying' } : c) })))
+  const [applyingAll, setApplyingAll] = useState(false)
+  const applyAll = async () => {
+    if (!ready.length || applyingAll) return
+    setApplyingAll(true)
+    try {
+      const d = await api<{ started: number[]; changesets: CsSummary[] }>('/api/schema-tool/changesets', { action: 'apply_many', ids: ready.map(c => c.id) })
+      const byId: Record<number, CsSummary> = {}
+      d.changesets.forEach(c => { byId[c.id] = c })
+      setMsgs(m => m.map(x => ({ ...x, changesets: x.changesets?.map(c => byId[c.id] || c) })))
+    } catch (e: any) { alert(e.message) } finally { setApplyingAll(false) }
   }
+  const readySnippets = ready.reduce((n, c) => n + (c.snippet_count || 0), 0)
+  const readyRetry = ready.filter(c => c.status !== 'proposed').length
 
   return (
     <div style={{ display: 'flex', height: '100%', minHeight: 0 }}>
@@ -338,10 +348,12 @@ function AssistantPanel({ onReview, aiReady, draft }: { onReview: (id: number) =
         </div>
 
         <div style={{ padding: '12px 22px 16px', borderTop: `1px solid ${T.border}`, background: 'rgba(12,17,30,0.85)' }}>
-          {lastProposed && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 11.5, color: T.sub }}>
-              <span>Ready: <b style={{ color: 'white' }}>#{lastProposed.id} {lastProposed.title}</b></span>
-              <Btn small kind="primary" onClick={applyLatest}><Check size={12} /> Apply</Btn>
+          {ready.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 11.5, color: T.sub, flexWrap: 'wrap' }}>
+              {ready.length === 1
+                ? <span>Ready: <b style={{ color: 'white' }}>#{ready[0].id} {ready[0].title}</b></span>
+                : <span><b style={{ color: 'white' }}>{ready.length} changes ready</b> · {readySnippets} snippet edit{readySnippets === 1 ? '' : 's'}{readyRetry ? ` · ${readyRetry} to retry` : ''} — applied oldest first, each on top of the last</span>}
+              <Btn small kind="primary" onClick={applyAll} disabled={applyingAll}>{applyingAll ? <Spinner /> : <Check size={12} />} {ready.length === 1 ? (ready[0].status === 'proposed' ? 'Apply' : 'Retry') : 'Apply all'}</Btn>
               <span style={{ color: T.faint }}>or press Ctrl+Enter</span>
             </div>
           )}
@@ -363,7 +375,7 @@ function AssistantPanel({ onReview, aiReady, draft }: { onReview: (id: number) =
               disabled={!aiReady}
               onPaste={e => { if (e.clipboardData.files.length) { e.preventDefault(); addFiles(e.clipboardData.files) } }}
               onKeyDown={e => {
-                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); applyLatest(); return }
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); applyAll(); return }
                 if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
               }}
               style={{ ...inputStyle, resize: 'none', minHeight: 46, maxHeight: 160, fontSize: 13, lineHeight: 1.5 }} />
@@ -561,10 +573,18 @@ function HistoryPanel({ onReview }: { onReview: (id: number) => void }) {
   useEffect(() => { load(); const t = setInterval(load, 8000); return () => clearInterval(t) }, [load])
   const shown = (rows || []).filter(r => filter === 'all' || (filter === 'applied' ? ['applied', 'partial', 'revert_partial'].includes(r.status) : r.status === 'proposed'))
   const undo = async (id: number) => { try { await api(`/api/schema-tool/changesets/${id}`, { action: 'revert' }); load() } catch (e: any) { alert(e.message) } }
+  const waiting = (rows || []).filter(r => r.status === 'proposed' && !r.running)
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const applyWaiting = async () => {
+    if (!confirm(`Apply ${waiting.length} waiting change${waiting.length === 1 ? '' : 's'} (oldest first)? Each one can still be undone.`)) return
+    setBulkBusy(true)
+    try { await api('/api/schema-tool/changesets', { action: 'apply_many', ids: waiting.map(r => r.id) }); load() } catch (e: any) { alert(e.message) } finally { setBulkBusy(false) }
+  }
   return (
     <div className="st-scroll" style={{ height: '100%', overflowY: 'auto', padding: '16px 22px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
         <div style={{ color: 'white', fontWeight: 650, fontSize: 14, flex: 1 }}>Change history</div>
+        {waiting.length > 0 && <Btn small kind="primary" onClick={applyWaiting} disabled={bulkBusy}>{bulkBusy ? <Spinner /> : <Check size={12} />} Apply all waiting ({waiting.length})</Btn>}
         {(['all', 'applied', 'proposed'] as const).map(f => <Btn key={f} small kind={filter === f ? 'ghost' : 'subtle'} onClick={() => setFilter(f)}>{f === 'all' ? 'All' : f === 'applied' ? 'Applied' : 'Waiting'}</Btn>)}
         <Btn small kind="subtle" onClick={load}><RefreshCw size={12} /></Btn>
       </div>

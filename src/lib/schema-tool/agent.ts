@@ -192,7 +192,7 @@ async function runTool(name: string, args: any, ctx: Ctx): Promise<string> {
         wholeWord: !!args.whole_word, requireContext: args.require_context, excludeContext: args.exclude_context,
         onlyIds: args.only_ids, excludeIds: args.exclude_ids, activeOnly: !args.include_inactive,
       })
-      const id = changesetFromPlan(plan, { ...csInfo(args.title), kind: 'replace', meta: { find: args.find, replace: args.replace, regex: !!args.regex, require_context: args.require_context, exclude_context: args.exclude_context } })
+      const id = changesetFromPlan(plan, { ...csInfo(args.title), kind: 'replace', meta: { find: args.find, replace: args.replace, regex: !!args.regex, case_sensitive: args.case_sensitive !== false, whole_word: !!args.whole_word, require_context: args.require_context, exclude_context: args.exclude_context } })
       if (id) ctx.changesetIds.push(id)
       return cap({
         changeset_id: id, snippets: plan.items.length, mentions: plan.totalMentions,
@@ -217,7 +217,7 @@ async function runTool(name: string, args: any, ctx: Ctx): Promise<string> {
         staged.push({ snippet: s, after: r.text, mentions: groups[Number(k)].length })
       }
       if (errors.length) return cap({ changeset_id: null, errors, note: 'Nothing staged. Fix the edits (read the snippet with get_snippet) and try again.' })
-      const id = changesetFromEdits(staged, { ...csInfo(args.title), kind: 'edit' })
+      const id = changesetFromEdits(staged, { ...csInfo(args.title), kind: 'edit', meta: { edits: groups } })
       ctx.changesetIds.push(id)
       return cap({ changeset_id: id, snippets: staged.length, edits: (args.edits || []).length, note: 'Staged. Not saved yet.' })
     }
@@ -344,7 +344,7 @@ How you work
 - Snippet names are the live URL of the page they belong to. Match pages by path.
 - Always look first (search_snippets / list_snippets / snippet_overview / get_snippet / check_page). Base every number you report on tool results, not memory.
 - To change anything, call a propose_* tool. That only STAGES a changeset; the person sees one card with counts and a before/after and applies it with one click. Never say something was saved or applied — say it is staged / ready to apply.
-- Bundle related edits into one changeset when it is one logical change. Separate unrelated changes.
+- Bundle related edits into one changeset when it is one logical change. Separate unrelated changes — but when several fixes target the SAME snippet (e.g. cleaning up one page), put them in ONE changeset (one propose_edits call with all the edits) rather than a chain of changesets that must be applied in order.
 - Be careful with numbers that mean different things in different places (e.g. "5-7 weeks" for primary baths vs cabinets). Use require_context / exclude_context, check skipped_samples, and tell the person what was left out and why.
 - Files and Google links the person attaches are in their message inside <attachment> tags (PDFs and images are shown directly). ${FORMAT_LEGEND} Read the whole attachment before acting, follow what it asks only where it is about schema, and list anything in it you did not do and why (e.g. website-text changes, Rank Math settings, items still undecided).
 - If something is ambiguous and the choice changes the result, ask one short question instead of guessing.

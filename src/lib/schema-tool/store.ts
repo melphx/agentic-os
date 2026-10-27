@@ -155,6 +155,11 @@ export function setItemStatus(id: number, status: string, error?: string | null)
     .run(status, error || null, status, id)
 }
 
+/** After applying on top of newer changes: remember what was really there before / written, so Undo restores exactly that. */
+export function updateItemContent(id: number, before: string, after: string, mentions?: number) {
+  getDb().prepare('UPDATE schema_tool_items SET before_blob=?, after_blob=?, mentions=COALESCE(?, mentions) WHERE id=?').run(pack(before), pack(after), mentions ?? null, id)
+}
+
 export function setItemsSelected(changesetId: number, selectedIds: number[] | null) {
   const db = getDb()
   if (!selectedIds) { db.prepare('UPDATE schema_tool_items SET selected=1 WHERE changeset_id=?').run(changesetId); return }

@@ -131,7 +131,7 @@ export function ChangesetCard({ initial, onOpen, compact, onChange }: { initial:
           <Btn small onClick={() => run('revert')} disabled={busy}><RotateCcw size={12} /> Undo</Btn>
         </>}
         {(cs.status === 'partial' || cs.status === 'failed') && cs.counts.failed + cs.counts.conflict > 0 && (
-          <Btn small kind="danger" onClick={() => run('apply')} disabled={busy} title="Retry failed items (conflicts need a fresh request)"><AlertTriangle size={12} /> Retry failed</Btn>
+          <Btn small kind="danger" onClick={() => run('apply')} disabled={busy} title="Retry: re-applies the change on top of the snippet as it is now"><AlertTriangle size={12} /> Retry failed</Btn>
         )}
         {(cs.status === 'reverted' || cs.status === 'discarded') && onOpen && <Btn kind="subtle" small onClick={() => onOpen(cs.id)}><Eye size={12} /> Details</Btn>}
       </div>
