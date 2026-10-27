@@ -8,10 +8,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Sparkles, Search, History as HistoryIcon, Globe, FileCode2, Settings2, Plus, Send, ExternalLink, Check, X, RefreshCw, MessageSquare, Zap,
 } from 'lucide-react'
+import { SourcesPanel } from './SourcesPanel'
 import { Btn, GlobalStyle, MiniMarkdown, Pill, Spinner, STATUS_LABEL, T, api, inputStyle, shortName, statusTone, timeAgo } from './ui'
 import { ChangesetCard, CsSummary, ReviewDrawer } from './ChangesetCard'
 
-type Tab = 'assistant' | 'snippets' | 'history' | 'page'
+type Tab = 'assistant' | 'snippets' | 'sources' | 'history' | 'page'
 
 interface Status {
   site: { url: string; label: string; prodOrigin: string; configured: boolean }
@@ -28,6 +29,8 @@ export default function SchemaToolView() {
   const [review, setReview] = useState<number | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [openSnippet, setOpenSnippet] = useState<number | null>(null)
+  const [draft, setDraft] = useState<{ text: string; n: number } | null>(null)
+  const askAssistant = (text: string) => { setDraft({ text, n: Date.now() }); setTab('assistant') }
 
   const loadStatus = useCallback(async (ping = false) => {
     try { setStatus(await api<Status>(`/api/schema-tool/status${ping ? '?ping=1' : ''}`)); setStatusErr(null) }
@@ -38,6 +41,7 @@ export default function SchemaToolView() {
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: 'assistant', label: 'Assistant', icon: <Sparkles size={13} /> },
     { id: 'snippets', label: 'Snippets', icon: <FileCode2 size={13} /> },
+    { id: 'sources', label: 'Sources', icon: <ExternalLink size={13} /> },
     { id: 'history', label: 'History', icon: <HistoryIcon size={13} /> },
     { id: 'page', label: 'Page check', icon: <Globe size={13} /> },
   ]
@@ -50,7 +54,6 @@ export default function SchemaToolView() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginRight: 6 }}>
           <span style={{ fontSize: 16 }}>🧩</span>
           <span style={{ color: 'white', fontWeight: 700, fontSize: 15 }}>Schema</span>
-          <span style={{ fontSize: 10, color: 'rgba(148,163,184,0.5)', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.15)', padding: '1px 7px', borderRadius: 10 }}>JSON-LD · HFCM snippets</span>
         </div>
         <div style={{ display: 'flex', background: 'rgba(99,102,241,0.08)', border: `1px solid ${T.border}`, borderRadius: 9, padding: 2 }}>
           {tabs.map(t => (
@@ -79,7 +82,8 @@ export default function SchemaToolView() {
       )}
 
       <div style={{ flex: 1, minHeight: 0 }}>
-        {tab === 'assistant' && <AssistantPanel onReview={setReview} aiReady={status?.ai.provider !== 'none'} />}
+        {tab === 'assistant' && <AssistantPanel onReview={setReview} aiReady={status?.ai.provider !== 'none'} draft={draft} />}
+        {tab === 'sources' && <SourcesPanel onAsk={askAssistant} />}
         {tab === 'snippets' && <SnippetsPanel openId={openSnippet} setOpenId={setOpenSnippet} onReview={setReview} prodOrigin={status?.site.prodOrigin || ''} siteUrl={status?.site.url || ''} />}
         {tab === 'history' && <HistoryPanel onReview={setReview} />}
         {tab === 'page' && <PageCheckPanel siteUrl={status?.site.url || ''} onOpenSnippet={id => { setOpenSnippet(id); setTab('snippets') }} />}
@@ -102,10 +106,10 @@ const SUGGESTIONS = [
   'Which snippets still mention a $15,000 minimum?',
   'Change guest bathroom timelines from 3-5 weeks to 3-4 weeks',
   'Check https://phxhomeremodeling.com/author-ben-chesley/ — does the FAQ schema match the page?',
-  'Add a sameAs link to every Organization copy',
+  'Sync the Organization sameAs with our SEO sameAs sheet',
 ]
 
-function AssistantPanel({ onReview, aiReady }: { onReview: (id: number) => void; aiReady: boolean }) {
+function AssistantPanel({ onReview, aiReady, draft }: { onReview: (id: number) => void; aiReady: boolean; draft?: { text: string; n: number } | null }) {
   const [convs, setConvs] = useState<{ conversation_id: string; title: string; updated_at: string }[]>([])
   const [cid, setCid] = useState<string | null>(null)
   const [msgs, setMsgs] = useState<Msg[]>([])
@@ -118,6 +122,7 @@ function AssistantPanel({ onReview, aiReady }: { onReview: (id: number) => void;
     try { setConvs((await api<{ conversations: any[] }>('/api/schema-tool/chat')).conversations) } catch {}
   }, [])
   useEffect(() => { loadConvs() }, [loadConvs])
+  useEffect(() => { if (draft) { setInput(draft.text); setTimeout(() => inputRef.current?.focus(), 50) } }, [draft])
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [msgs])
 
   const openConv = async (id: string) => {
