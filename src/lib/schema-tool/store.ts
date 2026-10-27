@@ -69,6 +69,7 @@ export function ensureSchemaToolTables() {
   `)
   try { getDb().exec('ALTER TABLE schema_tool_messages ADD COLUMN steps TEXT') } catch {}
   try { getDb().exec('ALTER TABLE schema_tool_messages ADD COLUMN usage TEXT') } catch {}
+  try { getDb().exec('ALTER TABLE schema_tool_messages ADD COLUMN attachments TEXT') } catch {}
   ensured = true
 }
 
@@ -163,10 +164,15 @@ export function setItemsSelected(changesetId: number, selectedIds: number[] | nu
 }
 
 // ── chat messages ──────────────────────────────────────────────────────────
-export function addMessage(conversationId: string, role: string, content: string, changesetIds?: number[], by?: string | null, steps?: string[], usage?: unknown) {
+export function addMessage(conversationId: string, role: string, content: string, changesetIds?: number[], by?: string | null, steps?: string[], usage?: unknown, attachments?: unknown[]): number {
   ensureSchemaToolTables()
-  getDb().prepare('INSERT INTO schema_tool_messages (conversation_id, role, content, changeset_ids, created_by, steps, usage) VALUES (?,?,?,?,?,?,?)')
-    .run(conversationId, role, content, changesetIds && changesetIds.length ? JSON.stringify(changesetIds) : null, by || null, steps && steps.length ? JSON.stringify(steps) : null, usage ? JSON.stringify(usage) : null)
+  return Number(getDb().prepare('INSERT INTO schema_tool_messages (conversation_id, role, content, changeset_ids, created_by, steps, usage, attachments) VALUES (?,?,?,?,?,?,?,?)')
+    .run(conversationId, role, content, changesetIds && changesetIds.length ? JSON.stringify(changesetIds) : null, by || null, steps && steps.length ? JSON.stringify(steps) : null, usage ? JSON.stringify(usage) : null, attachments && attachments.length ? JSON.stringify(attachments) : null).lastInsertRowid)
+}
+
+/** Attachments shown on a message: [{ id, kind, name, url, error? }] */
+export function setMessageAttachments(messageId: number, attachments: unknown[]) {
+  getDb().prepare('UPDATE schema_tool_messages SET attachments=? WHERE id=?').run(attachments.length ? JSON.stringify(attachments) : null, messageId)
 }
 
 /** AI usage + estimated cost over the last N days (from assistant messages). */
@@ -205,11 +211,11 @@ export function latestJob(conversationId: string): JobRow | null {
   return { ...r, steps: r.steps ? JSON.parse(r.steps) : [] }
 }
 
-export function getMessages(conversationId: string, limit = 60): { role: string; content: string; changeset_ids: number[]; steps: string[]; usage: any; created_at: string }[] {
+export function getMessages(conversationId: string, limit = 60): { role: string; content: string; changeset_ids: number[]; steps: string[]; usage: any; attachments: any[]; created_at: string }[] {
   ensureSchemaToolTables()
-  const rows = getDb().prepare('SELECT role, content, changeset_ids, steps, usage, created_at FROM schema_tool_messages WHERE conversation_id=? ORDER BY id DESC LIMIT ?')
+  const rows = getDb().prepare('SELECT role, content, changeset_ids, steps, usage, attachments, created_at FROM schema_tool_messages WHERE conversation_id=? ORDER BY id DESC LIMIT ?')
     .all(conversationId, limit) as any[]
-  return rows.reverse().map(r => ({ ...r, changeset_ids: r.changeset_ids ? JSON.parse(r.changeset_ids) : [], steps: r.steps ? JSON.parse(r.steps) : [], usage: r.usage ? JSON.parse(r.usage) : null }))
+  return rows.reverse().map(r => ({ ...r, changeset_ids: r.changeset_ids ? JSON.parse(r.changeset_ids) : [], steps: r.steps ? JSON.parse(r.steps) : [], usage: r.usage ? JSON.parse(r.usage) : null, attachments: r.attachments ? JSON.parse(r.attachments) : [] }))
 }
 
 export function listConversations(limit = 20): { conversation_id: string; title: string; updated_at: string }[] {
@@ -232,7 +238,32 @@ export const DEFAULT_RULES = `- Work only on the configured site (staging). Neve
 - PHR Organization ID: https://phxhomeremodeling.com/#organization. Wikidata: company Q138340466, Jeremy Q141665193, book Q141727039.
 - Project minimum is $20,000.`
 
-export function getSettings(): { auto_apply_max: number; rules: string; effort: string } {
+/** Background the assistant gets on every request (editable in Settings). Facts here are as of Oct 2026. */
+export const DEFAULT_CONTEXT = `Company
+- Phoenix Home Remodeling (PHR) — legal name "CMC Group Ventures, Inc. DBA Phoenix Home Remodeling". Founded 2017. Interior design-build remodeler (kitchens, bathrooms, whole-home interiors) serving the Phoenix metro.
+- Office: 6700 W Chicago St #1, Chandler, AZ 85226. Phone +1 602-492-8205. Email support@phxhomeremodeling.com. Website https://phxhomeremodeling.com
+- Owners: Jeremy Maher (Co-Founder & COO; author of the book "Remodel Without Regret"), Ben Chesley (Co-Founder & CFO), Mark Chesley (Co-Founder & Chief Construction Officer).
+- Person IDs: Jeremy https://phxhomeremodeling.com/author-jeremy-maher/#person · Ben https://phxhomeremodeling.com/about-phoenix-home-remodeling/#ben-chesley · Mark https://phxhomeremodeling.com/about-phoenix-home-remodeling/#mark-chesley
+- Other IDs: #organization, #website, Book https://phxhomeremodeling.com/remodel-book/#book. Google KG: company kgmid /g/11fy2d3flq, Jeremy /g/11gffc0shl.
+- Service area: Phoenix, Mesa, Chandler, Tempe, Gilbert, Scottsdale, Queen Creek, Sun Lakes, Laveen, Ahwatukee, Arcadia, Biltmore, South Phoenix (city pages are /…-az/).
+- Credentials: Arizona Registered Contractor (ROC), BBB A+ accredited, NARI and NKBA member. Ratings change — read the current number from the schema instead of assuming one.
+
+Confirmed facts (use these when schema disagrees)
+- Project minimum $20,000 (never $15,000 or $18,000).
+- Timelines: primary bathroom 4-7 weeks; guest bathroom 3-4 weeks.
+- Laundry room remodel $20,000 to $25,000.
+- Not decided yet — ask before changing: kitchen price range ($40K vs $50K–$100K+), whole-home range ($200K vs $150K–$500K), whether the shower range $12K–$30K applies site-wide, and minPrice/maxPrice numbers.
+
+Website & schema setup
+- Schema lives in Header Footer Code Manager (HFCM) snippets; one snippet per page, named with the page's live URL. About 150 snippets are active; inactive ones are old/retired.
+- Key snippets: #407 homepage, #410 About, #537 Our Story, #556 Jeremy's author page, #557 Ben's author page, #559 media kit, #560 book page.
+- The full Organization is copied into ~130 snippets (not defined once). A company-wide change means editing every copy — find them by searching for facebook.com/PhoenixHomeRemodelingCompany/.
+- Rank Math also outputs its own schema block (class "rank-math-schema-pro": basic Organization, VideoObject…). It is NOT editable here; ignore it unless asked.
+- Pages were renamed: bathroom-remodeling → bathroom-remodel, kitchen-remodeling → kitchen-remodel. The old kitchen-bath-renovation pages are retired.
+- The team's sameAs tracking sheet and fact-fix docs are usually shared as Google links.`
+
+export interface Settings { auto_apply_max: number; rules: string; effort: string; context: string; notes: string }
+export function getSettings(): Settings {
   ensureSchemaToolTables()
   const rows = getDb().prepare('SELECT key, value FROM schema_tool_settings').all() as { key: string; value: string }[]
   const m: Record<string, string> = {}
@@ -241,13 +272,28 @@ export function getSettings(): { auto_apply_max: number; rules: string; effort: 
     auto_apply_max: m.auto_apply_max != null ? Number(m.auto_apply_max) : 0,
     rules: m.rules != null ? m.rules : DEFAULT_RULES,
     effort: m.effort || '',
+    context: m.context != null ? m.context : DEFAULT_CONTEXT,
+    notes: m.notes || '',
   }
 }
 
-export function saveSettings(s: Partial<{ auto_apply_max: number; rules: string; effort: string }>) {
+/** The assistant's "remember this" — appended to the notes shown (and editable) in Settings. */
+export function addNote(note: string, by?: string | null): string {
+  const n = String(note || '').replace(/\s+/g, ' ').trim().slice(0, 500)
+  if (!n) return getSettings().notes
+  const cur = getSettings().notes
+  const line = `- ${n}${by ? ` (${by.split('@')[0]}, ${new Date().toISOString().slice(0, 10)})` : ''}`
+  const next = (cur ? cur.trimEnd() + '\n' : '') + line
+  saveSettings({ notes: next })
+  return next
+}
+
+export function saveSettings(s: Partial<Settings>) {
   ensureSchemaToolTables()
   const st = getDb().prepare('INSERT INTO schema_tool_settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
   if (s.auto_apply_max != null) st.run('auto_apply_max', String(Math.max(0, Math.floor(Number(s.auto_apply_max) || 0))))
   if (s.rules != null) st.run('rules', String(s.rules).slice(0, 20000))
   if (s.effort != null && ['', 'low', 'medium', 'high'].indexOf(s.effort) >= 0) st.run('effort', s.effort)
+  if (s.context != null) st.run('context', String(s.context).slice(0, 30000))
+  if (s.notes != null) st.run('notes', String(s.notes).slice(0, 20000))
 }

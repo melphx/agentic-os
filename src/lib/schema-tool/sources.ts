@@ -50,6 +50,47 @@ export interface SourceRow {
   fetched_at: string | null; error: string | null; created_by: string | null; created_at: string
 }
 
+/** Google links in free text (chat messages). */
+export function findGoogleLinks(text: string): string[] {
+  const re = /https?:\/\/(?:docs|drive)\.google\.com\/[^\s<>()"']+/g
+  const out: string[] = []
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text))) { const u = m[0].replace(/[.,;:!?]+$/, ''); if (parseAnyGoogleUrl(u) && out.indexOf(u) < 0) out.push(u) }
+  return out
+}
+
+/** Sheets, Docs, and plain Drive files (PDF, Word, Excel… stored in Drive). */
+export function parseAnyGoogleUrl(url: string): { id: string; type: 'sheet' | 'doc' | 'file'; gid?: string } | null {
+  const g = parseGoogleUrl(url)
+  if (g) return { id: g.doc_id, type: g.doc_type, gid: g.gid }
+  const f = url.match(/drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?(?:export=\w+&)?id=)([a-zA-Z0-9_-]+)/) || url.match(/docs\.google\.com\/presentation\/d\/([a-zA-Z0-9_-]+)/)
+  return f ? { id: f[1], type: 'file' } : null
+}
+
+export type GoogleRead =
+  | { kind: 'sheet' | 'doc'; title: string; tab?: string; tabs?: string[]; text: string }
+  | { kind: 'text'; title: string; text: string }
+  | { kind: 'binary'; title: string; mime: string; data: Buffer }
+
+/** Read any Google link once (for chat attachments). Sheets read up to 2,000 rows of the linked tab. */
+export async function readGoogleLink(url: string, tab?: string): Promise<GoogleRead> {
+  const p = parseAnyGoogleUrl(url)
+  if (!p) throw new Error('Not a Google Docs / Sheets / Drive link.')
+  let type = p.type
+  if (type === 'file') {
+    const f = await runReader(['file', '--id', p.id])
+    if (f.kind === 'native') type = f.doc_type
+    else if (f.kind === 'text') return { kind: 'text', title: f.name || 'Google file', text: String(f.text || '') }
+    else return { kind: 'binary', title: f.name || 'Drive file', mime: f.mimeType || 'application/octet-stream', data: Buffer.from(f.b64 || '', 'base64') }
+  }
+  if (type === 'sheet') {
+    const raw = await runReader(['sheet', '--id', p.id, '--range', 'A1:Z2000', ...(tab ? ['--tab', tab] : p.gid ? ['--gid', p.gid] : [])])
+    return { kind: 'sheet', title: raw.title || 'Google Sheet', tab: raw.tab, tabs: raw.tabs, text: renderSheet(raw).text }
+  }
+  const raw = await runReader(['doc', '--id', p.id])
+  return { kind: 'doc', title: raw.title || 'Google Doc', text: renderDoc(raw).text }
+}
+
 export function parseGoogleUrl(url: string): { doc_id: string; doc_type: 'sheet' | 'doc'; gid?: string } | null {
   const sheet = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/)
   if (sheet) { const gid = url.match(/[#&?]gid=(\d+)/); return { doc_id: sheet[1], doc_type: 'sheet', gid: gid?.[1] } }

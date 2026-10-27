@@ -2,14 +2,17 @@
  * /api/schema-tool/chat
  * GET                    → recent conversations
  * GET ?conversation_id=X → messages, changesets they staged, and the latest assistant job (running / done / error + steps)
- * POST { conversation_id?, message } → starts the assistant in the background and returns right away
+ * POST { conversation_id?, message, attachment_ids? } → starts the assistant in the background and returns right away
  *                                       { conversation_id, job_id }. The UI polls GET until the job is done,
  *                                       so leaving the page doesn't lose the answer.
+ *                                       Google Docs / Sheets / Drive links in the message are read automatically.
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
 import { runAgent } from '@/lib/schema-tool/agent'
-import { addMessage, createJob, finishJob, getMessages, getSettings, latestJob, listConversations, updateJobSteps } from '@/lib/schema-tool/store'
+import { addMessage, createJob, finishJob, getMessages, getSettings, latestJob, listConversations, setMessageAttachments, updateJobSteps } from '@/lib/schema-tool/store'
+import { attachLink, attachmentRefLine, AttachmentSummary, claimAttachments, KIND_LABEL, summaries } from '@/lib/schema-tool/attachments'
+import { findGoogleLinks } from '@/lib/schema-tool/sources'
 import { startApply } from '@/lib/schema-tool/changesets'
 import { changesetSummary, fail, guard } from '@/lib/schema-tool/http'
 
@@ -32,7 +35,8 @@ export async function POST(req: NextRequest) {
   const { email, error } = await guard(req); if (error) return error
   try {
     const body = await req.json()
-    const message = String(body.message || '').trim()
+    const uploadIds: number[] = Array.isArray(body.attachment_ids) ? body.attachment_ids.map(Number).filter((n: number) => n > 0).slice(0, 10) : []
+    const message = String(body.message || '').trim() || (uploadIds.length ? 'Please look at the attached file(s).' : '')
     if (!message) return NextResponse.json({ error: 'Empty message' }, { status: 400 })
     const conversationId = String(body.conversation_id || randomUUID())
     const running = latestJob(conversationId)
@@ -40,16 +44,33 @@ export async function POST(req: NextRequest) {
 
     const past = getMessages(conversationId, 16).map(m => ({
       role: (m.role === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant',
-      content: m.content + (m.changeset_ids.length ? `\n[staged changesets: ${m.changeset_ids.map(i => '#' + i).join(', ')}]` : ''),
+      content: m.content + (m.changeset_ids.length ? `\n[staged changesets: ${m.changeset_ids.map(i => '#' + i).join(', ')}]` : '') + attachmentRefLine(m.attachments || []),
     }))
-    addMessage(conversationId, 'user', message, [], email)
+    claimAttachments(uploadIds, conversationId)
+    const chip = (a: AttachmentSummary) => ({ id: a.id, kind: a.kind, name: a.name, url: a.url, error: a.error, note: a.note })
+    const uploaded = summaries(uploadIds)
+    const links = findGoogleLinks(message).slice(0, 6)
+    const msgId = addMessage(conversationId, 'user', message, [], email, undefined, undefined,
+      [...uploaded.map(chip), ...links.map(url => ({ id: 0, kind: /spreadsheets/.test(url) ? 'gsheet' : 'gdoc', name: 'Reading link…', url, pending: true }))])
     const jobId = createJob(conversationId)
 
     // run in the background — the response returns immediately
     void (async () => {
       try {
+        const pre: string[] = []
+        const linked: AttachmentSummary[] = []
+        for (const url of links) {
+          pre.push(`Reading ${/spreadsheets/.test(url) ? 'Google Sheet' : /document/.test(url) ? 'Google Doc' : 'Google Drive file'}`)
+          updateJobSteps(jobId, pre)
+          const a = await attachLink(url, conversationId, email)
+          linked.push(a)
+          pre[pre.length - 1] = a.error ? `Could not open ${KIND_LABEL[a.kind]} (${a.error.slice(0, 80)})` : `Read ${KIND_LABEL[a.kind]} “${a.name}”${a.note ? ` (${a.note})` : ''}`
+          updateJobSteps(jobId, pre)
+        }
+        setMessageAttachments(msgId, [...uploaded, ...linked].map(chip))
         const { reply, changesetIds, steps, usage } = await runAgent([...past, { role: 'user', content: message }], {
           conversationId, user: email, onProgress: s => updateJobSteps(jobId, s),
+          attachmentIds: [...uploaded, ...linked].map(a => a.id), preSteps: pre,
         })
         const { auto_apply_max } = getSettings()
         if (auto_apply_max > 0) {

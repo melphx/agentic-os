@@ -7,6 +7,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Sparkles, Search, History as HistoryIcon, Globe, FileCode2, Settings2, Plus, Send, ExternalLink, Check, X, RefreshCw, MessageSquare, Zap,
+  Paperclip, FileText, FileSpreadsheet, Image as ImageIcon, Link2, AlertTriangle,
 } from 'lucide-react'
 import { SourcesPanel } from './SourcesPanel'
 import { Btn, GlobalStyle, MiniMarkdown, Pill, Spinner, STATUS_LABEL, T, api, inputStyle, shortName, statusTone, timeAgo } from './ui'
@@ -17,9 +18,10 @@ type Tab = 'assistant' | 'snippets' | 'sources' | 'history' | 'page'
 interface Status {
   site: { url: string; label: string; prodOrigin: string; configured: boolean }
   ai: { provider: 'anthropic' | 'openai' | 'none'; model: string }
-  settings: { auto_apply_max: number; rules: string; effort: string }
+  settings: { auto_apply_max: number; rules: string; effort: string; context: string; notes: string }
   usage30d?: { requests: number; input: number; output: number; cacheRead: number; cacheWrite: number; costUsd: number }
   defaultRules: string
+  defaultContext: string
   ping: { ok: boolean; count?: number; error?: string } | null
 }
 
@@ -101,7 +103,34 @@ function Banner({ tone, children }: { tone: 'red' | 'amber'; children: React.Rea
 }
 
 // ── Assistant ──────────────────────────────────────────────────────────────
-interface Msg { role: 'user' | 'assistant'; content: string; changesets?: CsSummary[]; pending?: boolean; error?: boolean; steps?: string[]; usage?: any }
+interface Att { id: number; kind: string; name: string; url?: string | null; error?: string | null; note?: string; pending?: boolean; size?: number; chars?: number }
+interface Msg { role: 'user' | 'assistant'; content: string; changesets?: CsSummary[]; pending?: boolean; error?: boolean; steps?: string[]; usage?: any; attachments?: Att[] }
+interface Upload { key: string; name: string; size: number; att?: Att; error?: string; uploading: boolean }
+
+const GOOGLE_LINK = /https?:\/\/(?:docs|drive)\.google\.com\/[^\s]+/
+const ACCEPT = '.pdf,.docx,.xlsx,.xlsm,.pptx,.csv,.tsv,.txt,.md,.json,.jsonld,.html,.htm,.xml,.png,.jpg,.jpeg,.gif,.webp'
+
+function attIcon(kind: string) {
+  if (kind === 'gsheet' || kind === 'xlsx' || kind === 'csv') return <FileSpreadsheet size={12} />
+  if (kind === 'image') return <ImageIcon size={12} />
+  return <FileText size={12} />
+}
+const fmtSize = (n?: number) => !n ? '' : n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`
+
+function AttachmentChip({ a, onRemove, busy }: { a: { name: string; kind?: string; url?: string | null; error?: string | null; note?: string; size?: number; pending?: boolean }; onRemove?: () => void; busy?: boolean }) {
+  const bad = !!a.error
+  const body = (
+    <span title={a.error || a.url || a.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: 300, padding: '4px 9px', borderRadius: 8, fontSize: 11.5,
+      background: bad ? T.redBg : 'rgba(99,102,241,0.12)', border: `1px solid ${bad ? T.redBorder : T.border}`, color: bad ? T.red : '#c7d2fe' }}>
+      {busy || a.pending ? <Spinner size={10} /> : bad ? <AlertTriangle size={12} /> : attIcon(a.kind || '')}
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
+      {!bad && (a.note || a.size) ? <span style={{ color: T.faint, flexShrink: 0 }}>{a.note || fmtSize(a.size)}</span> : null}
+      {bad && <span style={{ color: T.red, opacity: 0.8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 140 }}>· {a.error}</span>}
+      {onRemove && <button onClick={onRemove} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, display: 'flex', opacity: 0.7 }}><X size={11} /></button>}
+    </span>
+  )
+  return a.url && !onRemove ? <a href={a.url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>{body}</a> : body
+}
 
 const SUGGESTIONS = [
   'Which snippets still mention a $15,000 minimum?',
@@ -109,6 +138,8 @@ const SUGGESTIONS = [
   'Check https://phxhomeremodeling.com/author-ben-chesley/ — does the FAQ schema match the page?',
   'Sync the Organization sameAs with our SEO sameAs sheet',
 ]
+// Tip shown under the suggestions
+const ATTACH_TIP = 'Paste a Google Doc or Sheet link, or attach a file (PDF, Word, Excel, CSV, screenshots) — the assistant reads it with formatting like red text kept.'
 
 function AssistantPanel({ onReview, aiReady, draft }: { onReview: (id: number) => void; aiReady: boolean; draft?: { text: string; n: number } | null }) {
   const [convs, setConvs] = useState<{ conversation_id: string; title: string; updated_at: string }[]>([])
@@ -116,6 +147,9 @@ function AssistantPanel({ onReview, aiReady, draft }: { onReview: (id: number) =
   const [msgs, setMsgs] = useState<Msg[]>([])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
+  const [uploads, setUploads] = useState<Upload[]>([])
+  const [dragging, setDragging] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -136,7 +170,7 @@ function AssistantPanel({ onReview, aiReady, draft }: { onReview: (id: number) =
     if (cidRef.current !== id) return
     const byId: Record<number, CsSummary> = {}
     d.changesets.forEach(c => { byId[c.id] = c })
-    const list: Msg[] = d.messages.map(m => ({ role: m.role, content: m.content, steps: m.steps, usage: m.usage, changesets: (m.changeset_ids || []).map((i: number) => byId[i]).filter(Boolean) }))
+    const list: Msg[] = d.messages.map(m => ({ role: m.role, content: m.content, steps: m.steps, usage: m.usage, attachments: m.attachments || [], changesets: (m.changeset_ids || []).map((i: number) => byId[i]).filter(Boolean) }))
     const working = d.job?.status === 'running'
     if (working) list.push({ role: 'assistant', content: '', pending: true, steps: d.job?.steps || [] })
     setMsgs(list)
@@ -166,14 +200,44 @@ function AssistantPanel({ onReview, aiReady, draft }: { onReview: (id: number) =
     setTimeout(() => inputRef.current?.focus(), 30)
   }
 
+  const addFiles = async (files: FileList | File[]) => {
+    const list = Array.from(files).slice(0, 10)
+    if (!list.length) return
+    const items: Upload[] = list.map(f => ({ key: `${Date.now()}-${Math.random()}`, name: f.name, size: f.size, uploading: true }))
+    setUploads(u => [...u, ...items])
+    await Promise.all(list.map(async (f, i) => {
+      const key = items[i].key
+      try {
+        if (f.size > 20 * 1024 * 1024) throw new Error('Files must be under 20 MB.')
+        const fd = new FormData()
+        fd.append('file', f)
+        const res = await fetch('/api/schema-tool/attachments', { method: 'POST', body: fd })
+        const data = await res.json().catch(() => ({}))
+        if (res.status === 413) throw new Error('Too big for the server upload limit (nginx client_max_body_size)')
+        if (!res.ok) throw new Error(data?.error || `Upload failed (${res.status})`)
+        const a = data.attachments?.[0]
+        if (!a || a.error) throw new Error(a?.error || 'Upload failed')
+        setUploads(u => u.map(x => x.key === key ? { ...x, uploading: false, att: a } : x))
+      } catch (e: any) {
+        setUploads(u => u.map(x => x.key === key ? { ...x, uploading: false, error: e.message } : x))
+      }
+    }))
+    setTimeout(() => inputRef.current?.focus(), 30)
+  }
+  const uploading = uploads.some(u => u.uploading)
+  const readyAtts = uploads.filter(u => u.att).map(u => u.att!)
+
   const send = async (text?: string) => {
     const message = (text ?? input).trim()
-    if (!message || sending) return
+    if ((!message && !readyAtts.length) || sending || uploading) return
+    const atts = text != null ? [] : readyAtts
     setInput('')
+    if (text == null) setUploads([])
     setSending(true)
-    setMsgs(m => [...m, { role: 'user', content: message }, { role: 'assistant', content: '', pending: true, steps: [] }])
+    const links = (message.match(new RegExp(GOOGLE_LINK.source, 'g')) || []).map(u => ({ id: 0, kind: /spreadsheets/.test(u) ? 'gsheet' : 'gdoc', name: 'Reading link…', url: u, pending: true }))
+    setMsgs(m => [...m, { role: 'user', content: message || 'Please look at the attached file(s).', attachments: [...atts, ...links] }, { role: 'assistant', content: '', pending: true, steps: [] }])
     try {
-      const d = await api<{ conversation_id: string; job_id: number }>('/api/schema-tool/chat', { conversation_id: cid, message })
+      const d = await api<{ conversation_id: string; job_id: number }>('/api/schema-tool/chat', { conversation_id: cid, message, attachment_ids: atts.map(a => a.id) })
       setCid(d.conversation_id); cidRef.current = d.conversation_id
       try { localStorage.setItem('schemaTool.cid', d.conversation_id) } catch {}
       if (!cid) loadConvs()
@@ -221,7 +285,16 @@ function AssistantPanel({ onReview, aiReady, draft }: { onReview: (id: number) =
       </div>
 
       {/* chat */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, position: 'relative' }}
+        onDragOver={e => { if (Array.from(e.dataTransfer.types).indexOf('Files') >= 0) { e.preventDefault(); setDragging(true) } }}
+        onDragLeave={e => { if (e.currentTarget === e.target) setDragging(false) }}
+        onDrop={e => { e.preventDefault(); setDragging(false); if (aiReady && e.dataTransfer.files.length) addFiles(e.dataTransfer.files) }}>
+        {dragging && (
+          <div onDragLeave={() => setDragging(false)} style={{ position: 'absolute', inset: 10, zIndex: 20, borderRadius: 14, border: `2px dashed ${T.accent}`, background: 'rgba(12,17,30,0.88)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, color: '#c7d2fe', fontSize: 14, fontWeight: 600 }}>
+            <Paperclip size={22} /> Drop files to attach
+            <span style={{ fontSize: 11.5, color: T.sub, fontWeight: 400 }}>PDF, Word, Excel, PowerPoint, CSV, text, images · up to 20 MB</span>
+          </div>
+        )}
         <div className="st-scroll" style={{ flex: 1, overflowY: 'auto', padding: '22px 26px', display: 'flex', flexDirection: 'column', gap: 16 }}>
           {msgs.length === 0 && (
             <div style={{ margin: 'auto', maxWidth: 560, textAlign: 'center', paddingBottom: 40 }}>
@@ -233,12 +306,20 @@ function AssistantPanel({ onReview, aiReady, draft }: { onReview: (id: number) =
                   <button key={s} onClick={() => send(s)} disabled={!aiReady} className="st-row" style={{ textAlign: 'left', fontSize: 12, color: T.sub, background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: '10px 12px', cursor: 'pointer', fontFamily: 'inherit', lineHeight: 1.45 }}>{s}</button>
                 ))}
               </div>
+              <div style={{ color: T.faint, fontSize: 11.5, marginTop: 16, lineHeight: 1.55, display: 'flex', gap: 8, alignItems: 'flex-start', textAlign: 'left' }}><Paperclip size={13} style={{ flexShrink: 0, marginTop: 2 }} />{ATTACH_TIP}</div>
             </div>
           )}
           {msgs.map((m, i) => (
             <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: m.role === 'user' ? 'flex-end' : 'stretch', gap: 10, animation: 'stfade .2s ease' }}>
               {m.role === 'user' ? (
-                <div style={{ maxWidth: '78%', background: 'rgba(99,102,241,0.18)', border: `1px solid ${T.borderStrong}`, color: 'white', borderRadius: '14px 14px 4px 14px', padding: '9px 13px', fontSize: 13, lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>{m.content}</div>
+                <>
+                  {(m.attachments || []).length > 0 && (
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: '78%' }}>
+                      {(m.attachments || []).map((a, k) => <AttachmentChip key={k} a={a} />)}
+                    </div>
+                  )}
+                  <div style={{ maxWidth: '78%', background: 'rgba(99,102,241,0.18)', border: `1px solid ${T.borderStrong}`, color: 'white', borderRadius: '14px 14px 4px 14px', padding: '9px 13px', fontSize: 13, lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.content}</div>
+                </>
               ) : (
                 <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
                   <div style={{ width: 26, height: 26, flexShrink: 0, borderRadius: 8, background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Sparkles size={13} color="white" /></div>
@@ -264,16 +345,29 @@ function AssistantPanel({ onReview, aiReady, draft }: { onReview: (id: number) =
               <span style={{ color: T.faint }}>or press Ctrl+Enter</span>
             </div>
           )}
+          {uploads.length > 0 && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+              {uploads.map(u => <AttachmentChip key={u.key} busy={u.uploading} a={{ name: u.name, kind: u.att?.kind, size: u.size, note: u.att?.note, error: u.error }} onRemove={() => setUploads(x => x.filter(y => y.key !== u.key))} />)}
+            </div>
+          )}
+          {GOOGLE_LINK.test(input) && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, fontSize: 11.5, color: T.sub }}>
+              <Link2 size={12} color={T.accent} /> The Google link will be read when you send (it needs Viewer access for the MCD service account — see the Sources tab).
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+            <input ref={fileRef} type="file" multiple accept={ACCEPT} style={{ display: 'none' }} onChange={e => { if (e.target.files) addFiles(e.target.files); e.target.value = '' }} />
+            <Btn onClick={() => fileRef.current?.click()} disabled={!aiReady} title="Attach files (or drag & drop / paste)" style={{ height: 46, width: 42, justifyContent: 'center', padding: 0 }}><Paperclip size={15} /></Btn>
             <textarea ref={inputRef} className="st-input" value={input} onChange={e => setInput(e.target.value)} rows={2}
-              placeholder={aiReady ? 'Describe the schema change or ask a question… (Enter to send, Shift+Enter for a new line)' : 'Add an AI key to .env.local to use the assistant'}
+              placeholder={aiReady ? 'Describe the schema change, paste a Google Doc/Sheet link, or attach a file… (Enter to send)' : 'Add an AI key to .env.local to use the assistant'}
               disabled={!aiReady}
+              onPaste={e => { if (e.clipboardData.files.length) { e.preventDefault(); addFiles(e.clipboardData.files) } }}
               onKeyDown={e => {
                 if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); applyLatest(); return }
                 if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
               }}
               style={{ ...inputStyle, resize: 'none', minHeight: 46, maxHeight: 160, fontSize: 13, lineHeight: 1.5 }} />
-            <Btn kind="primary" onClick={() => send()} disabled={sending || !input.trim() || !aiReady} style={{ height: 46 }}>{sending ? <Spinner /> : <Send size={14} />}</Btn>
+            <Btn kind="primary" onClick={() => send()} disabled={sending || uploading || (!input.trim() && !readyAtts.length) || !aiReady} style={{ height: 46 }}>{sending || uploading ? <Spinner /> : <Send size={14} />}</Btn>
           </div>
         </div>
       </div>
@@ -569,12 +663,14 @@ function SettingsModal({ status, onClose, onSaved }: { status: Status; onClose: 
   const [auto, setAuto] = useState(status.settings.auto_apply_max)
   const [rules, setRules] = useState(status.settings.rules)
   const [effort, setEffort] = useState(status.settings.effort || '')
+  const [context, setContext] = useState(status.settings.context)
+  const [notes, setNotes] = useState(status.settings.notes || '')
   const [busy, setBusy] = useState(false)
-  const save = async () => { setBusy(true); try { await api('/api/schema-tool/status', { auto_apply_max: auto, rules, effort }); onSaved(); onClose() } finally { setBusy(false) } }
+  const save = async () => { setBusy(true); try { await api('/api/schema-tool/status', { auto_apply_max: auto, rules, effort, context, notes }); onSaved(); onClose() } finally { setBusy(false) } }
   const u = status.usage30d
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(2,6,15,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: 'min(640px,100%)', background: '#0b1020', border: `1px solid ${T.borderStrong}`, borderRadius: 14, padding: 20, display: 'flex', flexDirection: 'column', gap: 14, animation: 'stfade .18s ease' }}>
+      <div onClick={e => e.stopPropagation()} className="st-scroll" style={{ width: 'min(720px,100%)', maxHeight: '92vh', overflowY: 'auto', background: '#0b1020', border: `1px solid ${T.borderStrong}`, borderRadius: 14, padding: 20, display: 'flex', flexDirection: 'column', gap: 14, animation: 'stfade .18s ease' }}>
         <div style={{ display: 'flex', alignItems: 'center' }}><div style={{ color: 'white', fontWeight: 700, fontSize: 15, flex: 1 }}>Schema tool settings</div><button onClick={onClose} style={{ background: 'none', border: 'none', color: T.sub, cursor: 'pointer' }}><X size={18} /></button></div>
         <div>
           <div style={{ fontSize: 12.5, color: T.text, fontWeight: 600 }}>Auto-apply</div>
@@ -601,10 +697,21 @@ function SettingsModal({ status, onClose, onSaved }: { status: Status; onClose: 
           </div>
         )}
         <div>
+          <div style={{ fontSize: 12.5, color: T.text, fontWeight: 600 }}>Company &amp; site background</div>
+          <div style={{ fontSize: 11.5, color: T.sub, margin: '3px 0 8px' }}>What the assistant should know before every request: company facts, confirmed numbers, open decisions, how the site and schema are set up. Keep it current — it trusts this over older schema text. (The staging → live domain rule is added automatically.)</div>
+          <textarea className="st-input st-scroll" value={context} onChange={e => setContext(e.target.value)} rows={14} style={{ ...inputStyle, fontSize: 12, lineHeight: 1.5, resize: 'vertical' }} />
+          <button onClick={() => setContext(status.defaultContext)} style={{ background: 'none', border: 'none', color: T.accent, fontSize: 11.5, cursor: 'pointer', padding: '4px 0' }}>Reset to defaults</button>
+        </div>
+        <div>
           <div style={{ fontSize: 12.5, color: T.text, fontWeight: 600 }}>House rules for the assistant</div>
-          <div style={{ fontSize: 11.5, color: T.sub, margin: '3px 0 8px' }}>The assistant follows these on every request.</div>
-          <textarea className="st-input st-scroll" value={rules} onChange={e => setRules(e.target.value)} rows={12} style={{ ...inputStyle, fontSize: 12, lineHeight: 1.5, resize: 'vertical' }} />
+          <div style={{ fontSize: 11.5, color: T.sub, margin: '3px 0 8px' }}>Hard rules it follows on every request — they win over attachments and sources.</div>
+          <textarea className="st-input st-scroll" value={rules} onChange={e => setRules(e.target.value)} rows={10} style={{ ...inputStyle, fontSize: 12, lineHeight: 1.5, resize: 'vertical' }} />
           <button onClick={() => setRules(status.defaultRules)} style={{ background: 'none', border: 'none', color: T.accent, fontSize: 11.5, cursor: 'pointer', padding: '4px 0' }}>Reset to defaults</button>
+        </div>
+        <div>
+          <div style={{ fontSize: 12.5, color: T.text, fontWeight: 600 }}>Notes the assistant saved</div>
+          <div style={{ fontSize: 11.5, color: T.sub, margin: '3px 0 8px' }}>When you tell it to remember something (“from now on…”, “remember that…”), it adds a line here. Edit or delete freely.</div>
+          <textarea className="st-input st-scroll" value={notes} onChange={e => setNotes(e.target.value)} rows={4} placeholder="Nothing saved yet." style={{ ...inputStyle, fontSize: 12, lineHeight: 1.5, resize: 'vertical' }} />
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <Btn kind="subtle" onClick={onClose}>Cancel</Btn>

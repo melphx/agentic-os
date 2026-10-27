@@ -10,6 +10,16 @@ A sidebar page for reading and changing the site's JSON-LD schema
   The AI searches every snippet and *stages* one changeset with counts and a before/after.
   You apply it with one click (or Ctrl+Enter). It never writes on its own unless
   auto-apply is turned on in Settings for small changes.
+  - **Attachments**: paste a Google Doc / Sheet / Drive link in a message and it is read automatically
+    (the linked tab for sheets), or attach files with the paperclip, drag & drop or paste: PDF, Word (.docx),
+    Excel (.xlsx), PowerPoint (.pptx), CSV, text/JSON/HTML and images, up to 20 MB. Formatting that carries
+    meaning is kept ({red} text, highlights, ~~strikethrough~~, links, comments). PDFs and images are also sent
+    to Claude as-is so it sees the layout. Older attachments in a chat are re-read on demand (`read_attachment`)
+    to keep cost down.
+  - **Background**: Settings → *Company & site background* (company facts, confirmed numbers, open decisions,
+    how the site and schema are set up) is given to the assistant on every request, plus an automatic rule that
+    schema must use the live domain even while editing staging (staging URLs typed into a change are converted).
+  - **Notes**: when you tell it to remember something, it saves a line under Settings → *Notes*.
 - **Snippets**: browse, filter by URL, search inside schema code (text or regex), edit
   JSON-LD directly with live validation. Saving creates a changeset and applies it.
 - **Sources**: connect Google Sheets / Docs (e.g. the SEO sameAs sheet). The assistant reads them with
@@ -34,8 +44,9 @@ mcd/scripts/schema_source_reader.py  Google Sheets/Docs reader that keeps format
 src/app/page.tsx            +1 import, +1 sidebar NAV item, +1 case in mainContent()
 ```
 
-Database: five new tables in the existing SQLite DB (`schema_tool_changesets`,
-`schema_tool_items`, `schema_tool_messages`, `schema_tool_settings`, `schema_tool_sources`), created on first use
+Database: new tables in the existing SQLite DB (`schema_tool_changesets`, `schema_tool_items`,
+`schema_tool_messages`, `schema_tool_settings`, `schema_tool_sources`, `schema_tool_jobs`,
+`schema_tool_attachments`), created on first use
 with `CREATE TABLE IF NOT EXISTS`. Nothing existing is altered. Before/after snippet text is
 stored zlib-compressed.
 
@@ -54,6 +65,9 @@ SCHEMA_TOOL_ANTHROPIC_MODEL=claude-sonnet-5-5
 # SCHEMA_TOOL_SA_JSON=/path/to/sa.json   # optional; defaults to INITIATIVES_SA_JSON etc.
 # otherwise it uses the existing OPENAI_API_KEY (SCHEMA_TOOL_OPENAI_MODEL || OPENAI_MODEL)
 ```
+
+Uploads go through nginx: raise `client_max_body_size` (e.g. `25m`) in the MCD server block if files over 1 MB
+are refused (the update script reports the current value).
 
 Switching to the live site after cutover = change `SCHEMA_TOOL_WP_URL` (the live site needs
 the `phr-schema-api.php` mu-plugin installed) and restart.

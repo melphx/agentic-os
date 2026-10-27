@@ -10,8 +10,9 @@ Env vars checked in order: SCHEMA_TOOL_SA_JSON, INITIATIVES_SA_JSON, CALL_FEEDBA
 Commands (all print JSON):
   whoami                                     service-account email (share sheets/docs with it)
   tabs  --id SHEET_ID                        list tab names
-  sheet --id SHEET_ID [--tab TAB] [--range A1:Z600]
+  sheet --id SHEET_ID [--tab TAB | --gid GID] [--range A1:Z600]
   doc   --id DOC_ID
+  file  --id DRIVE_FILE_ID                   any Drive file: {kind: sheet|doc|binary, ...}; binary = base64 bytes
 """
 import argparse
 import json
@@ -60,9 +61,12 @@ def cmd_tabs(args):
 
 def cmd_sheet(args):
     svc = _svc("sheets", "v4")
-    meta = svc.spreadsheets().get(spreadsheetId=args.id, fields="properties.title,sheets.properties.title").execute()
+    meta = svc.spreadsheets().get(spreadsheetId=args.id, fields="properties.title,sheets.properties(title,sheetId)").execute()
     tabs = [s["properties"]["title"] for s in meta.get("sheets", [])]
-    tab = args.tab or (tabs[0] if tabs else "")
+    tab = args.tab
+    if not tab and getattr(args, "gid", ""):
+        tab = next((s["properties"]["title"] for s in meta.get("sheets", []) if str(s["properties"].get("sheetId")) == str(args.gid)), "")
+    tab = tab or (tabs[0] if tabs else "")
     rng = f"'{tab}'!{args.range}" if tab else args.range
     fields = ("sheets.properties.title,sheets.data.startRow,sheets.data.rowData.values("
               "formattedValue,hyperlink,note,"
@@ -116,16 +120,36 @@ def cmd_doc(args):
         print(json.dumps({"kind": "doc", "title": "", "text": text, "note": f"plain text only ({type(e).__name__})"}))
 
 
+def cmd_file(args):
+    import base64
+    drive = _svc("drive", "v3")
+    f = drive.files().get(fileId=args.id, fields="name,mimeType,size", supportsAllDrives=True).execute()
+    mt = f.get("mimeType", "")
+    if mt == "application/vnd.google-apps.spreadsheet":
+        print(json.dumps({"kind": "native", "doc_type": "sheet", "name": f.get("name", "")})); return
+    if mt == "application/vnd.google-apps.document":
+        print(json.dumps({"kind": "native", "doc_type": "doc", "name": f.get("name", "")})); return
+    if mt.startswith("application/vnd.google-apps."):
+        resp = drive.files().export(fileId=args.id, mimeType="text/plain").execute()
+        text = resp.decode("utf-8", "ignore") if isinstance(resp, bytes) else str(resp)
+        print(json.dumps({"kind": "text", "name": f.get("name", ""), "mimeType": mt, "text": text})); return
+    if int(f.get("size") or 0) > 25 * 1024 * 1024:
+        raise RuntimeError("File is larger than 25 MB.")
+    data = drive.files().get_media(fileId=args.id, supportsAllDrives=True).execute()
+    print(json.dumps({"kind": "binary", "name": f.get("name", ""), "mimeType": mt, "b64": base64.b64encode(data).decode()}))
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("whoami")
     t = sub.add_parser("tabs"); t.add_argument("--id", required=True)
-    s = sub.add_parser("sheet"); s.add_argument("--id", required=True); s.add_argument("--tab", default=""); s.add_argument("--range", default="A1:Z600")
+    s = sub.add_parser("sheet"); s.add_argument("--id", required=True); s.add_argument("--tab", default=""); s.add_argument("--gid", default=""); s.add_argument("--range", default="A1:Z600")
     d = sub.add_parser("doc"); d.add_argument("--id", required=True)
+    f = sub.add_parser("file"); f.add_argument("--id", required=True)
     args = ap.parse_args()
     try:
-        {"whoami": cmd_whoami, "tabs": cmd_tabs, "sheet": cmd_sheet, "doc": cmd_doc}[args.cmd](args)
+        {"whoami": cmd_whoami, "tabs": cmd_tabs, "sheet": cmd_sheet, "doc": cmd_doc, "file": cmd_file}[args.cmd](args)
     except Exception as e:  # noqa: BLE001
         msg = str(e)
         if "403" in msg or "PERMISSION_DENIED" in msg or "does not have permission" in msg:
