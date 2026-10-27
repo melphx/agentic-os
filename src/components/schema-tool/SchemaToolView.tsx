@@ -535,7 +535,11 @@ function PageCheckPanel({ siteUrl, onOpenSnippet }: { siteUrl: string; onOpenSni
                 </div>
               ))}
             </Card>
-            <Card title={`FAQ schema vs page (${res.faq.total} questions)`}>
+            <Card title={`FAQ visible on the page (${res.visibleFaq?.count ?? 0})`}>
+              {!res.visibleFaq?.count && <div style={{ fontSize: 12, color: T.faint }}>No FAQ found in the page HTML.</div>}
+              {(res.visibleFaq?.items || []).slice(0, 30).map((f: any, i: number) => <div key={i} style={{ fontSize: 12, color: T.sub, padding: '2px 0' }}>• {f.q}</div>)}
+            </Card>
+            <Card title={`FAQ schema vs page (${res.faq.total} questions in schema)`}>
               {res.faq.total === 0 && <div style={{ fontSize: 12, color: T.faint }}>No FAQ schema on this page.</div>}
               {res.faq.total > 0 && res.faq.mismatched.length === 0 && <div style={{ fontSize: 12, color: T.green }}><Check size={12} /> Every FAQ answer matches the page word for word.</div>}
               {res.faq.mismatched.map((m: any, i: number) => <div key={i} style={{ fontSize: 12, color: T.sub, padding: '2px 0' }}><span style={{ color: T.amber }}>{m.reason}:</span> {m.q}</div>)}

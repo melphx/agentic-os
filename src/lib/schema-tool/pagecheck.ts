@@ -3,7 +3,7 @@
  */
 import { toSiteUrl } from './config'
 import { fetchPage, listSnippets } from './wp'
-import { faqPairs, jsonLdBlocks, normalizeForCompare, visibleText } from './engine'
+import { decodeEntities, faqPairs, jsonLdBlocks, normalizeForCompare, visibleText } from './engine'
 
 export interface PageCheck {
   url: string
@@ -15,7 +15,34 @@ export interface PageCheck {
   hfcmSnippets: { id: number; name: string }[]
   expectedSnippets: { id: number; name: string; showing: boolean }[]
   jsonLd: { source: string; types: string[]; valid: boolean; error?: string }[]
+  /** FAQ items in the page's JSON-LD schema, and which of them don't match the visible page */
   faq: { total: number; mismatched: { q: string; reason: string }[] }
+  /** FAQ questions + answers visible in the page HTML (accordions, <details>, question headings) */
+  visibleFaq: { count: number; items: { q: string; a: string }[] }
+}
+
+/** Extract the FAQ a visitor sees: GenerateBlocks / generic accordions, <details>, and question headings. */
+export function extractVisibleFaq(html: string): { q: string; a: string }[] {
+  const body = html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, ' ')
+  const text = (s: string) => decodeEntities(s.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim()
+  const items: { q: string; a: string }[] = []
+  const seen: Record<string, boolean> = {}
+  const add = (q: string, a: string) => {
+    const k = q.toLowerCase()
+    if (q.length < 8 || q.length > 300 || seen[k]) return
+    seen[k] = true; items.push({ q, a: a.slice(0, 2000) })
+  }
+  // 1. accordions (GenerateBlocks: toggle + content; also generic "accordion" markup)
+  const accRe = /<[^>]+class="[^"]*accordion__toggle[^"]*"[^>]*>([\s\S]*?)<[^>]+class="[^"]*accordion__content[^"]*"[^>]*>([\s\S]*?)(?=<[^>]+class="[^"]*accordion__(?:item|toggle)[^"]*"|<\/section>|$)/gi
+  let m: RegExpExecArray | null
+  while ((m = accRe.exec(body))) add(text(m[1]), text(m[2]))
+  // 2. <details><summary>Q</summary>A</details>
+  const detRe = /<details[^>]*>\s*<summary[^>]*>([\s\S]*?)<\/summary>([\s\S]*?)<\/details>/gi
+  while ((m = detRe.exec(body))) add(text(m[1]), text(m[2]))
+  // 3. headings that are questions, answer = text until the next heading
+  const hRe = /<h([2-5])[^>]*>([\s\S]*?)<\/h\1>([\s\S]*?)(?=<h[1-5][^>]*>|$)/gi
+  while ((m = hRe.exec(body))) { const q = text(m[2]); if (/\?$/.test(q)) add(q, text(m[3]).slice(0, 1500)) }
+  return items
 }
 
 function typesOf(o: any, acc: Set<string>) {
@@ -78,5 +105,6 @@ export async function checkPage(inputUrl: string): Promise<PageCheck> {
     expectedSnippets: expected.map(s => ({ id: s.id, name: s.name, showing: hfcmIds.indexOf(s.id) >= 0 })),
     jsonLd: blocks,
     faq: { total: pairs.length, mismatched },
+    visibleFaq: (() => { const v = extractVisibleFaq(html); return { count: v.length, items: v } })(),
   }
 }

@@ -89,7 +89,7 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'check_page',
-    description: 'Fetch a page on the site and report which HFCM snippets it outputs, whether all JSON-LD parses, the canonical URL, and FAQ schema vs visible FAQ mismatches.',
+    description: 'Fetch a page on the site and report which HFCM snippets it outputs, whether all JSON-LD parses, the canonical URL, faq (= FAQ items in the page SCHEMA and which differ from the page) and visibleFaq (= the FAQ questions and answers a visitor actually sees, read from the page HTML). Use visibleFaq as the exact text when writing FAQ schema. faq.total = 0 only means there is no FAQ schema; check visibleFaq.count for whether the page shows FAQs.',
     parameters: { type: 'object', properties: { url: str }, required: ['url'] },
   },
   {
