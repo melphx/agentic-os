@@ -56,7 +56,18 @@ export function ensureSchemaToolTables() {
       key   TEXT PRIMARY KEY,
       value TEXT
     );
+    CREATE TABLE IF NOT EXISTS schema_tool_jobs (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      conversation_id TEXT NOT NULL,
+      status          TEXT NOT NULL DEFAULT 'running',   -- running | done | error
+      steps           TEXT,
+      error           TEXT,
+      started_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      finished_at     TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_schema_tool_jobs ON schema_tool_jobs(conversation_id);
   `)
+  try { getDb().exec('ALTER TABLE schema_tool_messages ADD COLUMN steps TEXT') } catch {}
   ensured = true
 }
 
@@ -151,17 +162,42 @@ export function setItemsSelected(changesetId: number, selectedIds: number[] | nu
 }
 
 // ── chat messages ──────────────────────────────────────────────────────────
-export function addMessage(conversationId: string, role: string, content: string, changesetIds?: number[], by?: string | null) {
+export function addMessage(conversationId: string, role: string, content: string, changesetIds?: number[], by?: string | null, steps?: string[]) {
   ensureSchemaToolTables()
-  getDb().prepare('INSERT INTO schema_tool_messages (conversation_id, role, content, changeset_ids, created_by) VALUES (?,?,?,?,?)')
-    .run(conversationId, role, content, changesetIds && changesetIds.length ? JSON.stringify(changesetIds) : null, by || null)
+  getDb().prepare('INSERT INTO schema_tool_messages (conversation_id, role, content, changeset_ids, created_by, steps) VALUES (?,?,?,?,?,?)')
+    .run(conversationId, role, content, changesetIds && changesetIds.length ? JSON.stringify(changesetIds) : null, by || null, steps && steps.length ? JSON.stringify(steps) : null)
 }
 
-export function getMessages(conversationId: string, limit = 60): { role: string; content: string; changeset_ids: number[]; created_at: string }[] {
+// ── background assistant jobs (survive tab switches; UI polls) ─────────────
+export interface JobRow { id: number; conversation_id: string; status: string; steps: string[]; error: string | null; started_at: string; finished_at: string | null }
+
+export function createJob(conversationId: string): number {
   ensureSchemaToolTables()
-  const rows = getDb().prepare('SELECT role, content, changeset_ids, created_at FROM schema_tool_messages WHERE conversation_id=? ORDER BY id DESC LIMIT ?')
+  return Number(getDb().prepare('INSERT INTO schema_tool_jobs (conversation_id) VALUES (?)').run(conversationId).lastInsertRowid)
+}
+export function updateJobSteps(id: number, steps: string[]) {
+  getDb().prepare('UPDATE schema_tool_jobs SET steps=? WHERE id=?').run(JSON.stringify(steps), id)
+}
+export function finishJob(id: number, status: 'done' | 'error', error?: string) {
+  getDb().prepare("UPDATE schema_tool_jobs SET status=?, error=?, finished_at=datetime('now') WHERE id=?").run(status, error || null, id)
+}
+export function latestJob(conversationId: string): JobRow | null {
+  ensureSchemaToolTables()
+  const r = getDb().prepare('SELECT * FROM schema_tool_jobs WHERE conversation_id=? ORDER BY id DESC LIMIT 1').get(conversationId) as any
+  if (!r) return null
+  // a job "running" for over 20 minutes was lost (e.g. server restarted)
+  if (r.status === 'running' && Date.now() - new Date(r.started_at.replace(' ', 'T') + 'Z').getTime() > 20 * 60_000) {
+    finishJob(r.id, 'error', 'Interrupted (the server restarted or the request took too long).')
+    r.status = 'error'; r.error = 'Interrupted (the server restarted or the request took too long).'
+  }
+  return { ...r, steps: r.steps ? JSON.parse(r.steps) : [] }
+}
+
+export function getMessages(conversationId: string, limit = 60): { role: string; content: string; changeset_ids: number[]; steps: string[]; created_at: string }[] {
+  ensureSchemaToolTables()
+  const rows = getDb().prepare('SELECT role, content, changeset_ids, steps, created_at FROM schema_tool_messages WHERE conversation_id=? ORDER BY id DESC LIMIT ?')
     .all(conversationId, limit) as any[]
-  return rows.reverse().map(r => ({ ...r, changeset_ids: r.changeset_ids ? JSON.parse(r.changeset_ids) : [] }))
+  return rows.reverse().map(r => ({ ...r, changeset_ids: r.changeset_ids ? JSON.parse(r.changeset_ids) : [], steps: r.steps ? JSON.parse(r.steps) : [] }))
 }
 
 export function listConversations(limit = 20): { conversation_id: string; title: string; updated_at: string }[] {

@@ -100,7 +100,7 @@ function Banner({ tone, children }: { tone: 'red' | 'amber'; children: React.Rea
 }
 
 // ── Assistant ──────────────────────────────────────────────────────────────
-interface Msg { role: 'user' | 'assistant'; content: string; changesets?: CsSummary[]; pending?: boolean; error?: boolean }
+interface Msg { role: 'user' | 'assistant'; content: string; changesets?: CsSummary[]; pending?: boolean; error?: boolean; steps?: string[] }
 
 const SUGGESTIONS = [
   'Which snippets still mention a $15,000 minimum?',
@@ -125,31 +125,61 @@ function AssistantPanel({ onReview, aiReady, draft }: { onReview: (id: number) =
   useEffect(() => { if (draft) { setInput(draft.text); setTimeout(() => inputRef.current?.focus(), 50) } }, [draft])
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [msgs])
 
-  const openConv = async (id: string) => {
-    setCid(id)
-    const d = await api<{ messages: any[]; changesets: CsSummary[] }>(`/api/schema-tool/chat?conversation_id=${encodeURIComponent(id)}`)
+  const pollRef = useRef<any>(null)
+  const cidRef = useRef<string | null>(null)
+  useEffect(() => () => clearTimeout(pollRef.current), [])
+
+  /** Load a conversation; if the assistant is still working on it, keep polling until it's done. */
+  const loadConv = useCallback(async (id: string) => {
+    const d = await api<{ messages: any[]; changesets: CsSummary[]; job: { status: string; steps: string[]; error?: string } | null }>(`/api/schema-tool/chat?conversation_id=${encodeURIComponent(id)}`)
+    if (cidRef.current !== id) return
     const byId: Record<number, CsSummary> = {}
     d.changesets.forEach(c => { byId[c.id] = c })
-    setMsgs(d.messages.map(m => ({ role: m.role, content: m.content, changesets: (m.changeset_ids || []).map((i: number) => byId[i]).filter(Boolean) })))
+    const list: Msg[] = d.messages.map(m => ({ role: m.role, content: m.content, steps: m.steps, changesets: (m.changeset_ids || []).map((i: number) => byId[i]).filter(Boolean) }))
+    const working = d.job?.status === 'running'
+    if (working) list.push({ role: 'assistant', content: '', pending: true, steps: d.job?.steps || [] })
+    setMsgs(list)
+    setSending(working)
+    clearTimeout(pollRef.current)
+    if (working) pollRef.current = setTimeout(() => { loadConv(id).catch(() => {}) }, 1500)
+    else { loadConvs(); setTimeout(() => inputRef.current?.focus(), 30) }
+  }, [loadConvs])
+
+  const openConv = async (id: string) => {
+    setCid(id); cidRef.current = id
+    try { localStorage.setItem('schemaTool.cid', id) } catch {}
+    await loadConv(id)
   }
 
-  const newConv = () => { setCid(null); setMsgs([]); setTimeout(() => inputRef.current?.focus(), 30) }
+  // reopen the last conversation when coming back to this tab
+  useEffect(() => {
+    let saved: string | null = null
+    try { saved = localStorage.getItem('schemaTool.cid') } catch {}
+    if (saved) openConv(saved).catch(() => { try { localStorage.removeItem('schemaTool.cid') } catch {} })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const newConv = () => {
+    clearTimeout(pollRef.current)
+    setCid(null); cidRef.current = null; setMsgs([]); setSending(false)
+    try { localStorage.removeItem('schemaTool.cid') } catch {}
+    setTimeout(() => inputRef.current?.focus(), 30)
+  }
 
   const send = async (text?: string) => {
     const message = (text ?? input).trim()
     if (!message || sending) return
     setInput('')
     setSending(true)
-    setMsgs(m => [...m, { role: 'user', content: message }, { role: 'assistant', content: '', pending: true }])
+    setMsgs(m => [...m, { role: 'user', content: message }, { role: 'assistant', content: '', pending: true, steps: [] }])
     try {
-      const d = await api<{ conversation_id: string; reply: string; changesets: CsSummary[]; auto_applied: number[] }>('/api/schema-tool/chat', { conversation_id: cid, message })
-      if (!cid) { setCid(d.conversation_id); loadConvs() }
-      setMsgs(m => [...m.slice(0, -1), { role: 'assistant', content: d.reply, changesets: d.changesets }])
+      const d = await api<{ conversation_id: string; job_id: number }>('/api/schema-tool/chat', { conversation_id: cid, message })
+      setCid(d.conversation_id); cidRef.current = d.conversation_id
+      try { localStorage.setItem('schemaTool.cid', d.conversation_id) } catch {}
+      if (!cid) loadConvs()
+      pollRef.current = setTimeout(() => { loadConv(d.conversation_id).catch(() => {}) }, 1200)
     } catch (e: any) {
       setMsgs(m => [...m.slice(0, -1), { role: 'assistant', content: e.message, error: true }])
-    } finally {
       setSending(false)
-      setTimeout(() => inputRef.current?.focus(), 30)
     }
   }
 
@@ -213,7 +243,8 @@ function AssistantPanel({ onReview, aiReady, draft }: { onReview: (id: number) =
                   <div style={{ width: 26, height: 26, flexShrink: 0, borderRadius: 8, background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Sparkles size={13} color="white" /></div>
                   <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
                     <div style={{ fontSize: 13, lineHeight: 1.62, color: m.error ? T.red : '#cbd5e1' }}>
-                      {m.pending ? <span style={{ color: T.sub, display: 'inline-flex', alignItems: 'center', gap: 8 }}><Spinner /> Looking through the snippets…</span> : <MiniMarkdown text={m.content} />}
+                      {m.pending ? <Working steps={m.steps || []} /> : <MiniMarkdown text={m.content} />}
+                      {!m.pending && m.steps && m.steps.length > 0 && <StepsDetails steps={m.steps} />}
                     </div>
                     {(m.changesets || []).map(c => <ChangesetCard key={c.id} initial={c} onOpen={onReview} onChange={updateCs} />)}
                   </div>
@@ -245,6 +276,32 @@ function AssistantPanel({ onReview, aiReady, draft }: { onReview: (id: number) =
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+function Working({ steps }: { steps: string[] }) {
+  const [t0] = useState(Date.now())
+  const [, tick] = useState(0)
+  useEffect(() => { const i = setInterval(() => tick(x => x + 1), 1000); return () => clearInterval(i) }, [])
+  const secs = Math.round((Date.now() - t0) / 1000)
+  return (
+    <div style={{ color: T.sub, display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Spinner /> Working{steps.length ? ` · step ${steps.length}` : ''}{secs > 4 ? ` · ${secs}s` : ''}</span>
+      {steps.slice(-4).map((s, i, arr) => (
+        <span key={i} style={{ fontSize: 12, color: i === arr.length - 1 ? '#c7d2fe' : T.faint, paddingLeft: 20 }}>{i === arr.length - 1 ? '→ ' : '✓ '}{s}</span>
+      ))}
+      {secs > 8 && <span style={{ fontSize: 11, color: T.faint, paddingLeft: 20 }}>You can leave this page — the answer will be here when you come back.</span>}
+    </div>
+  )
+}
+
+function StepsDetails({ steps }: { steps: string[] }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div style={{ marginTop: 6 }}>
+      <button onClick={() => setOpen(o => !o)} style={{ background: 'none', border: 'none', color: T.faint, fontSize: 11, cursor: 'pointer', padding: 0 }}>{open ? '▾' : '▸'} {steps.length} step{steps.length === 1 ? '' : 's'}</button>
+      {open && <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4 }}>{steps.map((s, i) => <span key={i} style={{ fontSize: 11.5, color: T.faint }}>✓ {s}</span>)}</div>}
     </div>
   )
 }

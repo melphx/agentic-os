@@ -32,6 +32,11 @@ const TOOLS: ToolDef[] = [
     parameters: { type: 'object', properties: { name_contains: str, include_inactive: bool } },
   },
   {
+    name: 'snippet_overview',
+    description: 'One-call scan of every active snippet: page path, city in the URL, Service names/serviceTypes, FAQ count, and how often each city is mentioned (with a flag when the most-mentioned city differs from the URL city). Use this for site-wide audits instead of reading snippets one by one.',
+    parameters: { type: 'object', properties: { path_contains: str, only_flagged: bool } },
+  },
+  {
     name: 'get_snippet',
     description: 'Read one snippet in full (code + settings).',
     parameters: { type: 'object', properties: { id: num }, required: ['id'] },
@@ -105,7 +110,7 @@ const TOOLS: ToolDef[] = [
 ]
 
 export interface AgentResult { reply: string; changesetIds: number[] }
-interface Ctx { conversationId: string; user: string | null; changesetIds: number[] }
+interface Ctx { conversationId: string; user: string | null; changesetIds: number[]; steps: string[]; onProgress?: (steps: string[]) => void }
 
 const cap = (o: unknown, n = 14000) => { const s = JSON.stringify(o); return s.length > n ? s.slice(0, n) + '…(truncated)' : s }
 
@@ -125,6 +130,7 @@ async function runTool(name: string, args: any, ctx: Ctx): Promise<string> {
       const s = (await listSnippets()).filter(x => (args.include_inactive || x.status === 'active') && (!q || x.name.toLowerCase().includes(q)))
       return cap({ count: s.length, snippets: s.slice(0, 200).map(x => ({ id: x.id, name: x.name, status: x.status, shows_on: x.display_on, pages: x.s_pages, posts: x.s_posts })) })
     }
+    case 'snippet_overview': return cap(await snippetOverview(String(args.path_contains || ''), !!args.only_flagged), 45000)
     case 'get_snippet': {
       const s = await getSnippet(Number(args.id))
       const v = validateSnippet(s.snippet)
@@ -220,6 +226,47 @@ async function runTool(name: string, args: any, ctx: Ctx): Promise<string> {
   }
 }
 
+const CITIES = ['Ahwatukee', 'Arcadia', 'Biltmore', 'Chandler', 'Gilbert', 'Laveen', 'Mesa', 'Phoenix', 'Queen Creek', 'Scottsdale', 'Sun Lakes', 'Tempe', 'South Phoenix', 'Ocotillo', 'Paradise Valley', 'Glendale', 'Peoria']
+
+export async function snippetOverview(pathContains: string, onlyFlagged: boolean) {
+  const snippets = (await listSnippets()).filter(s => s.status === 'active')
+  const out: any[] = []
+  for (const s of snippets) {
+    const path = s.name.replace(/^https?:\/\/[^/]+/, '')
+    if (pathContains && !path.includes(pathContains)) continue
+    const m = path.match(/\/([a-z-]+)-az\/?$/)
+    const slugCity = m ? m[1].split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ') : null
+    const urlCity = slugCity && CITIES.indexOf(slugCity) >= 0 ? slugCity : null
+    const counts: Record<string, number> = {}
+    for (const c of CITIES) {
+      const n = (s.snippet.match(new RegExp(`\\b${c}\\b`, 'g')) || []).length
+      if (n) counts[c] = n
+    }
+    // "South Phoenix" also counts as "Phoenix"; keep the more specific one
+    if (counts['South Phoenix'] && counts['Phoenix']) counts['Phoenix'] -= counts['South Phoenix']
+    const services: string[] = []
+    let faq = 0
+    const walk = (o: any) => {
+      if (Array.isArray(o)) { o.forEach(walk); return }
+      if (o && typeof o === 'object') {
+        const ty = o['@type']; const types = Array.isArray(ty) ? ty : [ty]
+        if (types.indexOf('Service') >= 0) services.push([o.name, o.serviceType].filter(Boolean).join(' / '))
+        if (types.indexOf('Question') >= 0) faq++
+        Object.keys(o).forEach(k => walk(o[k]))
+      }
+    }
+    const re = /<script[^>]*ld\+json[^>]*>([\s\S]*?)<\/script>/gi
+    let b: RegExpExecArray | null
+    while ((b = re.exec(s.snippet))) { try { walk(JSON.parse(b[1])) } catch {} }
+    const sorted = Object.keys(counts).filter(c => c !== 'Phoenix' || !urlCity || urlCity === 'Phoenix').sort((a, b2) => counts[b2] - counts[a])
+    const top = sorted[0] || null
+    const flagged = !!(urlCity && top && top !== urlCity && (counts[urlCity] || 0) < counts[top])
+    if (onlyFlagged && !flagged) continue
+    out.push({ id: s.id, path, url_city: urlCity, top_city: top, city_mentions: counts, services: services.slice(0, 4), faq, ...(flagged ? { flag: `mentions ${top} more than ${urlCity}` } : {}) })
+  }
+  return { count: out.length, flagged: out.filter(o => o.flag).length, snippets: out }
+}
+
 function systemPrompt(): string {
   const c = getConfig()
   const s = getSettings()
@@ -244,23 +291,57 @@ ${src}
 
 // ── provider loops ─────────────────────────────────────────────────────────
 type Turn = { role: 'user' | 'assistant'; content: string }
+const MAX_STEPS = 40
+const WRAP_UP = 'Stop using tools now. Reply to the person with what you found and what (if anything) is staged, and say plainly what you did not get to.'
+
+function progressLabel(name: string, args: any): string {
+  switch (name) {
+    case 'search_snippets': return `Searching snippets for “${String(args.query || '').slice(0, 60)}”`
+    case 'list_snippets': return args.name_contains ? `Listing snippets matching “${args.name_contains}”` : 'Listing snippets'
+    case 'get_snippet': return `Reading snippet #${args.id}`
+    case 'snippet_overview': return 'Scanning every snippet (pages, services, cities)'
+    case 'propose_replace': return `Staging: ${String(args.title || 'find & replace').slice(0, 80)}`
+    case 'propose_edits': return `Staging: ${String(args.title || 'edits').slice(0, 80)}`
+    case 'propose_attach': return 'Staging placement changes'
+    case 'propose_status': return 'Staging status changes'
+    case 'propose_revert': return `Staging undo of #${args.changeset_id}`
+    case 'check_page': return `Checking page ${String(args.url || '').replace(/^https?:\/\/[^/]+/, '')}`
+    case 'read_source': return `Reading source #${args.source_id}${args.query ? ` (“${args.query}”)` : ''}`
+    case 'refresh_source': return `Re-reading source #${args.source_id} from Google`
+    case 'recent_changes': return 'Looking at recent changes'
+    default: return name
+  }
+}
+
+async function callTool(name: string, args: any, ctx: Ctx): Promise<string> {
+  ctx.steps.push(progressLabel(name, args))
+  ctx.onProgress?.(ctx.steps)
+  try { return await runTool(name, args, ctx) } catch (e: any) { return JSON.stringify({ error: e?.message || String(e) }) }
+}
 
 async function runOpenAI(history: Turn[], ctx: Ctx, model: string): Promise<string> {
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   const messages: OpenAI.ChatCompletionMessageParam[] = [{ role: 'system', content: systemPrompt() }, ...history.map(h => ({ role: h.role, content: h.content }) as OpenAI.ChatCompletionMessageParam)]
   const tools: OpenAI.ChatCompletionTool[] = TOOLS.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }))
-  for (let i = 0; i < 10; i++) {
-    const r = await openai.chat.completions.create({ model, messages, tools })
+  for (let i = 0; i <= MAX_STEPS; i++) {
+    const last = i === MAX_STEPS
+    if (last) messages.push({ role: 'user', content: WRAP_UP })
+    const r = await openai.chat.completions.create({ model, messages, tools, ...(last ? { tool_choice: 'none' as const } : {}) })
     const msg = r.choices[0].message
     messages.push(msg as OpenAI.ChatCompletionMessageParam)
-    if (!msg.tool_calls || !msg.tool_calls.length) return msg.content || ''
+    if (!msg.tool_calls || !msg.tool_calls.length) {
+      if ((msg.content || '').trim() || last) return msg.content || ''
+      messages.push({ role: 'user', content: WRAP_UP })
+      const r2 = await openai.chat.completions.create({ model, messages, tools, tool_choice: 'none' })
+      return r2.choices[0].message.content || ''
+    }
     for (const tc of msg.tool_calls) {
-      let out: string
-      try { out = await runTool(tc.function.name, JSON.parse(tc.function.arguments || '{}'), ctx) } catch (e: any) { out = JSON.stringify({ error: e?.message || String(e) }) }
-      messages.push({ role: 'tool', tool_call_id: tc.id, content: out })
+      let args: any = {}
+      try { args = JSON.parse(tc.function.arguments || '{}') } catch {}
+      messages.push({ role: 'tool', tool_call_id: tc.id, content: await callTool(tc.function.name, args, ctx) })
     }
   }
-  return 'I stopped after several steps without finishing. Try narrowing the request.'
+  return ''
 }
 
 /** Personal / service-account keys (sk-ant-usr-…) use Bearer auth; unscoped keys also need a workspace ID. */
@@ -274,37 +355,55 @@ function anthropicHeaders(): Record<string, string> {
   return h
 }
 
+async function anthropicCall(model: string, messages: any[], tools: any[], noTools: boolean) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: anthropicHeaders(),
+    body: JSON.stringify({ model, max_tokens: 8192, system: systemPrompt(), tools, messages, ...(noTools ? { tool_choice: { type: 'none' } } : {}) }),
+  })
+  const data: any = await res.json()
+  if (!res.ok) throw new Error(`Claude API ${res.status}: ${data?.error?.message || JSON.stringify(data).slice(0, 200)}`)
+  return data
+}
+
+const textOf = (data: any) => (data.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim()
+
+/** Append a wrap-up instruction to the conversation (merging into the trailing user turn if there is one). */
+function addWrapUp(messages: any[]) {
+  const lastMsg = messages[messages.length - 1]
+  if (lastMsg && lastMsg.role === 'user') {
+    if (typeof lastMsg.content === 'string') lastMsg.content = [{ type: 'text', text: lastMsg.content }]
+    lastMsg.content.push({ type: 'text', text: WRAP_UP })
+  } else {
+    messages.push({ role: 'user', content: WRAP_UP })
+  }
+}
+
 async function runAnthropic(history: Turn[], ctx: Ctx, model: string): Promise<string> {
   const messages: any[] = history.map(h => ({ role: h.role, content: h.content }))
   const tools = TOOLS.map(t => ({ name: t.name, description: t.description, input_schema: t.parameters }))
-  for (let i = 0; i < 10; i++) {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: anthropicHeaders(),
-      body: JSON.stringify({ model, max_tokens: 4096, system: systemPrompt(), tools, messages }),
-    })
-    const data: any = await res.json()
-    if (!res.ok) throw new Error(`Claude API ${res.status}: ${data?.error?.message || JSON.stringify(data).slice(0, 200)}`)
+  for (let i = 0; i < MAX_STEPS; i++) {
+    const data = await anthropicCall(model, messages, tools, false)
     messages.push({ role: 'assistant', content: data.content })
     const uses = (data.content || []).filter((b: any) => b.type === 'tool_use')
     if (data.stop_reason !== 'tool_use' || !uses.length) {
-      return (data.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim()
+      const txt = textOf(data)
+      if (txt) return txt
+      break // no text — ask for a wrap-up below
     }
     const results: any[] = []
-    for (const u of uses) {
-      let out: string
-      try { out = await runTool(u.name, u.input || {}, ctx) } catch (e: any) { out = JSON.stringify({ error: e?.message || String(e) }) }
-      results.push({ type: 'tool_result', tool_use_id: u.id, content: out })
-    }
+    for (const u of uses) results.push({ type: 'tool_result', tool_use_id: u.id, content: await callTool(u.name, u.input || {}, ctx) })
     messages.push({ role: 'user', content: results })
   }
-  return 'I stopped after several steps without finishing. Try narrowing the request.'
+  addWrapUp(messages)
+  return textOf(await anthropicCall(model, messages, tools, true))
 }
 
-export async function runAgent(history: Turn[], ctx: { conversationId: string; user: string | null }): Promise<AgentResult> {
+export async function runAgent(history: Turn[], ctx: { conversationId: string; user: string | null; onProgress?: (steps: string[]) => void }): Promise<AgentResult & { steps: string[] }> {
   const { provider, model } = getAiProvider()
-  const c: Ctx = { ...ctx, changesetIds: [] }
-  if (provider === 'none') return { reply: 'No AI key is configured. Add ANTHROPIC_API_KEY or OPENAI_API_KEY to .env.local. You can still use the Snippets tab to edit by hand.', changesetIds: [] }
-  const reply = provider === 'anthropic' ? await runAnthropic(history, c, model) : await runOpenAI(history, c, model)
-  return { reply, changesetIds: c.changesetIds }
+  const c: Ctx = { ...ctx, changesetIds: [], steps: [] }
+  if (provider === 'none') return { reply: 'No AI key is configured. Add ANTHROPIC_API_KEY or OPENAI_API_KEY to .env.local. You can still use the Snippets tab to edit by hand.', changesetIds: [], steps: [] }
+  let reply = provider === 'anthropic' ? await runAnthropic(history, c, model) : await runOpenAI(history, c, model)
+  if (!reply.trim()) reply = c.changesetIds.length ? `Staged ${c.changesetIds.length} change${c.changesetIds.length > 1 ? 's' : ''} — see below.` : 'I could not finish that one. Try asking again, or narrow it down (e.g. one service or city).'
+  return { reply, changesetIds: c.changesetIds, steps: c.steps }
 }
