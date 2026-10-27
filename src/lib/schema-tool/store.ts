@@ -68,6 +68,7 @@ export function ensureSchemaToolTables() {
     CREATE INDEX IF NOT EXISTS idx_schema_tool_jobs ON schema_tool_jobs(conversation_id);
   `)
   try { getDb().exec('ALTER TABLE schema_tool_messages ADD COLUMN steps TEXT') } catch {}
+  try { getDb().exec('ALTER TABLE schema_tool_messages ADD COLUMN usage TEXT') } catch {}
   ensured = true
 }
 
@@ -162,10 +163,21 @@ export function setItemsSelected(changesetId: number, selectedIds: number[] | nu
 }
 
 // ── chat messages ──────────────────────────────────────────────────────────
-export function addMessage(conversationId: string, role: string, content: string, changesetIds?: number[], by?: string | null, steps?: string[]) {
+export function addMessage(conversationId: string, role: string, content: string, changesetIds?: number[], by?: string | null, steps?: string[], usage?: unknown) {
   ensureSchemaToolTables()
-  getDb().prepare('INSERT INTO schema_tool_messages (conversation_id, role, content, changeset_ids, created_by, steps) VALUES (?,?,?,?,?,?)')
-    .run(conversationId, role, content, changesetIds && changesetIds.length ? JSON.stringify(changesetIds) : null, by || null, steps && steps.length ? JSON.stringify(steps) : null)
+  getDb().prepare('INSERT INTO schema_tool_messages (conversation_id, role, content, changeset_ids, created_by, steps, usage) VALUES (?,?,?,?,?,?,?)')
+    .run(conversationId, role, content, changesetIds && changesetIds.length ? JSON.stringify(changesetIds) : null, by || null, steps && steps.length ? JSON.stringify(steps) : null, usage ? JSON.stringify(usage) : null)
+}
+
+/** AI usage + estimated cost over the last N days (from assistant messages). */
+export function usageSummary(days = 30): { requests: number; input: number; output: number; cacheRead: number; cacheWrite: number; costUsd: number } {
+  ensureSchemaToolTables()
+  const rows = getDb().prepare(`SELECT usage FROM schema_tool_messages WHERE usage IS NOT NULL AND created_at >= datetime('now', ?)`).all(`-${days} days`) as { usage: string }[]
+  const s = { requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0 }
+  for (const r of rows) {
+    try { const u = JSON.parse(r.usage); s.requests++; s.input += u.input || 0; s.output += u.output || 0; s.cacheRead += u.cacheRead || 0; s.cacheWrite += u.cacheWrite || 0; s.costUsd += u.costUsd || 0 } catch {}
+  }
+  return s
 }
 
 // ── background assistant jobs (survive tab switches; UI polls) ─────────────
@@ -193,11 +205,11 @@ export function latestJob(conversationId: string): JobRow | null {
   return { ...r, steps: r.steps ? JSON.parse(r.steps) : [] }
 }
 
-export function getMessages(conversationId: string, limit = 60): { role: string; content: string; changeset_ids: number[]; steps: string[]; created_at: string }[] {
+export function getMessages(conversationId: string, limit = 60): { role: string; content: string; changeset_ids: number[]; steps: string[]; usage: any; created_at: string }[] {
   ensureSchemaToolTables()
-  const rows = getDb().prepare('SELECT role, content, changeset_ids, steps, created_at FROM schema_tool_messages WHERE conversation_id=? ORDER BY id DESC LIMIT ?')
+  const rows = getDb().prepare('SELECT role, content, changeset_ids, steps, usage, created_at FROM schema_tool_messages WHERE conversation_id=? ORDER BY id DESC LIMIT ?')
     .all(conversationId, limit) as any[]
-  return rows.reverse().map(r => ({ ...r, changeset_ids: r.changeset_ids ? JSON.parse(r.changeset_ids) : [], steps: r.steps ? JSON.parse(r.steps) : [] }))
+  return rows.reverse().map(r => ({ ...r, changeset_ids: r.changeset_ids ? JSON.parse(r.changeset_ids) : [], steps: r.steps ? JSON.parse(r.steps) : [], usage: r.usage ? JSON.parse(r.usage) : null }))
 }
 
 export function listConversations(limit = 20): { conversation_id: string; title: string; updated_at: string }[] {
@@ -220,7 +232,7 @@ export const DEFAULT_RULES = `- Work only on the configured site (staging). Neve
 - PHR Organization ID: https://phxhomeremodeling.com/#organization. Wikidata: company Q138340466, Jeremy Q141665193, book Q141727039.
 - Project minimum is $20,000.`
 
-export function getSettings(): { auto_apply_max: number; rules: string } {
+export function getSettings(): { auto_apply_max: number; rules: string; effort: string } {
   ensureSchemaToolTables()
   const rows = getDb().prepare('SELECT key, value FROM schema_tool_settings').all() as { key: string; value: string }[]
   const m: Record<string, string> = {}
@@ -228,12 +240,14 @@ export function getSettings(): { auto_apply_max: number; rules: string } {
   return {
     auto_apply_max: m.auto_apply_max != null ? Number(m.auto_apply_max) : 0,
     rules: m.rules != null ? m.rules : DEFAULT_RULES,
+    effort: m.effort || '',
   }
 }
 
-export function saveSettings(s: Partial<{ auto_apply_max: number; rules: string }>) {
+export function saveSettings(s: Partial<{ auto_apply_max: number; rules: string; effort: string }>) {
   ensureSchemaToolTables()
   const st = getDb().prepare('INSERT INTO schema_tool_settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
   if (s.auto_apply_max != null) st.run('auto_apply_max', String(Math.max(0, Math.floor(Number(s.auto_apply_max) || 0))))
   if (s.rules != null) st.run('rules', String(s.rules).slice(0, 20000))
+  if (s.effort != null && ['', 'low', 'medium', 'high'].indexOf(s.effort) >= 0) st.run('effort', s.effort)
 }

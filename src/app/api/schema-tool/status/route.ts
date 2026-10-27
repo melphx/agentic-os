@@ -5,7 +5,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { getAiProvider, getConfig } from '@/lib/schema-tool/config'
-import { DEFAULT_RULES, getSettings, saveSettings } from '@/lib/schema-tool/store'
+import { DEFAULT_RULES, getSettings, saveSettings, usageSummary } from '@/lib/schema-tool/store'
 import { ping } from '@/lib/schema-tool/wp'
 import { fail, guard } from '@/lib/schema-tool/http'
 
@@ -22,6 +22,7 @@ export async function GET(req: NextRequest) {
       site: { url: c.siteUrl, label: c.siteLabel, prodOrigin: c.prodOrigin, configured: c.configured },
       ai,
       settings: getSettings(),
+      usage30d: usageSummary(30),
       defaultRules: DEFAULT_RULES,
       ping: doPing && c.configured ? await ping() : null,
     })
@@ -32,7 +33,7 @@ export async function POST(req: NextRequest) {
   const { error } = await guard(req); if (error) return error
   try {
     const body = await req.json()
-    saveSettings({ auto_apply_max: body.auto_apply_max, rules: body.rules })
+    saveSettings({ auto_apply_max: body.auto_apply_max, rules: body.rules, effort: body.effort })
     return NextResponse.json({ settings: getSettings() })
   } catch (e) { return fail(e) }
 }

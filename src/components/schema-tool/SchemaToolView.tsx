@@ -17,7 +17,8 @@ type Tab = 'assistant' | 'snippets' | 'sources' | 'history' | 'page'
 interface Status {
   site: { url: string; label: string; prodOrigin: string; configured: boolean }
   ai: { provider: 'anthropic' | 'openai' | 'none'; model: string }
-  settings: { auto_apply_max: number; rules: string }
+  settings: { auto_apply_max: number; rules: string; effort: string }
+  usage30d?: { requests: number; input: number; output: number; cacheRead: number; cacheWrite: number; costUsd: number }
   defaultRules: string
   ping: { ok: boolean; count?: number; error?: string } | null
 }
@@ -100,7 +101,7 @@ function Banner({ tone, children }: { tone: 'red' | 'amber'; children: React.Rea
 }
 
 // ── Assistant ──────────────────────────────────────────────────────────────
-interface Msg { role: 'user' | 'assistant'; content: string; changesets?: CsSummary[]; pending?: boolean; error?: boolean; steps?: string[] }
+interface Msg { role: 'user' | 'assistant'; content: string; changesets?: CsSummary[]; pending?: boolean; error?: boolean; steps?: string[]; usage?: any }
 
 const SUGGESTIONS = [
   'Which snippets still mention a $15,000 minimum?',
@@ -135,7 +136,7 @@ function AssistantPanel({ onReview, aiReady, draft }: { onReview: (id: number) =
     if (cidRef.current !== id) return
     const byId: Record<number, CsSummary> = {}
     d.changesets.forEach(c => { byId[c.id] = c })
-    const list: Msg[] = d.messages.map(m => ({ role: m.role, content: m.content, steps: m.steps, changesets: (m.changeset_ids || []).map((i: number) => byId[i]).filter(Boolean) }))
+    const list: Msg[] = d.messages.map(m => ({ role: m.role, content: m.content, steps: m.steps, usage: m.usage, changesets: (m.changeset_ids || []).map((i: number) => byId[i]).filter(Boolean) }))
     const working = d.job?.status === 'running'
     if (working) list.push({ role: 'assistant', content: '', pending: true, steps: d.job?.steps || [] })
     setMsgs(list)
@@ -244,7 +245,7 @@ function AssistantPanel({ onReview, aiReady, draft }: { onReview: (id: number) =
                   <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
                     <div style={{ fontSize: 13, lineHeight: 1.62, color: m.error ? T.red : '#cbd5e1' }}>
                       {m.pending ? <Working steps={m.steps || []} /> : <MiniMarkdown text={m.content} />}
-                      {!m.pending && m.steps && m.steps.length > 0 && <StepsDetails steps={m.steps} />}
+                      {!m.pending && ((m.steps && m.steps.length > 0) || m.usage) && <StepsDetails steps={m.steps || []} usage={m.usage} />}
                     </div>
                     {(m.changesets || []).map(c => <ChangesetCard key={c.id} initial={c} onOpen={onReview} onChange={updateCs} />)}
                   </div>
@@ -296,11 +297,16 @@ function Working({ steps }: { steps: string[] }) {
   )
 }
 
-function StepsDetails({ steps }: { steps: string[] }) {
+export const fmtCost = (c?: number | null) => c == null ? '' : c < 0.01 ? '<$0.01' : `$${c.toFixed(c < 1 ? 3 : 2)}`
+const fmtK = (n: number) => n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n)
+
+function StepsDetails({ steps, usage }: { steps: string[]; usage?: any }) {
   const [open, setOpen] = useState(false)
+  const tokenInfo = usage ? `${fmtK((usage.input || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0))} in (${fmtK(usage.cacheRead || 0)} cached) · ${fmtK(usage.output || 0)} out` : ''
   return (
     <div style={{ marginTop: 6 }}>
-      <button onClick={() => setOpen(o => !o)} style={{ background: 'none', border: 'none', color: T.faint, fontSize: 11, cursor: 'pointer', padding: 0 }}>{open ? '▾' : '▸'} {steps.length} step{steps.length === 1 ? '' : 's'}</button>
+      <button onClick={() => setOpen(o => !o)} title={tokenInfo} style={{ background: 'none', border: 'none', color: T.faint, fontSize: 11, cursor: 'pointer', padding: 0 }}>{open ? '▾' : '▸'} {steps.length} step{steps.length === 1 ? '' : 's'}{usage?.costUsd != null ? ` · ~${fmtCost(usage.costUsd)}` : ''}</button>
+      {open && tokenInfo && <div style={{ fontSize: 11, color: T.faint, marginTop: 3 }}>{tokenInfo}</div>}
       {open && <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4 }}>{steps.map((s, i) => <span key={i} style={{ fontSize: 11.5, color: T.faint }}>✓ {s}</span>)}</div>}
     </div>
   )
@@ -562,8 +568,10 @@ function Row({ k, v }: { k: string; v: React.ReactNode }) {
 function SettingsModal({ status, onClose, onSaved }: { status: Status; onClose: () => void; onSaved: () => void }) {
   const [auto, setAuto] = useState(status.settings.auto_apply_max)
   const [rules, setRules] = useState(status.settings.rules)
+  const [effort, setEffort] = useState(status.settings.effort || '')
   const [busy, setBusy] = useState(false)
-  const save = async () => { setBusy(true); try { await api('/api/schema-tool/status', { auto_apply_max: auto, rules }); onSaved(); onClose() } finally { setBusy(false) } }
+  const save = async () => { setBusy(true); try { await api('/api/schema-tool/status', { auto_apply_max: auto, rules, effort }); onSaved(); onClose() } finally { setBusy(false) } }
+  const u = status.usage30d
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(2,6,15,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
       <div onClick={e => e.stopPropagation()} style={{ width: 'min(640px,100%)', background: '#0b1020', border: `1px solid ${T.borderStrong}`, borderRadius: 14, padding: 20, display: 'flex', flexDirection: 'column', gap: 14, animation: 'stfade .18s ease' }}>
@@ -575,6 +583,23 @@ function SettingsModal({ status, onClose, onSaved }: { status: Status; onClose: 
             {[0, 1, 3, 10, 25].map(n => <Btn key={n} small kind={auto === n ? 'primary' : 'ghost'} onClick={() => setAuto(n)}>{n === 0 ? 'Off' : `≤ ${n}`}</Btn>)}
           </div>
         </div>
+        {u && (
+          <div style={{ display: 'flex', gap: 16, background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: '10px 12px', fontSize: 12, color: T.sub, flexWrap: 'wrap' }}>
+            <span><b style={{ color: 'white' }}>~{fmtCost(u.costUsd) || '$0'}</b> AI cost, last 30 days</span>
+            <span>{u.requests} answer{u.requests === 1 ? '' : 's'}</span>
+            <span>{fmtK(u.input + u.cacheRead + u.cacheWrite)} tokens in ({fmtK(u.cacheRead)} from cache)</span>
+            <span>{fmtK(u.output)} out</span>
+          </div>
+        )}
+        {status.ai.provider === 'anthropic' && (
+          <div>
+            <div style={{ fontSize: 12.5, color: T.text, fontWeight: 600 }}>Thinking effort</div>
+            <div style={{ fontSize: 11.5, color: T.sub, margin: '3px 0 8px' }}>How hard Claude thinks before answering. Medium is the best balance for schema work; High costs more and is slower; Low is cheapest but may skip checks.</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {[['low', 'Low'], ['', 'Medium (default)'], ['high', 'High']].map(([v, l]) => <Btn key={v} small kind={effort === v || (v === '' && effort === 'medium') ? 'primary' : 'ghost'} onClick={() => setEffort(v)}>{l}</Btn>)}
+            </div>
+          </div>
+        )}
         <div>
           <div style={{ fontSize: 12.5, color: T.text, fontWeight: 600 }}>House rules for the assistant</div>
           <div style={{ fontSize: 11.5, color: T.sub, margin: '3px 0 8px' }}>The assistant follows these on every request.</div>

@@ -39,7 +39,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'get_snippet',
     description: 'Read one snippet in full (code + settings).',
-    parameters: { type: 'object', properties: { id: num }, required: ['id'] },
+    parameters: { type: 'object', properties: { id: num, around: { type: 'string', description: 'Optional: only return the parts of the code around this text (saves tokens on big snippets).' } }, required: ['id'] },
   },
   {
     name: 'propose_replace',
@@ -110,7 +110,22 @@ const TOOLS: ToolDef[] = [
 ]
 
 export interface AgentResult { reply: string; changesetIds: number[] }
-interface Ctx { conversationId: string; user: string | null; changesetIds: number[]; steps: string[]; onProgress?: (steps: string[]) => void }
+export interface Usage { calls: number; input: number; output: number; cacheRead: number; cacheWrite: number; costUsd: number | null; model: string }
+interface Ctx { conversationId: string; user: string | null; changesetIds: number[]; steps: string[]; onProgress?: (steps: string[]) => void; usage: Usage }
+
+/** USD per million tokens: [input, output, cache write (5m), cache read] — platform.claude.com pricing */
+const RATES: [RegExp, number[]][] = [
+  [/sonnet-5-5/, [2, 10, 2.5, 0.1]],
+  [/sonnet-4-6|sonnet-4-5|sonnet-4/, [3, 15, 3.75, 0.3]],
+  [/haiku-5-5/, [0.1, 0.5, 0.125, 0.01]],
+  [/opus-5-5/, [4, 20, 5, 0.2]],
+]
+export function estimateCost(u: Usage): number | null {
+  const r = RATES.find(([re]) => re.test(u.model))
+  if (!r) return null
+  const [i, o, cw, cr] = r[1]
+  return (u.input * i + u.output * o + u.cacheWrite * cw + u.cacheRead * cr) / 1e6
+}
 
 const cap = (o: unknown, n = 14000) => { const s = JSON.stringify(o); return s.length > n ? s.slice(0, n) + '…(truncated)' : s }
 
@@ -134,7 +149,14 @@ async function runTool(name: string, args: any, ctx: Ctx): Promise<string> {
     case 'get_snippet': {
       const s = await getSnippet(Number(args.id))
       const v = validateSnippet(s.snippet)
-      return cap({ id: s.id, name: s.name, status: s.status, display_on: s.display_on, pages: s.s_pages, posts: s.s_posts, page_urls: s.page_urls, valid: v, code: s.snippet }, 60000)
+      let code = s.snippet
+      if (args.around) {
+        const parts: string[] = []
+        let idx = code.indexOf(String(args.around))
+        while (idx >= 0 && parts.length < 8) { parts.push(code.slice(Math.max(0, idx - 1200), idx + 1200)); idx = code.indexOf(String(args.around), idx + 1200) }
+        code = parts.length ? parts.join('\n…\n') : `(text not found; snippet is ${code.length} chars)`
+      }
+      return cap({ id: s.id, name: s.name, status: s.status, display_on: s.display_on, pages: s.s_pages, posts: s.s_posts, page_urls: s.page_urls, valid: v, code }, 60000)
     }
     case 'propose_replace': {
       const snippets = await listSnippets({ fresh: true })
@@ -327,6 +349,7 @@ async function runOpenAI(history: Turn[], ctx: Ctx, model: string): Promise<stri
     const last = i === MAX_STEPS
     if (last) messages.push({ role: 'user', content: WRAP_UP })
     const r = await openai.chat.completions.create({ model, messages, tools, ...(last ? { tool_choice: 'none' as const } : {}) })
+    ctx.usage.calls++; ctx.usage.input += r.usage?.prompt_tokens || 0; ctx.usage.output += r.usage?.completion_tokens || 0
     const msg = r.choices[0].message
     messages.push(msg as OpenAI.ChatCompletionMessageParam)
     if (!msg.tool_calls || !msg.tool_calls.length) {
@@ -355,14 +378,40 @@ function anthropicHeaders(): Record<string, string> {
   return h
 }
 
-async function anthropicCall(model: string, messages: any[], tools: any[], noTools: boolean) {
+/** Mark the last content block of the newest message as a cache breakpoint (rolling prompt cache). */
+function withRollingCache(messages: any[]): any[] {
+  if (!messages.length) return messages
+  const out = messages.slice(0, -1)
+  const last = messages[messages.length - 1]
+  const blocks = typeof last.content === 'string' ? [{ type: 'text', text: last.content }] : last.content.map((b: any) => ({ ...b }))
+  if (blocks.length) blocks[blocks.length - 1] = { ...blocks[blocks.length - 1], cache_control: { type: 'ephemeral' } }
+  out.push({ role: last.role, content: blocks })
+  return out
+}
+
+async function anthropicCall(model: string, messages: any[], tools: any[], noTools: boolean, ctx: Ctx, system: string) {
+  const effort = getSettings().effort || process.env.SCHEMA_TOOL_EFFORT || 'medium'
+  const cachedTools = tools.map((t, i) => (i === tools.length - 1 ? { ...t, cache_control: { type: 'ephemeral' } } : t))
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: anthropicHeaders(),
-    body: JSON.stringify({ model, max_tokens: 8192, system: systemPrompt(), tools, messages, ...(noTools ? { tool_choice: { type: 'none' } } : {}) }),
+    body: JSON.stringify({
+      model, max_tokens: 16000,
+      system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+      tools: cachedTools,
+      messages: withRollingCache(messages),
+      output_config: { effort },
+      ...(noTools ? { tool_choice: { type: 'none' } } : {}),
+    }),
   })
   const data: any = await res.json()
   if (!res.ok) throw new Error(`Claude API ${res.status}: ${data?.error?.message || JSON.stringify(data).slice(0, 200)}`)
+  const u = data.usage || {}
+  ctx.usage.calls++
+  ctx.usage.input += u.input_tokens || 0
+  ctx.usage.output += u.output_tokens || 0
+  ctx.usage.cacheRead += u.cache_read_input_tokens || 0
+  ctx.usage.cacheWrite += u.cache_creation_input_tokens || 0
   return data
 }
 
@@ -382,28 +431,34 @@ function addWrapUp(messages: any[]) {
 async function runAnthropic(history: Turn[], ctx: Ctx, model: string): Promise<string> {
   const messages: any[] = history.map(h => ({ role: h.role, content: h.content }))
   const tools = TOOLS.map(t => ({ name: t.name, description: t.description, input_schema: t.parameters }))
+  const system = systemPrompt() // built once per request so the cached prefix stays identical
   for (let i = 0; i < MAX_STEPS; i++) {
-    const data = await anthropicCall(model, messages, tools, false)
-    messages.push({ role: 'assistant', content: data.content })
+    const data = await anthropicCall(model, messages, tools, false, ctx, system)
     const uses = (data.content || []).filter((b: any) => b.type === 'tool_use')
     if (data.stop_reason !== 'tool_use' || !uses.length) {
       const txt = textOf(data)
-      if (txt) return txt
-      break // no text — ask for a wrap-up below
+      if (txt && data.stop_reason !== 'max_tokens') return txt
+      // Cut off (max_tokens) or no text: keep only finished text — never a tool_use without its
+      // tool_result, which the API rejects — then ask for a wrap-up below.
+      const kept = (data.content || []).filter((b: any) => b.type === 'text' && String(b.text || '').trim())
+      if (kept.length) messages.push({ role: 'assistant', content: kept })
+      break
     }
+    messages.push({ role: 'assistant', content: data.content })
     const results: any[] = []
     for (const u of uses) results.push({ type: 'tool_result', tool_use_id: u.id, content: await callTool(u.name, u.input || {}, ctx) })
     messages.push({ role: 'user', content: results })
   }
   addWrapUp(messages)
-  return textOf(await anthropicCall(model, messages, tools, true))
+  return textOf(await anthropicCall(model, messages, tools, true, ctx, system))
 }
 
-export async function runAgent(history: Turn[], ctx: { conversationId: string; user: string | null; onProgress?: (steps: string[]) => void }): Promise<AgentResult & { steps: string[] }> {
+export async function runAgent(history: Turn[], ctx: { conversationId: string; user: string | null; onProgress?: (steps: string[]) => void }): Promise<AgentResult & { steps: string[]; usage: Usage }> {
   const { provider, model } = getAiProvider()
-  const c: Ctx = { ...ctx, changesetIds: [], steps: [] }
-  if (provider === 'none') return { reply: 'No AI key is configured. Add ANTHROPIC_API_KEY or OPENAI_API_KEY to .env.local. You can still use the Snippets tab to edit by hand.', changesetIds: [], steps: [] }
+  const c: Ctx = { ...ctx, changesetIds: [], steps: [], usage: { calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: null, model } }
+  if (provider === 'none') return { reply: 'No AI key is configured. Add ANTHROPIC_API_KEY or OPENAI_API_KEY to .env.local. You can still use the Snippets tab to edit by hand.', changesetIds: [], steps: [], usage: c.usage }
   let reply = provider === 'anthropic' ? await runAnthropic(history, c, model) : await runOpenAI(history, c, model)
   if (!reply.trim()) reply = c.changesetIds.length ? `Staged ${c.changesetIds.length} change${c.changesetIds.length > 1 ? 's' : ''} — see below.` : 'I could not finish that one. Try asking again, or narrow it down (e.g. one service or city).'
-  return { reply, changesetIds: c.changesetIds, steps: c.steps }
+  c.usage.costUsd = estimateCost(c.usage)
+  return { reply, changesetIds: c.changesetIds, steps: c.steps, usage: c.usage }
 }

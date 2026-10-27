@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
     // run in the background — the response returns immediately
     void (async () => {
       try {
-        const { reply, changesetIds, steps } = await runAgent([...past, { role: 'user', content: message }], {
+        const { reply, changesetIds, steps, usage } = await runAgent([...past, { role: 'user', content: message }], {
           conversationId, user: email, onProgress: s => updateJobSteps(jobId, s),
         })
         const { auto_apply_max } = getSettings()
@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
             if (s && s.snippet_count <= auto_apply_max && !(s.meta?.invalid?.length)) startApply(id)
           }
         }
-        addMessage(conversationId, 'assistant', reply, changesetIds, null, steps)
+        addMessage(conversationId, 'assistant', reply, changesetIds, null, steps, usage.calls ? usage : undefined)
         finishJob(jobId, 'done')
       } catch (e: any) {
         addMessage(conversationId, 'assistant', `Something went wrong: ${e?.message || e}`)

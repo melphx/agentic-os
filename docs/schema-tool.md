@@ -50,6 +50,7 @@ SCHEMA_TOOL_PROD_ORIGIN=https://phxhomeremodeling.com
 ANTHROPIC_API_KEY=<Claude API key, e.g. sk-ant-usr-… from platform.claude.com/settings/keys>
 ANTHROPIC_WORKSPACE_ID=<wrkspc_… — only if the key isn't scoped to a workspace>
 SCHEMA_TOOL_ANTHROPIC_MODEL=claude-sonnet-5-5
+# SCHEMA_TOOL_EFFORT=medium        # low | medium | high (also adjustable in Settings)
 # SCHEMA_TOOL_SA_JSON=/path/to/sa.json   # optional; defaults to INITIATIVES_SA_JSON etc.
 # otherwise it uses the existing OPENAI_API_KEY (SCHEMA_TOOL_OPENAI_MODEL || OPENAI_MODEL)
 ```
