@@ -32,8 +32,9 @@ export default function SchemaToolView() {
   const [review, setReview] = useState<number | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [openSnippet, setOpenSnippet] = useState<number | null>(null)
-  const [draft, setDraft] = useState<{ text: string; n: number } | null>(null)
-  const askAssistant = (text: string) => { setDraft({ text, n: Date.now() }); setTab('assistant') }
+  const [draft, setDraft] = useState<{ text: string; n: number; send?: boolean } | null>(null)
+  /** Fill the assistant box; with send, start a new chat and send it right away. */
+  const askAssistant = (text: string, opts?: { send?: boolean }) => { setDraft({ text, n: Date.now(), send: opts?.send }); setTab('assistant') }
 
   const loadStatus = useCallback(async (ping = false) => {
     try { setStatus(await api<Status>(`/api/schema-tool/status${ping ? '?ping=1' : ''}`)); setStatusErr(null) }
@@ -141,7 +142,7 @@ const SUGGESTIONS = [
 // Tip shown under the suggestions
 const ATTACH_TIP = 'Paste a Google Doc or Sheet link, or attach a file (PDF, Word, Excel, CSV, screenshots) — the assistant reads it with formatting like red text kept.'
 
-function AssistantPanel({ onReview, aiReady, draft }: { onReview: (id: number) => void; aiReady: boolean; draft?: { text: string; n: number } | null }) {
+function AssistantPanel({ onReview, aiReady, draft }: { onReview: (id: number) => void; aiReady: boolean; draft?: { text: string; n: number; send?: boolean } | null }) {
   const [convs, setConvs] = useState<{ conversation_id: string; title: string; updated_at: string }[]>([])
   const [cid, setCid] = useState<string | null>(null)
   const [msgs, setMsgs] = useState<Msg[]>([])
@@ -157,7 +158,17 @@ function AssistantPanel({ onReview, aiReady, draft }: { onReview: (id: number) =
     try { setConvs((await api<{ conversations: any[] }>('/api/schema-tool/chat')).conversations) } catch {}
   }, [])
   useEffect(() => { loadConvs() }, [loadConvs])
-  useEffect(() => { if (draft) { setInput(draft.text); setTimeout(() => inputRef.current?.focus(), 50) } }, [draft])
+  const sentDraft = useRef(0)
+  useEffect(() => {
+    if (!draft) return
+    if (draft.send && aiReady && sentDraft.current !== draft.n) {
+      sentDraft.current = draft.n
+      newConv()
+      send(draft.text, { fresh: true })
+      return
+    }
+    setInput(draft.text); setTimeout(() => inputRef.current?.focus(), 50)
+  }, [draft]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [msgs])
 
   const pollRef = useRef<any>(null)
@@ -227,9 +238,9 @@ function AssistantPanel({ onReview, aiReady, draft }: { onReview: (id: number) =
   const uploading = uploads.some(u => u.uploading)
   const readyAtts = uploads.filter(u => u.att).map(u => u.att!)
 
-  const send = async (text?: string) => {
+  const send = async (text?: string, opts?: { fresh?: boolean }) => {
     const message = (text ?? input).trim()
-    if ((!message && !readyAtts.length) || sending || uploading) return
+    if ((!message && !readyAtts.length) || (sending && !opts?.fresh) || uploading) return
     const atts = text != null ? [] : readyAtts
     setInput('')
     if (text == null) setUploads([])
@@ -237,10 +248,10 @@ function AssistantPanel({ onReview, aiReady, draft }: { onReview: (id: number) =
     const links = (message.match(new RegExp(GOOGLE_LINK.source, 'g')) || []).map(u => ({ id: 0, kind: /spreadsheets/.test(u) ? 'gsheet' : 'gdoc', name: 'Reading link…', url: u, pending: true }))
     setMsgs(m => [...m, { role: 'user', content: message || 'Please look at the attached file(s).', attachments: [...atts, ...links] }, { role: 'assistant', content: '', pending: true, steps: [] }])
     try {
-      const d = await api<{ conversation_id: string; job_id: number }>('/api/schema-tool/chat', { conversation_id: cid, message, attachment_ids: atts.map(a => a.id) })
+      const d = await api<{ conversation_id: string; job_id: number }>('/api/schema-tool/chat', { conversation_id: opts?.fresh ? null : cid, message, attachment_ids: atts.map(a => a.id) })
       setCid(d.conversation_id); cidRef.current = d.conversation_id
       try { localStorage.setItem('schemaTool.cid', d.conversation_id) } catch {}
-      if (!cid) loadConvs()
+      if (!cid || opts?.fresh) loadConvs()
       pollRef.current = setTimeout(() => { loadConv(d.conversation_id).catch(() => {}) }, 1200)
     } catch (e: any) {
       setMsgs(m => [...m.slice(0, -1), { role: 'assistant', content: e.message, error: true }])

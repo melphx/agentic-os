@@ -12,7 +12,7 @@ interface Source {
   writeback?: { status_col: string; note_col: string; values: string[] } | null
 }
 
-export function SourcesPanel({ onAsk }: { onAsk: (text: string) => void }) {
+export function SourcesPanel({ onAsk }: { onAsk: (text: string, opts?: { send?: boolean }) => void }) {
   const [list, setList] = useState<Source[] | null>(null)
   const [sa, setSa] = useState<string | null>(null)
   const [defLegend, setDefLegend] = useState('')
@@ -116,7 +116,11 @@ function AddForm({ defLegend, onDone }: { defLegend: string; onDone: () => void 
   )
 }
 
-function SourceCard({ s, onChanged, onAsk, defLegend }: { s: Source; onChanged: () => void; onAsk: (t: string) => void; defLegend: string }) {
+function SourceCard({ s, onChanged, onAsk, defLegend }: { s: Source; onChanged: () => void; onAsk: (t: string, opts?: { send?: boolean }) => void; defLegend: string }) {
+  const [rowFrom, setRowFrom] = useState('')
+  const [rowTo, setRowTo] = useState('')
+  const rowRange = () => !rowTo || rowTo === rowFrom ? `do row ${rowFrom} only` : `do rows ${Math.min(+rowFrom, +rowTo)}–${Math.max(+rowFrom, +rowTo)} only`
+  const syncRows = (what: string) => onAsk(`Sheet "${s.label}" (source #${s.id}): ${what}. Use sheet_row_plan and follow its targets exactly: stage the schema edits each row needs (one change per row, or per city when a row covers many pages), then stage the sheet status for every row — Added with "Added {date}", or Not Added with a short reason. Finish every row; list anything you couldn't do and why.`, { send: true })
   const [wbOpen, setWbOpen] = useState(false)
   const [statusCol, setStatusCol] = useState(s.writeback?.status_col || 'I')
   const [noteCol, setNoteCol] = useState(s.writeback?.note_col || 'E')
@@ -170,7 +174,7 @@ function SourceCard({ s, onChanged, onAsk, defLegend }: { s: Source; onChanged: 
         <div style={{ marginTop: 10, fontSize: 12, color: T.sub, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           {s.writeback && !wbOpen ? <>
             <Pill tone="green">Write-back on</Pill>
-            <span>Status dropdown in column <b style={{ color: 'white' }}>{s.writeback.status_col}</b> ({s.writeback.values.join(' / ')}) · dates appended to notes in column <b style={{ color: 'white' }}>{s.writeback.note_col}</b> — written only when you apply a change.</span>
+            <span>Status dropdown in column <b style={{ color: 'white' }}>{s.writeback.status_col}</b> ({s.writeback.values.join(' / ')}) · dates written to notes (black) in column <b style={{ color: 'white' }}>{s.writeback.note_col}</b> — written only when you apply a change.</span>
             <button onClick={() => setWbOpen(true)} style={{ background: 'none', border: 'none', color: T.accent, fontSize: 11.5, cursor: 'pointer' }}>Change</button>
           </> : wbOpen ? <>
             <span>Status column</span>
@@ -184,6 +188,18 @@ function SourceCard({ s, onChanged, onAsk, defLegend }: { s: Source; onChanged: 
             <span style={{ color: T.faint }}>Let the assistant mark rows Added / Not Added in this sheet?</span>
             <Btn small onClick={() => setWbOpen(true)}><FileSpreadsheet size={12} /> Set up status column</Btn>
           </>}
+        </div>
+      )}
+
+      {s.writeback && !s.error && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center', flexWrap: 'wrap', padding: '10px 12px', borderRadius: 10, background: 'rgba(99,102,241,0.08)', border: `1px solid ${T.border}` }}>
+          <Btn kind="primary" small onClick={() => syncRows('do every row whose status (column ' + s.writeback!.status_col + ') is still blank, section by section')}><Sparkles size={12} /> Sync pending rows</Btn>
+          <span style={{ color: T.faint, fontSize: 11.5 }}>or rows</span>
+          <input className="st-input" value={rowFrom} onChange={e => setRowFrom(e.target.value.replace(/\D/g, ''))} placeholder="160" style={{ ...inputStyle, width: 62, textAlign: 'center', padding: '5px 6px' }} />
+          <span style={{ color: T.faint, fontSize: 11.5 }}>to</span>
+          <input className="st-input" value={rowTo} onChange={e => setRowTo(e.target.value.replace(/\D/g, ''))} onKeyDown={e => { if (e.key === 'Enter' && rowFrom) syncRows(rowRange()) }} placeholder="170" style={{ ...inputStyle, width: 62, textAlign: 'center', padding: '5px 6px' }} />
+          <Btn small disabled={!rowFrom} onClick={() => syncRows(rowRange())}>Sync these rows</Btn>
+          <span style={{ color: T.faint, fontSize: 11.5, flexBasis: '100%' }}>Opens a new chat and starts right away. You get change cards to review — nothing is saved or written to the sheet until you click Apply.</span>
         </div>
       )}
 

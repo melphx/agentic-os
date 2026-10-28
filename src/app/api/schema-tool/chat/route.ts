@@ -19,6 +19,8 @@ import { changesetSummary, fail, guard } from '@/lib/schema-tool/http'
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
+const MAX_PARTS = 3
+
 export async function GET(req: NextRequest) {
   const { error } = await guard(req); if (error) return error
   try {
@@ -68,18 +70,28 @@ export async function POST(req: NextRequest) {
           updateJobSteps(jobId, pre)
         }
         setMessageAttachments(msgId, [...uploaded, ...linked].map(chip))
-        const { reply, changesetIds, steps, usage } = await runAgent([...past, { role: 'user', content: message }], {
-          conversationId, user: email, onProgress: s => updateJobSteps(jobId, s),
-          attachmentIds: [...uploaded, ...linked].map(a => a.id), preSteps: pre,
-        })
-        const { auto_apply_max } = getSettings()
-        if (auto_apply_max > 0) {
-          for (const id of changesetIds) {
-            const s = changesetSummary(id)
-            if (s && s.snippet_count <= auto_apply_max && !(s.meta?.invalid?.length)) startApply(id)
+        // A big job can run out of steps; carry on automatically (up to 3 parts) so nothing is left half done.
+        let history: { role: 'user' | 'assistant'; content: string }[] = [...past, { role: 'user', content: message }]
+        for (let part = 1; part <= MAX_PARTS; part++) {
+          const { reply, changesetIds, steps, usage, hitLimit } = await runAgent(history, {
+            conversationId, user: email, onProgress: s => updateJobSteps(jobId, s),
+            attachmentIds: part === 1 ? [...uploaded, ...linked].map(a => a.id) : [], preSteps: part === 1 ? pre : [`Continuing (part ${part} of up to ${MAX_PARTS})`],
+          })
+          const { auto_apply_max } = getSettings()
+          if (auto_apply_max > 0) {
+            for (const id of changesetIds) {
+              const s = changesetSummary(id)
+              if (s && s.snippet_count <= auto_apply_max && !(s.meta?.invalid?.length)) startApply(id)
+            }
           }
+          addMessage(conversationId, 'assistant', reply, changesetIds, null, steps, usage.calls ? usage : undefined)
+          if (!hitLimit || part === MAX_PARTS) break
+          const cont = `↻ Continuing automatically (part ${part + 1}): finish whatever is left from the request above. Don't redo anything already staged.`
+          addMessage(conversationId, 'user', cont, [], 'auto')
+          history = [...history,
+            { role: 'assistant', content: reply + (changesetIds.length ? `\n[staged changesets: ${changesetIds.map(i => '#' + i).join(', ')}]` : '') },
+            { role: 'user', content: cont }]
         }
-        addMessage(conversationId, 'assistant', reply, changesetIds, null, steps, usage.calls ? usage : undefined)
         finishJob(jobId, 'done')
       } catch (e: any) {
         addMessage(conversationId, 'assistant', `Something went wrong: ${e?.message || e}`)

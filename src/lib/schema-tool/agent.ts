@@ -13,6 +13,7 @@ import { attachLink, attachmentBlocks, FORMAT_LEGEND, readAttachmentText } from 
 import { checkPage } from './pagecheck'
 import { describeRows, getSource, planSheetWrites, readSourceText, refreshSource, sourcesForPrompt, writebackOf } from './sources'
 import { updateChangesetMeta } from './store'
+import { coverageGaps, planRows, plansForAssistant } from './sheetplan'
 
 interface ToolDef { name: string; description: string; parameters: Record<string, unknown> }
 
@@ -105,6 +106,11 @@ const TOOLS: ToolDef[] = [
     parameters: { type: 'object', properties: { source_id: num }, required: ['source_id'] },
   },
   {
+    name: 'sheet_row_plan',
+    description: 'For rows of a connected sameAs sheet: works out from column A exactly which snippets each URL belongs in (homepage, every full Organization, a city service page, all pages of a city, a service in every city…), which of them already have it, old links to replace (column C), NO rows still in schema, and rows with no page. ALWAYS call this before changing schema or sheet status for sheet rows, and follow its targets exactly — never work out the page list yourself. rows: e.g. "160-170" or "4, 15, 28"; or pending: true for rows whose status is blank (up to 30 at a time).',
+    parameters: { type: 'object', properties: { source_id: num, rows: str, pending: bool }, required: ['source_id'] },
+  },
+  {
     name: 'propose_sheet_updates',
     description: 'Stage status / note updates for rows of a connected sheet that has write-back set up (e.g. mark sameAs rows "Added" or "Not Added"). Pass changeset_id to attach them to a schema change you just staged: the sheet is then written only after that change is applied successfully, and put back if it is undone. Without changeset_id it stages a sheet-only change (for rows whose links are already correct in the schema). note: short text that REPLACES the NOTES cell (written in black); use just "Added {date}" ({date} becomes MM-YYYY when written). For "Not Added" always give the reason in the note.',
     parameters: {
@@ -140,7 +146,7 @@ const TOOLS: ToolDef[] = [
 
 export interface AgentResult { reply: string; changesetIds: number[] }
 export interface Usage { calls: number; input: number; output: number; cacheRead: number; cacheWrite: number; costUsd: number | null; model: string }
-interface Ctx { conversationId: string; user: string | null; changesetIds: number[]; steps: string[]; onProgress?: (steps: string[]) => void; usage: Usage; domainFixes: number }
+interface Ctx { conversationId: string; user: string | null; changesetIds: number[]; steps: string[]; onProgress?: (steps: string[]) => void; usage: Usage; domainFixes: number; hitLimit?: boolean }
 
 /** USD per million tokens: [input, output, cache write (5m), cache read] — platform.claude.com pricing */
 const RATES: [RegExp, number[]][] = [
@@ -283,6 +289,26 @@ async function runTool(name: string, args: any, ctx: Ctx): Promise<string> {
       return cap({ id: s.id, label: s.label, refreshed: s.fetched_at, error: s.error, changes: s.changes ? JSON.parse(s.changes) : null })
     }
     case 'check_page': return cap(await checkPage(String(args.url)))
+    case 'sheet_row_plan': {
+      let rows: number[] | 'pending' = 'pending'
+      if (!args.pending && args.rows) {
+        rows = []
+        for (const part of String(args.rows).split(/[,\s]+/).filter(Boolean)) {
+          const m = part.match(/^(\d+)(?:-(\d+))?$/)
+          if (!m) continue
+          const a = Number(m[1]), b = Number(m[2] || m[1])
+          for (let r = Math.min(a, b); r <= Math.max(a, b) && rows.length < 200; r++) rows.push(r)
+        }
+      }
+      const { plans } = await planRows(Number(args.source_id), rows)
+      const work = plans.filter(p => p.action !== 'not a link row')
+      const shown = rows === 'pending' ? work.slice(0, 30) : work
+      return cap({
+        rows: plansForAssistant(shown),
+        ...(rows === 'pending' && work.length > shown.length ? { more_pending: work.length - shown.length, note: 'Finish these first; call again with pending: true for the rest.' } : {}),
+        how_to: 'action "add": add the URL on every snippet in missing/targets without "(has it)" (Organization sameAs → the sameAs list of the full Organization; subjectOf → an Article entry {"@type":"Article","url":…,"name":…} in subjectOf of the Organization / Person / page Service). "replace old link": swap old_url for url wherever it appears. "remove": delete the URL (NO rows). "nothing to do": already right — just mark the sheet. "no page": mark Not Added with the reason. Put each row\'s edits in one change. also_found_in = URL is on pages column A doesn\'t list: mention it, don\'t remove unless asked.',
+      }, 60000)
+    }
     case 'propose_sheet_updates': {
       const src = getSource(Number(args.source_id))
       if (!src) return cap({ error: 'source not found' })
@@ -290,6 +316,9 @@ async function runTool(name: string, args: any, ctx: Ctx): Promise<string> {
       const rows = (args.updates || []).map((u: any) => ({ row: Number(u.row), url: u.url ? String(u.url) : undefined, status: u.status != null ? String(u.status) : undefined, note: u.note ? String(u.note) : undefined }))
       let cells
       try { cells = planSheetWrites(src, rows) } catch (e: any) { return cap({ error: e.message }) }
+      // a row is only "Added" when the URL is on every page column A asks for (now, or in a change staged in this chat)
+      const gaps = await coverageGaps(src.id, rows, ctx.conversationId)
+      if (gaps.length) return cap({ error: 'Not staged — some rows marked "Added" are not covered yet:', gaps, note: 'Stage the missing edits first (see sheet_row_plan), or mark those rows Not Added with the reason.' })
       const described = describeRows(src, rows)
       const empty = described.filter(r => !r.url && !r.type).map(r => r.row)
       if (empty.length) return cap({ error: `Rows ${empty.join(', ')} are empty in the sheet — check the row numbers (re-read the source if it changed).` })
@@ -400,6 +429,7 @@ ${s.notes.trim()}` : ''}${src ? `
 Connected sources (read them with read_source when a request involves them, e.g. sameAs links)
 ${src}
 - When syncing schema with a source, compare carefully (normalise trailing slashes and www), stage the changes as one changeset, and list anything in the source you deliberately did not apply and why.
+- Sheet rows (e.g. "do rows 160–170", "sync pending rows"): call sheet_row_plan first and follow its targets exactly. Stage one change per row (or one per city when a row covers many pages), never leave a target out, and finish every row you were given — say plainly if you couldn't.
 - Sources with write-back ON: after staging the schema change, call propose_sheet_updates with that changeset_id for every row you handled ("Added" + note "Added {date}", or "Not Added" + the reason). Rows already correct in the schema get "Added" in a separate sheet-only change (no changeset_id). Only mark a row "Added" when the URL is in EVERY place its column A type asks for. When asked to do a section, cover EVERY row in it that has a URL — including NO rows ("Not Added", note e.g. "Marked NO — not in schema") — and say which rows you skipped and why. Don't touch rows you didn't check.` : ''}`
 }
 
@@ -424,6 +454,7 @@ function progressLabel(name: string, args: any): string {
     case 'read_source': return `Reading source #${args.source_id}${args.query ? ` (“${args.query}”)` : ''}`
     case 'refresh_source': return `Re-reading source #${args.source_id} from Google`
     case 'recent_changes': return 'Looking at recent changes'
+    case 'sheet_row_plan': return args.pending ? 'Finding sheet rows still to do' : `Working out where rows ${String(args.rows || '').slice(0, 30)} belong`
     case 'propose_sheet_updates': return `Staging sheet status for ${(args.updates || []).length} rows`
     case 'read_attachment': return `Reading attachment #${args.attachment_id}${args.query ? ` (“${String(args.query).slice(0, 40)}”)` : ''}`
     case 'read_link': return 'Opening a Google link'
@@ -447,7 +478,7 @@ async function runOpenAI(history: Turn[], ctx: Ctx, model: string, attIds: numbe
   const tools: OpenAI.ChatCompletionTool[] = TOOLS.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }))
   for (let i = 0; i <= MAX_STEPS; i++) {
     const last = i === MAX_STEPS
-    if (last) messages.push({ role: 'user', content: WRAP_UP })
+    if (last) { messages.push({ role: 'user', content: WRAP_UP }); ctx.hitLimit = true }
     const r = await openai.chat.completions.create({ model, messages, tools, ...(last ? { tool_choice: 'none' as const } : {}) })
     ctx.usage.calls++; ctx.usage.input += r.usage?.prompt_tokens || 0; ctx.usage.output += r.usage?.completion_tokens || 0
     const msg = r.choices[0].message
@@ -552,19 +583,20 @@ async function runAnthropic(history: Turn[], ctx: Ctx, model: string, attIds: nu
     const results: any[] = []
     for (const u of uses) results.push({ type: 'tool_result', tool_use_id: u.id, content: await callTool(u.name, u.input || {}, ctx) })
     messages.push({ role: 'user', content: results })
+    if (i === MAX_STEPS - 1) ctx.hitLimit = true
   }
   addWrapUp(messages)
   return textOf(await anthropicCall(model, messages, tools, true, ctx, system))
 }
 
-export async function runAgent(history: Turn[], ctx: RunOpts): Promise<AgentResult & { steps: string[]; usage: Usage }> {
+export async function runAgent(history: Turn[], ctx: RunOpts): Promise<AgentResult & { steps: string[]; usage: Usage; hitLimit: boolean }> {
   const { provider, model } = getAiProvider()
   const c: Ctx = { conversationId: ctx.conversationId, user: ctx.user, onProgress: ctx.onProgress, changesetIds: [], steps: [...(ctx.preSteps || [])], domainFixes: 0, usage: { calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: null, model } }
   const attIds = ctx.attachmentIds || []
-  if (provider === 'none') return { reply: 'No AI key is configured. Add ANTHROPIC_API_KEY or OPENAI_API_KEY to .env.local. You can still use the Snippets tab to edit by hand.', changesetIds: [], steps: [], usage: c.usage }
+  if (provider === 'none') return { reply: 'No AI key is configured. Add ANTHROPIC_API_KEY or OPENAI_API_KEY to .env.local. You can still use the Snippets tab to edit by hand.', changesetIds: [], steps: [], usage: c.usage, hitLimit: false }
   let reply = provider === 'anthropic' ? await runAnthropic(history, c, model, attIds) : await runOpenAI(history, c, model, attIds)
   if (!reply.trim()) reply = c.changesetIds.length ? `Staged ${c.changesetIds.length} change${c.changesetIds.length > 1 ? 's' : ''} — see below.` : 'I could not finish that one. Try asking again, or narrow it down (e.g. one service or city).'
   if (c.domainFixes) reply += `\n\nNote: ${c.domainFixes} staging URL${c.domainFixes === 1 ? ' was' : 's were'} switched to ${getConfig().prodOrigin} in the staged change.`
   c.usage.costUsd = estimateCost(c.usage)
-  return { reply, changesetIds: c.changesetIds, steps: c.steps, usage: c.usage }
+  return { reply, changesetIds: c.changesetIds, steps: c.steps, usage: c.usage, hitLimit: !!c.hitLimit }
 }

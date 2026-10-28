@@ -269,7 +269,10 @@ Website & schema setup
 - Key snippets: #407 homepage, #410 About, #537 Our Story, #556 Jeremy's author page, #557 Ben's author page, #559 media kit, #560 book page.
 - The full Organization is copied into ~130 snippets (not defined once). A company-wide change means editing every copy — find them by searching for facebook.com/PhoenixHomeRemodelingCompany/.
 - Rank Math also outputs its own schema block (class "rank-math-schema-pro": basic Organization, VideoObject…). It is NOT editable here; ignore it unless asked.
-- Pages were renamed: bathroom-remodeling → bathroom-remodel, kitchen-remodeling → kitchen-remodel. The old kitchen-bath-renovation pages are retired.
+- Pages were renamed: bathroom-remodeling → bathroom-remodel, kitchen-remodeling → kitchen-remodel. The old kitchen-bath-renovation pages are retired: never add links to /services/kitchen-bath-renovation/… snippets.
+- City pages (…-az/) no longer carry their own company block: they reference {"@id": "https://phxhomeremodeling.com/#organization"} and have one Service with provider + areaServed = that city. Don't add a company block back.
+- #422 is named …/aging-in-place-remodeling-phoenix-az/ but shows on /services/aging-in-place-remodel/ — a metro-wide page, not a Phoenix city page.
+- City pages that don't exist: Phoenix has no bathroom or home-remodeling page; South Phoenix only has bathroom and home-remodeling pages.
 - The team's sameAs tracking sheet and fact-fix docs are usually shared as Google links.`
 
 export interface Settings { auto_apply_max: number; rules: string; effort: string; context: string; notes: string }
