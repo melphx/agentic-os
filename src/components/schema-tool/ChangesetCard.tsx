@@ -62,7 +62,7 @@ export function ChangesetCard({ initial, onOpen, compact, onChange }: { initial:
   const [err, setErr] = useState<string | null>(null)
   const [showSkipped, setShowSkipped] = useState(false)
   const [showSheet, setShowSheet] = useState(false)
-  const sheet = cs.meta?.sheet as { label?: string; rows: { row: number; url?: string; status?: string; note?: string }[]; written_at?: string; error?: string; reverted_at?: string } | undefined
+  const sheet = cs.meta?.sheet as { label?: string; rows: { row: number; url?: string; type?: string; status?: string; note?: string; prev_status?: string; prev_note?: string }[]; written_at?: string; error?: string; reverted_at?: string } | undefined
   const sheetOnly = cs.kind === 'sheet'
   const skipped = cs.meta?.skipped_count || 0
   const invalid: any[] = cs.meta?.invalid || []
@@ -109,14 +109,27 @@ export function ChangesetCard({ initial, onOpen, compact, onChange }: { initial:
       {sheet && (showSheet || sheetOnly) && (
         <div className="st-scroll" style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 240, overflowY: 'auto' }}>
           {sheet.error && <div style={{ fontSize: 11.5, color: T.red }}>Sheet not updated: {sheet.error}</div>}
-          {(showSheet ? sheet.rows : sheet.rows.slice(0, 4)).map((r, i) => (
-            <div key={i} style={{ fontSize: 11.5, color: T.sub, display: 'flex', gap: 8, alignItems: 'baseline', background: 'rgba(8,12,20,0.55)', border: `1px solid ${T.border}`, borderRadius: 6, padding: '4px 8px' }}>
-              <span style={{ fontFamily: T.mono, color: T.faint, flexShrink: 0 }}>R{r.row}</span>
-              {r.status && <span style={{ flexShrink: 0, fontWeight: 600, color: r.status === 'Added' ? T.green : T.amber }}>{r.status}</span>}
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{r.url || ''}</span>
-              {r.note && <span style={{ color: T.faint, flexShrink: 0, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.note}>{r.note.replace('{date}', 'MM-YYYY')}</span>}
-            </div>
-          ))}
+          {(showSheet ? sheet.rows : sheet.rows.slice(0, 4)).map((r, i) => {
+            const same = r.status != null && (r.prev_status || '') === r.status
+            return (
+              <div key={i} style={{ fontSize: 11.5, color: T.sub, background: 'rgba(8,12,20,0.55)', border: `1px solid ${T.border}`, borderRadius: 6, padding: '5px 8px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', minWidth: 0 }}>
+                  <span style={{ fontFamily: T.mono, color: T.faint, flexShrink: 0 }}>R{r.row}</span>
+                  {r.type && <span style={{ flexShrink: 0, color: r.type === 'NO' ? T.red : '#c7d2fe', fontSize: 10.5, fontWeight: 600 }}>{r.type}</span>}
+                  {r.url ? <a href={r.url} target="_blank" rel="noreferrer" style={{ color: T.sub, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{r.url.replace(/^https?:\/\/(www\.)?/, '')}</a> : <span style={{ color: T.faint }}>(no URL)</span>}
+                </div>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap', paddingLeft: 28 }}>
+                  {r.status != null && <span>
+                    Status: <span style={{ color: T.faint }}>{r.prev_status || 'blank'}</span> → <b style={{ color: r.status === 'Added' ? T.green : T.amber }}>{r.status}</b>{same ? <span style={{ color: T.faint }}> (no change)</span> : null}
+                  </span>}
+                  {r.note && <span title={r.prev_note ? `Current note: ${r.prev_note}` : ''}>
+                    Note: {r.prev_note ? <span style={{ color: T.faint }}>“{r.prev_note.length > 40 ? r.prev_note.slice(0, 40) + '…' : r.prev_note}” + </span> : null}<span style={{ color: '#c7d2fe' }}>“{r.note.replace('{date}', new Date().toISOString().slice(5, 7) + '-' + new Date().getFullYear())}”</span>
+                    {r.prev_note && r.prev_note.includes(r.note.replace('{date}', new Date().toISOString().slice(5, 7) + '-' + new Date().getFullYear())) ? <span style={{ color: T.faint }}> (already there)</span> : null}
+                  </span>}
+                </div>
+              </div>
+            )
+          })}
           {!showSheet && sheet.rows.length > 4 && <span onClick={() => setShowSheet(true)} style={{ fontSize: 11, color: T.accent, cursor: 'pointer' }}>+ {sheet.rows.length - 4} more rows</span>}
         </div>
       )}

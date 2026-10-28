@@ -302,6 +302,28 @@ export async function setupWriteback(id: number, cfg: { status_col?: string; not
 
 export interface SheetRowUpdate { row: number; status?: string; note?: string; url?: string }
 
+/** The plain text of one cell from the last read (formatting markers removed). */
+export function cellText(s: SourceRow, row: number, col: string): string {
+  const rows: Record<string, string> = s.rows_json ? JSON.parse(s.rows_json) : {}
+  const r = rows['R' + row]
+  if (!r) return ''
+  const c = r.split(' | ').find(x => x.startsWith(col + '='))
+  if (!c) return ''
+  return c.slice(col.length + 1).replace(/\s\(note: .*\)$/, '').replace(/\s<[^>]+>$/, '').replace(/\s\{[a-z:,]+\}$/, '').replace(/~~/g, '').trim()
+}
+
+/** Add what the person needs to review each row: its type (A), URL (B), and the current status / note. */
+export function describeRows(s: SourceRow, rows: SheetRowUpdate[]) {
+  const wb = writebackOf(s)
+  return rows.map(u => ({
+    ...u,
+    type: cellText(s, u.row, 'A') || undefined,
+    url: u.url || cellText(s, u.row, 'B') || undefined,
+    prev_status: wb ? cellText(s, u.row, wb.status_col) || '' : '',
+    prev_note: wb ? cellText(s, u.row, wb.note_col) || '' : '',
+  }))
+}
+
 /** Turn row-level updates into cell writes. Notes are appended to what is already in the notes cell. */
 export function planSheetWrites(s: SourceRow, rows: SheetRowUpdate[]): SheetCell[] {
   const wb = writebackOf(s)

@@ -11,7 +11,7 @@ import { changesetFromConfig, changesetFromEdits, changesetFromPlan, describeCon
 import { addNote, createChangeset, getChangeset, getItems, getSettings, ItemFull, listChangesets } from './store'
 import { attachLink, attachmentBlocks, FORMAT_LEGEND, readAttachmentText } from './attachments'
 import { checkPage } from './pagecheck'
-import { getSource, planSheetWrites, readSourceText, refreshSource, sourcesForPrompt, writebackOf } from './sources'
+import { describeRows, getSource, planSheetWrites, readSourceText, refreshSource, sourcesForPrompt, writebackOf } from './sources'
 import { updateChangesetMeta } from './store'
 
 interface ToolDef { name: string; description: string; parameters: Record<string, unknown> }
@@ -290,13 +290,16 @@ async function runTool(name: string, args: any, ctx: Ctx): Promise<string> {
       const rows = (args.updates || []).map((u: any) => ({ row: Number(u.row), url: u.url ? String(u.url) : undefined, status: u.status != null ? String(u.status) : undefined, note: u.note ? String(u.note) : undefined }))
       let cells
       try { cells = planSheetWrites(src, rows) } catch (e: any) { return cap({ error: e.message }) }
-      const sheet = { source_id: src.id, label: src.label, rows, cells }
+      const described = describeRows(src, rows)
+      const empty = described.filter(r => !r.url && !r.type).map(r => r.row)
+      if (empty.length) return cap({ error: `Rows ${empty.join(', ')} are empty in the sheet — check the row numbers (re-read the source if it changed).` })
+      const sheet = { source_id: src.id, label: src.label, rows: described, cells }
       if (args.changeset_id) {
         const cs = getChangeset(Number(args.changeset_id))
         if (!cs || cs.status !== 'proposed') return cap({ error: `changeset #${args.changeset_id} is not waiting to be applied` })
         const meta = cs.meta ? JSON.parse(cs.meta) : {}
         if (meta.sheet && meta.sheet.source_id !== src.id) return cap({ error: 'that changeset already has updates for a different sheet' })
-        const merged = meta.sheet ? { ...meta.sheet, rows: [...meta.sheet.rows, ...rows], cells: [...meta.sheet.cells, ...cells] } : sheet
+        const merged = meta.sheet ? { ...meta.sheet, rows: [...meta.sheet.rows, ...described], cells: [...meta.sheet.cells, ...cells] } : sheet
         updateChangesetMeta(cs.id, { ...meta, sheet: merged })
         return cap({ changeset_id: cs.id, sheet_rows: merged.rows.length, note: 'Attached: the sheet is updated when this change is applied.' })
       }
@@ -397,7 +400,7 @@ ${s.notes.trim()}` : ''}${src ? `
 Connected sources (read them with read_source when a request involves them, e.g. sameAs links)
 ${src}
 - When syncing schema with a source, compare carefully (normalise trailing slashes and www), stage the changes as one changeset, and list anything in the source you deliberately did not apply and why.
-- Sources with write-back ON: after staging the schema change, call propose_sheet_updates with that changeset_id for every row you handled ("Added" + note "Added {date}", or "Not Added" + the reason). Rows already correct in the schema get "Added" in a separate sheet-only change (no changeset_id). Only mark a row "Added" when the URL is in EVERY place its column A type asks for. Don't touch rows you didn't check.` : ''}`
+- Sources with write-back ON: after staging the schema change, call propose_sheet_updates with that changeset_id for every row you handled ("Added" + note "Added {date}", or "Not Added" + the reason). Rows already correct in the schema get "Added" in a separate sheet-only change (no changeset_id). Only mark a row "Added" when the URL is in EVERY place its column A type asks for. When asked to do a section, cover EVERY row in it that has a URL — including NO rows ("Not Added", note e.g. "Marked NO — not in schema") — and say which rows you skipped and why. Don't touch rows you didn't check.` : ''}`
 }
 
 // ── provider loops ─────────────────────────────────────────────────────────
