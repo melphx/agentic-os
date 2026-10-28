@@ -150,6 +150,10 @@ export function setChangesetStatus(id: number, status: string, extra?: { applied
   getDb().prepare(`UPDATE schema_tool_changesets SET ${sets.join(',')} WHERE id=?`).run(status, id)
 }
 
+export function updateChangesetMeta(id: number, meta: unknown) {
+  getDb().prepare('UPDATE schema_tool_changesets SET meta=? WHERE id=?').run(JSON.stringify(meta), id)
+}
+
 export function setItemStatus(id: number, status: string, error?: string | null) {
   getDb().prepare(`UPDATE schema_tool_items SET status=?, error=?, applied_at=CASE WHEN ?='applied' THEN datetime('now') ELSE applied_at END WHERE id=?`)
     .run(status, error || null, status, id)
@@ -239,7 +243,8 @@ export const DEFAULT_RULES = `- Work only on the configured site (staging). Neve
 - Jeremy Maher has one Person ID: https://phxhomeremodeling.com/author-jeremy-maher/#person. Never create a second Person for him.
 - Jeremy's title is always "Co-Founder & COO" (never owner, founder, co-owner or general contractor). Ben Chesley: "Co-Founder & CFO". Mark Chesley: "Co-Founder & Chief Construction Officer".
 - Only approved URLs go in sameAs. Press, podcasts and videos go in subjectOf. Book links go in the Book (https://phxhomeremodeling.com/remodel-book/#book).
-- Never include Credit Repair Doctor / mycreditdoc.com, Patch, EnrollBusiness, ZoomInfo, RocketReach, Grokipedia or tier-3/parasite pages.
+- Never include Credit Repair Doctor / mycreditdoc.com, EnrollBusiness, ZoomInfo, RocketReach or tier-3/parasite pages.
+- For sameAs / mentions, the team's sameAs sheet (column A) decides what goes where; a row marked NO must not be in schema.
 - PHR Organization ID: https://phxhomeremodeling.com/#organization. Wikidata: company Q138340466, Jeremy Q141665193, book Q141727039.
 - Project minimum is $20,000.`
 

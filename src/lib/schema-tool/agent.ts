@@ -11,7 +11,8 @@ import { changesetFromConfig, changesetFromEdits, changesetFromPlan, describeCon
 import { addNote, createChangeset, getChangeset, getItems, getSettings, ItemFull, listChangesets } from './store'
 import { attachLink, attachmentBlocks, FORMAT_LEGEND, readAttachmentText } from './attachments'
 import { checkPage } from './pagecheck'
-import { readSourceText, refreshSource, sourcesForPrompt } from './sources'
+import { getSource, planSheetWrites, readSourceText, refreshSource, sourcesForPrompt, writebackOf } from './sources'
+import { updateChangesetMeta } from './store'
 
 interface ToolDef { name: string; description: string; parameters: Record<string, unknown> }
 
@@ -102,6 +103,18 @@ const TOOLS: ToolDef[] = [
     name: 'refresh_source',
     description: 'Re-read a connected source from Google right now (use when the person says the sheet was just updated).',
     parameters: { type: 'object', properties: { source_id: num }, required: ['source_id'] },
+  },
+  {
+    name: 'propose_sheet_updates',
+    description: 'Stage status / note updates for rows of a connected sheet that has write-back set up (e.g. mark sameAs rows "Added" or "Not Added"). Pass changeset_id to attach them to a schema change you just staged: the sheet is then written only after that change is applied successfully, and put back if it is undone. Without changeset_id it stages a sheet-only change (for rows whose links are already correct in the schema). note: short text appended to the NOTES cell; use "Added {date}" ({date} becomes MM-YYYY when written). For "Not Added" always give the reason in the note.',
+    parameters: {
+      type: 'object',
+      properties: {
+        source_id: num, changeset_id: num, title: str,
+        updates: { type: 'array', items: { type: 'object', properties: { row: num, url: str, status: str, note: str }, required: ['row'] } },
+      },
+      required: ['source_id', 'updates'],
+    },
   },
   {
     name: 'read_attachment',
@@ -270,6 +283,27 @@ async function runTool(name: string, args: any, ctx: Ctx): Promise<string> {
       return cap({ id: s.id, label: s.label, refreshed: s.fetched_at, error: s.error, changes: s.changes ? JSON.parse(s.changes) : null })
     }
     case 'check_page': return cap(await checkPage(String(args.url)))
+    case 'propose_sheet_updates': {
+      const src = getSource(Number(args.source_id))
+      if (!src) return cap({ error: 'source not found' })
+      if (!writebackOf(src)) return cap({ error: `Source #${src.id} has no status column set up. Tell the person to open Sources → "${src.label}" → Set up status column.` })
+      const rows = (args.updates || []).map((u: any) => ({ row: Number(u.row), url: u.url ? String(u.url) : undefined, status: u.status != null ? String(u.status) : undefined, note: u.note ? String(u.note) : undefined }))
+      let cells
+      try { cells = planSheetWrites(src, rows) } catch (e: any) { return cap({ error: e.message }) }
+      const sheet = { source_id: src.id, label: src.label, rows, cells }
+      if (args.changeset_id) {
+        const cs = getChangeset(Number(args.changeset_id))
+        if (!cs || cs.status !== 'proposed') return cap({ error: `changeset #${args.changeset_id} is not waiting to be applied` })
+        const meta = cs.meta ? JSON.parse(cs.meta) : {}
+        if (meta.sheet && meta.sheet.source_id !== src.id) return cap({ error: 'that changeset already has updates for a different sheet' })
+        const merged = meta.sheet ? { ...meta.sheet, rows: [...meta.sheet.rows, ...rows], cells: [...meta.sheet.cells, ...cells] } : sheet
+        updateChangesetMeta(cs.id, { ...meta, sheet: merged })
+        return cap({ changeset_id: cs.id, sheet_rows: merged.rows.length, note: 'Attached: the sheet is updated when this change is applied.' })
+      }
+      const id = createChangeset({ site: getConfig().siteUrl, title: String(args.title || `Update "${src.label}" status (${rows.length} rows)`).slice(0, 160), kind: 'sheet', source: 'chat', conversation_id: ctx.conversationId, created_by: ctx.user, meta: { sheet } }, [])
+      ctx.changesetIds.push(id)
+      return cap({ changeset_id: id, sheet_rows: rows.length, note: 'Staged a sheet-only change. Nothing is written until the person applies it.' })
+    }
     case 'read_attachment': return readAttachmentText(Number(args.attachment_id), { query: args.query, offset: args.offset })
     case 'read_link': {
       const a = await attachLink(String(args.url || ''), ctx.conversationId, ctx.user, args.tab ? String(args.tab) : undefined)
@@ -362,7 +396,8 @@ ${s.notes.trim()}` : ''}${src ? `
 
 Connected sources (read them with read_source when a request involves them, e.g. sameAs links)
 ${src}
-- When syncing schema with a source, compare carefully (normalise trailing slashes and www), stage the changes as one changeset, and list anything in the source you deliberately did not apply and why.` : ''}`
+- When syncing schema with a source, compare carefully (normalise trailing slashes and www), stage the changes as one changeset, and list anything in the source you deliberately did not apply and why.
+- Sources with write-back ON: after staging the schema change, call propose_sheet_updates with that changeset_id for every row you handled ("Added" + note "Added {date}", or "Not Added" + the reason). Rows already correct in the schema get "Added" in a separate sheet-only change (no changeset_id). Only mark a row "Added" when the URL is in EVERY place its column A type asks for. Don't touch rows you didn't check.` : ''}`
 }
 
 // ── provider loops ─────────────────────────────────────────────────────────
@@ -386,6 +421,7 @@ function progressLabel(name: string, args: any): string {
     case 'read_source': return `Reading source #${args.source_id}${args.query ? ` (“${args.query}”)` : ''}`
     case 'refresh_source': return `Re-reading source #${args.source_id} from Google`
     case 'recent_changes': return 'Looking at recent changes'
+    case 'propose_sheet_updates': return `Staging sheet status for ${(args.updates || []).length} rows`
     case 'read_attachment': return `Reading attachment #${args.attachment_id}${args.query ? ` (“${String(args.query).slice(0, 40)}”)` : ''}`
     case 'read_link': return 'Opening a Google link'
     case 'remember': return 'Saving a note for next time'

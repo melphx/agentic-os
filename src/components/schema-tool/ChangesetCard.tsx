@@ -1,7 +1,7 @@
 'use client'
 /** Schema Tool — changeset card (one-click apply / undo) and review drawer. */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown, ChevronRight, Eye, RotateCcw, X, AlertTriangle } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Eye, RotateCcw, X, AlertTriangle, FileSpreadsheet } from 'lucide-react'
 import { Btn, Pill, Spinner, STATUS_LABEL, T, WordDiff, api, shortName, statusTone, timeAgo } from './ui'
 
 export interface CsSummary {
@@ -61,6 +61,9 @@ export function ChangesetCard({ initial, onOpen, compact, onChange }: { initial:
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [showSkipped, setShowSkipped] = useState(false)
+  const [showSheet, setShowSheet] = useState(false)
+  const sheet = cs.meta?.sheet as { label?: string; rows: { row: number; url?: string; status?: string; note?: string }[]; written_at?: string; error?: string; reverted_at?: string } | undefined
+  const sheetOnly = cs.kind === 'sheet'
   const skipped = cs.meta?.skipped_count || 0
   const invalid: any[] = cs.meta?.invalid || []
   const progress = cs.counts.total ? (cs.status === 'reverting' ? cs.counts.reverted : cs.counts.applied + cs.counts.failed + cs.counts.conflict) / cs.counts.total : 0
@@ -79,8 +82,11 @@ export function ChangesetCard({ initial, onOpen, compact, onChange }: { initial:
         <Pill tone={statusTone(cs.status)}>{working && <Spinner size={9} />}{STATUS_LABEL[cs.status] || cs.status}</Pill>
       </div>
       <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-        <Pill>{cs.snippet_count} snippet{cs.snippet_count === 1 ? '' : 's'}</Pill>
-        {cs.kind !== 'config' && <Pill>{cs.mention_count} change{cs.mention_count === 1 ? '' : 's'}</Pill>}
+        {!sheetOnly && <Pill>{cs.snippet_count} snippet{cs.snippet_count === 1 ? '' : 's'}</Pill>}
+        {sheet && <span onClick={() => setShowSheet(v => !v)} style={{ cursor: 'pointer' }}><Pill tone={sheet.error ? 'red' : sheet.reverted_at ? 'neutral' : sheet.written_at ? 'green' : 'accent'} title={sheet.error || ''}>
+          <FileSpreadsheet size={10} /> {sheet.rows.length} sheet row{sheet.rows.length === 1 ? '' : 's'}{sheet.error ? ' · not written' : sheet.reverted_at ? ' · put back' : sheet.written_at ? ' · updated' : ' · on apply'} {showSheet ? '▾' : '▸'}
+        </Pill></span>}
+        {cs.kind !== 'config' && !sheetOnly && <Pill>{cs.mention_count} change{cs.mention_count === 1 ? '' : 's'}</Pill>}
         {cs.kind === 'config' && <Pill>placement / settings</Pill>}
         {cs.kind === 'revert' && <Pill tone="amber">undo</Pill>}
         {skipped > 0 && <span onClick={() => setShowSkipped(s => !s)} style={{ cursor: 'pointer' }}><Pill tone="amber" title="Matches the assistant left alone">{skipped} left as-is {showSkipped ? '▾' : '▸'}</Pill></span>}
@@ -97,6 +103,21 @@ export function ChangesetCard({ initial, onOpen, compact, onChange }: { initial:
               <SamplePreview p={s.preview} />
             </div>
           ))}
+        </div>
+      )}
+
+      {sheet && (showSheet || sheetOnly) && (
+        <div className="st-scroll" style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 240, overflowY: 'auto' }}>
+          {sheet.error && <div style={{ fontSize: 11.5, color: T.red }}>Sheet not updated: {sheet.error}</div>}
+          {(showSheet ? sheet.rows : sheet.rows.slice(0, 4)).map((r, i) => (
+            <div key={i} style={{ fontSize: 11.5, color: T.sub, display: 'flex', gap: 8, alignItems: 'baseline', background: 'rgba(8,12,20,0.55)', border: `1px solid ${T.border}`, borderRadius: 6, padding: '4px 8px' }}>
+              <span style={{ fontFamily: T.mono, color: T.faint, flexShrink: 0 }}>R{r.row}</span>
+              {r.status && <span style={{ flexShrink: 0, fontWeight: 600, color: r.status === 'Added' ? T.green : T.amber }}>{r.status}</span>}
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{r.url || ''}</span>
+              {r.note && <span style={{ color: T.faint, flexShrink: 0, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.note}>{r.note.replace('{date}', 'MM-YYYY')}</span>}
+            </div>
+          ))}
+          {!showSheet && sheet.rows.length > 4 && <span onClick={() => setShowSheet(true)} style={{ fontSize: 11, color: T.accent, cursor: 'pointer' }}>+ {sheet.rows.length - 4} more rows</span>}
         </div>
       )}
 
@@ -120,17 +141,17 @@ export function ChangesetCard({ initial, onOpen, compact, onChange }: { initial:
 
       <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
         {cs.status === 'proposed' && <>
-          <Btn kind="primary" onClick={() => run('apply')} disabled={busy}>{busy ? <Spinner /> : <Check size={14} />} Apply{cs.snippet_count > 1 ? ` to ${cs.snippet_count} snippets` : ''}</Btn>
+          <Btn kind="primary" onClick={() => run('apply')} disabled={busy}>{busy ? <Spinner /> : <Check size={14} />} {sheetOnly ? 'Update sheet' : `Apply${cs.snippet_count > 1 ? ` to ${cs.snippet_count} snippets` : ''}`}</Btn>
           {onOpen && <Btn onClick={() => onOpen(cs.id)}><Eye size={13} /> Review</Btn>}
           <Btn kind="subtle" onClick={() => run('discard')} disabled={busy}><X size={13} /> Discard</Btn>
         </>}
         {(cs.status === 'applied' || cs.status === 'partial' || cs.status === 'revert_partial') && <>
-          <span style={{ color: T.green, fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 5 }}><Check size={13} /> {cs.counts.applied} saved{cs.applied_at ? ` · ${timeAgo(cs.applied_at)}` : ''}</span>
+          <span style={{ color: T.green, fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 5 }}><Check size={13} /> {sheetOnly ? 'sheet updated' : `${cs.counts.applied} saved`}{cs.applied_at ? ` · ${timeAgo(cs.applied_at)}` : ''}</span>
           <div style={{ flex: 1 }} />
           {onOpen && <Btn kind="subtle" small onClick={() => onOpen(cs.id)}><Eye size={12} /> Details</Btn>}
           <Btn small onClick={() => run('revert')} disabled={busy}><RotateCcw size={12} /> Undo</Btn>
         </>}
-        {(cs.status === 'partial' || cs.status === 'failed') && cs.counts.failed + cs.counts.conflict > 0 && (
+        {(cs.status === 'partial' || cs.status === 'failed') && (cs.counts.failed + cs.counts.conflict > 0 || !!sheet?.error) && (
           <Btn small kind="danger" onClick={() => run('apply')} disabled={busy} title="Retry: re-applies the change on top of the snippet as it is now"><AlertTriangle size={12} /> Retry failed</Btn>
         )}
         {(cs.status === 'reverted' || cs.status === 'discarded') && onOpen && <Btn kind="subtle" small onClick={() => onOpen(cs.id)}><Eye size={12} /> Details</Btn>}

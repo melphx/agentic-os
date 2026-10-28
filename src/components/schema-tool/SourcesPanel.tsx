@@ -9,6 +9,7 @@ interface Source {
   title: string | null; fetched_at: string | null; error: string | null; row_count: number
   changes: { added: string[]; changed: string[]; removed: string[] } | null
   content?: string
+  writeback?: { status_col: string; note_col: string; values: string[] } | null
 }
 
 export function SourcesPanel({ onAsk }: { onAsk: (text: string) => void }) {
@@ -43,7 +44,7 @@ export function SourcesPanel({ onAsk }: { onAsk: (text: string) => void }) {
         </div>
 
         <div style={{ fontSize: 12, color: T.sub, background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: '9px 12px', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span>Share each sheet or doc (Viewer) with</span>
+          <span>Share each sheet or doc (Viewer — or Editor if the assistant should update a status column) with</span>
           {sa ? <code style={{ fontFamily: T.mono, color: '#c7d2fe', background: 'rgba(99,102,241,0.12)', padding: '2px 6px', borderRadius: 5 }}>{sa}</code> : <span style={{ color: T.amber }}>the MCD Google service account (not found — set SCHEMA_TOOL_SA_JSON or INITIATIVES_SA_JSON)</span>}
           {sa && <button onClick={copySa} style={{ background: 'none', border: 'none', color: T.accent, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11.5 }}>{copied ? <Check size={12} /> : <Copy size={12} />}{copied ? 'Copied' : 'Copy'}</button>}
         </div>
@@ -52,7 +53,7 @@ export function SourcesPanel({ onAsk }: { onAsk: (text: string) => void }) {
         {err && <div style={{ color: T.red, fontSize: 12 }}>{err}</div>}
         {!list && <div style={{ color: T.faint, fontSize: 12 }}><Spinner /> Loading…</div>}
         {list && !list.length && !adding && <div style={{ color: T.faint, fontSize: 12.5, padding: 30, textAlign: 'center', border: `1px dashed ${T.border}`, borderRadius: 12 }}>No sources yet. Connect your sameAs sheet to let the assistant keep schema in sync with it.</div>}
-        {list?.map(s => <SourceCard key={s.id} s={s} onChanged={load} onAsk={onAsk} />)}
+        {list?.map(s => <SourceCard key={s.id} s={s} onChanged={load} onAsk={onAsk} defLegend={defLegend} />)}
       </div>
     </div>
   )
@@ -115,7 +116,10 @@ function AddForm({ defLegend, onDone }: { defLegend: string; onDone: () => void 
   )
 }
 
-function SourceCard({ s, onChanged, onAsk }: { s: Source; onChanged: () => void; onAsk: (t: string) => void }) {
+function SourceCard({ s, onChanged, onAsk, defLegend }: { s: Source; onChanged: () => void; onAsk: (t: string) => void; defLegend: string }) {
+  const [wbOpen, setWbOpen] = useState(false)
+  const [statusCol, setStatusCol] = useState(s.writeback?.status_col || 'I')
+  const [noteCol, setNoteCol] = useState(s.writeback?.note_col || 'E')
   const [busy, setBusy] = useState(false)
   const [preview, setPreview] = useState<string | null>(null)
   const [showPrev, setShowPrev] = useState(false)
@@ -153,6 +157,7 @@ function SourceCard({ s, onChanged, onAsk }: { s: Source; onChanged: () => void;
         <div style={{ marginTop: 10 }}>
           <textarea className="st-input st-scroll" value={legend} onChange={e => setLegend(e.target.value)} rows={6} style={{ ...inputStyle, fontSize: 12, lineHeight: 1.5, resize: 'vertical' }} />
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 6 }}>
+            {s.doc_type === 'sheet' && <button onClick={() => setLegend(defLegend)} style={{ background: 'none', border: 'none', color: T.accent, fontSize: 11.5, cursor: 'pointer', marginRight: 'auto' }}>Use the default sameAs-sheet guide</button>}
             <Btn kind="subtle" small onClick={() => { setEditing(false); setLegend(s.legend || '') }}>Cancel</Btn>
             <Btn kind="primary" small onClick={async () => { await act({ legend }); setEditing(false) }}>Save</Btn>
           </div>
@@ -161,8 +166,29 @@ function SourceCard({ s, onChanged, onAsk }: { s: Source; onChanged: () => void;
         <div style={{ marginTop: 10, fontSize: 11.5, color: T.sub, whiteSpace: 'pre-wrap', lineHeight: 1.5, background: 'rgba(8,12,20,0.5)', border: `1px solid ${T.border}`, borderRadius: 8, padding: '8px 10px' }}>{s.legend}</div>
       ) : null}
 
+      {s.doc_type === 'sheet' && (
+        <div style={{ marginTop: 10, fontSize: 12, color: T.sub, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {s.writeback && !wbOpen ? <>
+            <Pill tone="green">Write-back on</Pill>
+            <span>Status dropdown in column <b style={{ color: 'white' }}>{s.writeback.status_col}</b> ({s.writeback.values.join(' / ')}) · dates appended to notes in column <b style={{ color: 'white' }}>{s.writeback.note_col}</b> — written only when you apply a change.</span>
+            <button onClick={() => setWbOpen(true)} style={{ background: 'none', border: 'none', color: T.accent, fontSize: 11.5, cursor: 'pointer' }}>Change</button>
+          </> : wbOpen ? <>
+            <span>Status column</span>
+            <input className="st-input" value={statusCol} onChange={e => setStatusCol(e.target.value.toUpperCase())} style={{ ...inputStyle, width: 52, textAlign: 'center' }} />
+            <span>Notes column</span>
+            <input className="st-input" value={noteCol} onChange={e => setNoteCol(e.target.value.toUpperCase())} style={{ ...inputStyle, width: 52, textAlign: 'center' }} />
+            <Btn small kind="primary" disabled={busy} onClick={async () => { await act({ action: 'setup_writeback', status_col: statusCol, note_col: noteCol }); setWbOpen(false) }}>{busy ? <Spinner size={10} /> : <Check size={12} />} Add dropdown to the sheet</Btn>
+            <Btn small kind="subtle" onClick={() => setWbOpen(false)}>Cancel</Btn>
+            <span style={{ color: T.faint, width: '100%' }}>Adds a "Schema status" header and an Added / Not Added dropdown to that column (rows 3 and down). Existing columns don't move. The sheet must be shared with the service account as Editor.</span>
+          </> : <>
+            <span style={{ color: T.faint }}>Let the assistant mark rows Added / Not Added in this sheet?</span>
+            <Btn small onClick={() => setWbOpen(true)}><FileSpreadsheet size={12} /> Set up status column</Btn>
+          </>}
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-        <Btn kind="primary" small onClick={() => onAsk(`Compare the schema with the "${s.label}" source (#${s.id}). Stage whatever needs to change to match it (sameAs links, replaced/old URLs, rows marked red) and list anything you're leaving out and why.`)} disabled={!!s.error}><Sparkles size={12} /> Sync schema with this</Btn>
+        <Btn kind="primary" small onClick={() => onAsk(`Compare the schema with the "${s.label}" source (#${s.id}). Stage whatever needs to change to match it (sameAs links, mentions/subjectOf, replaced/old URLs, rows marked red, NO rows that are still in schema) and list anything you're leaving out and why.${s.writeback ? ' Then stage the sheet status for every row you checked (Added / Not Added with a note).' : ''}`)} disabled={!!s.error}><Sparkles size={12} /> Sync schema with this</Btn>
         <Btn small onClick={() => act({ action: 'refresh' })} disabled={busy}>{busy ? <Spinner size={10} /> : <RefreshCw size={12} />} Re-read</Btn>
         <Btn small onClick={togglePreview}>{showPrev ? <EyeOff size={12} /> : <Eye size={12} />} {showPrev ? 'Hide' : 'Preview'}</Btn>
         <Btn small kind="subtle" onClick={() => setEditing(true)}><Pencil size={12} /> How to read it</Btn>

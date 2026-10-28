@@ -10,12 +10,21 @@ import { ensureSchemaToolTables } from './store'
 const SCRIPTS_DIR = process.env.MCD_SCRIPTS_DIR || '/root/agentic-os/mcd/scripts'
 const VENV_PYTHON = process.env.MCD_VENV_PYTHON || '/root/agentic-os/mcd/venv/bin/python3'
 
-export const DEFAULT_LEGEND = `How to read this sheet:
-- Column A says where a URL belongs ("SAMEAS - All Pages", "SAMEAS - Homepage Only", "MENTIONS - …", "NO" = do not use).
-- {red} text marks something that still needs to be changed on the schema.
-- Notes like "Added 10-2026" / "Replaced 09-2026" tell when a row changed; "old link" cells hold the URL being replaced.
-- Blue text is just link styling. Highlights are for the team's own tracking.
-- The house rules always win: if the sheet lists a banned site (e.g. Patch, RocketReach, ZoomInfo), don't add it and say so.`
+export const DEFAULT_LEGEND = `How to read this sheet (SEO sameAs / mentions tracker):
+- Column A says where the URL in column B belongs. Read it carefully — it decides WHERE in the schema the link goes:
+  • "SAMEAS - All Pages" → sameAs of every full Organization definition (homepage #407 plus any snippet that still defines the whole company; city pages only reference {"@id": "https://phxhomeremodeling.com/#organization"} and inherit it — never add a company block back to them).
+  • "SAMEAS - Homepage Only" → sameAs of the Organization on the homepage (#407) only.
+  • "MENTIONS - Homepage Only" → third-party pages about PHR, on the homepage Organization (as subjectOf, see below).
+  • "SUBJECTOF - Homepage + Author Page" → subjectOf on the homepage Organization and on Jeremy's Person (author page #556). Not in sameAs.
+  • "MENTIONS - <Service> - <City>" → on that service's page for that city, e.g. "MENTIONS - Kitchen - Mesa" → /services/kitchen-remodel/mesa-az/. Services: Bathroom → bathroom-remodel, Kitchen → kitchen-remodel, Shower → shower-remodeling, GC → general-contractor, Home → home-remodeling.
+  • "MENTIONS - <Service> - All Cities" → that service's page in EVERY city (all active -az pages for that service).
+  • "MENTIONS - All <City> Service Pages" → every active -az page for that city.
+  • "NO" → must not be in any schema. Remove it if it is there.
+- Write MENTIONS rows as subjectOf entries ({"@type": "Article", "url": "…", "name": "…"}) on the Organization (homepage) or the page's Service (city pages). schema.org only allows "mentions" on articles/web pages, so "mentions" on an Organization or Service is flagged by validators.
+- Column C sometimes holds the OLD link ("old url", "OLD LINK", "old one", "Is the old one"): replace the old link with the column B link wherever the old one appears.
+- Column E (NOTES) is the team's history ("Added 09-2026", "Replaced 09-2026", "Needs to be changed on schema"). Columns F–H are formula helpers — ignore them.
+- Column I (Schema status) is the dropdown you keep up to date: "Added" when the URL is in every place column A asks for, "Not Added" when it isn't (NO rows, or rows you couldn't add — say why in the note).
+- {red} text marks something that still needs doing. Blue text is just link styling. Rows under a heading (Socials, Listing Sites, Wikis, Press, Listicles, Podcasts…) are grouping only.`
 
 let ensured = false
 function ensure() {
@@ -41,6 +50,7 @@ function ensure() {
       created_at  TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `)
+  try { getDb().exec('ALTER TABLE schema_tool_sources ADD COLUMN writeback TEXT') } catch {}
   ensured = true
 }
 
@@ -48,7 +58,11 @@ export interface SourceRow {
   id: number; label: string; url: string; doc_id: string; doc_type: 'sheet' | 'doc'; tab: string | null; legend: string | null
   enabled: number; title: string | null; content: string | null; rows_json: string | null; changes: string | null
   fetched_at: string | null; error: string | null; created_by: string | null; created_at: string
+  writeback: string | null   // JSON { status_col: 'I', note_col: 'E', values: ['Added','Not Added'], first_row: 3 }
 }
+
+export interface Writeback { status_col: string; note_col: string; values: string[]; first_row: number }
+export const writebackOf = (s: SourceRow): Writeback | null => { try { return s.writeback ? JSON.parse(s.writeback) : null } catch { return null } }
 
 /** Google links in free text (chat messages). */
 export function findGoogleLinks(text: string): string[] {
@@ -270,6 +284,52 @@ export async function refreshSource(id: number): Promise<SourceRow> {
   return getSource(id)!
 }
 
+// ── write-back (status dropdown + notes) ───────────────────────────────────
+const colOk = (c: string) => /^[A-Z]{1,2}$/.test(c)
+
+/** Add the status dropdown column to the sheet and remember where to write. Needs Editor access. */
+export async function setupWriteback(id: number, cfg: { status_col?: string; note_col?: string; values?: string[] }): Promise<SourceRow> {
+  const s = getSource(id)
+  if (!s) throw new Error('Source not found')
+  if (s.doc_type !== 'sheet' || !s.tab) throw new Error('Write-back works on a sheet tab.')
+  const status_col = String(cfg.status_col || 'I').toUpperCase(), note_col = String(cfg.note_col || 'E').toUpperCase()
+  if (!colOk(status_col) || !colOk(note_col)) throw new Error('Columns must be letters like I or E.')
+  const values = (cfg.values && cfg.values.length ? cfg.values : ['Added', 'Not Added']).map(v => String(v).trim()).filter(Boolean)
+  await runReader(['setup', '--id', s.doc_id, '--tab', s.tab, '--status-col', status_col, '--values', values.join(','), '--first-row', '3'])
+  getDb().prepare('UPDATE schema_tool_sources SET writeback=? WHERE id=?').run(JSON.stringify({ status_col, note_col, values, first_row: 3 }), id)
+  return refreshSource(id)
+}
+
+export interface SheetRowUpdate { row: number; status?: string; note?: string; url?: string }
+
+/** Turn row-level updates into cell writes. Notes are appended to what is already in the notes cell. */
+export function planSheetWrites(s: SourceRow, rows: SheetRowUpdate[]): SheetCell[] {
+  const wb = writebackOf(s)
+  if (!wb) throw new Error(`Source #${s.id} has no write-back set up (Sources tab → Set up status column).`)
+  const out: SheetCell[] = []
+  for (const u of rows) {
+    const row = Math.floor(Number(u.row))
+    if (!(row >= wb.first_row)) throw new Error(`Row ${u.row} is not a data row`)
+    if (u.status != null) {
+      if (wb.values.indexOf(u.status) < 0) throw new Error(`Status must be one of: ${wb.values.join(', ')}`)
+      out.push({ cell: `${wb.status_col}${row}`, value: u.status })
+    }
+    if (u.note && String(u.note).trim()) out.push({ cell: `${wb.note_col}${row}`, value: String(u.note).trim().slice(0, 300), append: true })
+  }
+  return out
+}
+
+export interface SheetCell { cell: string; value: string; append?: boolean }
+
+/** Write cells and return what was there before (for undo). */
+export async function writeCells(id: number, cells: SheetCell[]): Promise<{ cell: string; value: string }[]> {
+  const s = getSource(id)
+  if (!s || !s.tab) throw new Error('Source not found')
+  if (!cells.length) return []
+  const r = await runReader(['write', '--id', s.doc_id, '--tab', s.tab, '--updates', JSON.stringify(cells)])
+  return r.previous || []
+}
+
 /** Sources summary for the assistant's system prompt. */
 export function sourcesForPrompt(): string {
   const list = listSources().filter(s => s.enabled)
@@ -278,7 +338,9 @@ export function sourcesForPrompt(): string {
     const rows = s.rows_json ? Object.keys(JSON.parse(s.rows_json)).length : 0
     const ch = s.changes ? JSON.parse(s.changes) : null
     const chs = ch ? ` · last refresh: ${ch.added.length} added, ${ch.changed.length} changed, ${ch.removed.length} removed rows` : ''
-    return `- Source #${s.id} "${s.label}" (${s.doc_type}${s.tab ? `, tab "${s.tab}"` : ''}; ${rows} rows; refreshed ${s.fetched_at || 'never'}${chs})${s.error ? ` — ERROR: ${s.error}` : ''}${s.legend ? `\n  ${s.legend.replace(/\n/g, '\n  ')}` : ''}`
+    const wb = writebackOf(s)
+    const wbs = wb ? ` · write-back ON: status column ${wb.status_col} (${wb.values.join(' / ')}), notes column ${wb.note_col}` : ''
+    return `- Source #${s.id} "${s.label}" (${s.doc_type}${s.tab ? `, tab "${s.tab}"` : ''}; ${rows} rows; refreshed ${s.fetched_at || 'never'}${chs}${wbs})${s.error ? ` — ERROR: ${s.error}` : ''}${s.legend ? `\n  ${s.legend.replace(/\n/g, '\n  ')}` : ''}`
   }).join('\n')
 }
 

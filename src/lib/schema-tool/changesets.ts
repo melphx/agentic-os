@@ -7,8 +7,47 @@ import { getConfig } from './config'
 import { configOf, getSnippet, invalidateCache, listSnippets, saveSnippetCode, saveSnippetConfig, Snippet, SnippetConfig } from './wp'
 import { previewOf, validateSnippet, outsideScripts, ReplacePlan } from './engine'
 import {
-  createChangeset, getChangeset, getItems, ItemFull, NewItem, setChangesetStatus, setItemStatus, setItemsSelected, updateItemContent,
+  createChangeset, getChangeset, getItems, ItemFull, NewItem, setChangesetStatus, setItemStatus, setItemsSelected, updateChangesetMeta, updateItemContent,
 } from './store'
+import { refreshSource, SheetCell, writeCells } from './sources'
+
+/** Sheet write-back attached to a changeset: written after the schema change is applied, put back on Undo. */
+export interface SheetWrite {
+  source_id: number; label?: string
+  rows: { row: number; url?: string; status?: string; note?: string }[]
+  cells: SheetCell[]
+  written_at?: string; previous?: { cell: string; value: string }[]; error?: string; reverted_at?: string
+}
+
+const monthYear = () => { const d = new Date(); return `${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}` }
+
+async function writeSheet(changesetId: number): Promise<string | null> {
+  const cs = getChangeset(changesetId)
+  const meta = cs?.meta ? JSON.parse(cs.meta) : {}
+  const sw: SheetWrite | undefined = meta.sheet
+  if (!sw || sw.written_at || !sw.cells?.length) return null
+  try {
+    const cells = sw.cells.map(c => ({ ...c, value: c.value.replace(/\{date\}/g, monthYear()) }))
+    sw.previous = await writeCells(sw.source_id, cells)
+    sw.written_at = new Date().toISOString(); delete sw.error
+    void refreshSource(sw.source_id).catch(() => {})
+  } catch (e: any) { sw.error = e?.message || String(e) }
+  updateChangesetMeta(changesetId, { ...meta, sheet: sw })
+  return sw.error || null
+}
+
+async function unwriteSheet(changesetId: number) {
+  const cs = getChangeset(changesetId)
+  const meta = cs?.meta ? JSON.parse(cs.meta) : {}
+  const sw: SheetWrite | undefined = meta.sheet
+  if (!sw || !sw.written_at || sw.reverted_at || !sw.previous) return
+  try {
+    await writeCells(sw.source_id, sw.previous.map(p => ({ cell: p.cell, value: p.value })))
+    sw.reverted_at = new Date().toISOString()
+    void refreshSource(sw.source_id).catch(() => {})
+  } catch (e: any) { sw.error = 'Undo of sheet cells failed: ' + (e?.message || String(e)) }
+  updateChangesetMeta(changesetId, { ...meta, sheet: sw })
+}
 import { rebaseCode, rebaseConfig } from './rebase'
 
 export interface CsMeta { [k: string]: unknown }
@@ -141,8 +180,11 @@ async function runApply(changesetId: number, opts?: { force?: boolean }) {
     const all = getItems(changesetId) as any[]
     for (const it of all) if (!it.selected && it.status === 'pending') setItemStatus(it.id, 'skipped')
     const done = (getItems(changesetId) as any[]).filter(i => i.selected)
-    const allOk = done.every(i => i.status === 'applied')
-    setChangesetStatus(changesetId, allOk ? 'applied' : done.some(i => i.status === 'applied') ? 'partial' : 'failed', { applied: ok > 0 })
+    let allOk = done.every(i => i.status === 'applied')
+    // the sheet is only updated once every schema edit in this change went through
+    if (allOk) { const err = await writeSheet(changesetId); if (err) allOk = false }
+    const anyApplied = done.some(i => i.status === 'applied')
+    setChangesetStatus(changesetId, allOk ? 'applied' : anyApplied ? 'partial' : 'failed', { applied: ok > 0 || allOk })
   } catch {
     setChangesetStatus(changesetId, 'failed')
   } finally {
@@ -194,7 +236,8 @@ export function startRevert(changesetId: number, opts?: { force?: boolean; by?: 
           else { setItemStatus(it.id, 'reverted'); ok++ }
         } catch (e: any) { setItemStatus(it.id, 'applied', 'Revert failed: ' + (e?.message || String(e))); bad++ }
       }
-      setChangesetStatus(changesetId, bad === 0 ? 'reverted' : ok > 0 ? 'revert_partial' : cs.status, { reverted: ok > 0 })
+      if (bad === 0) await unwriteSheet(changesetId)
+      setChangesetStatus(changesetId, bad === 0 ? 'reverted' : ok > 0 ? 'revert_partial' : cs.status, { reverted: ok > 0 || bad === 0 })
     } finally {
       running.delete(changesetId)
       invalidateCache()

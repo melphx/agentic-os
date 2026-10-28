@@ -5,7 +5,7 @@
  * POST { action: 'tabs', url }          → list a sheet's tabs (for the picker)
  */
 import { NextRequest, NextResponse } from 'next/server'
-import { addSource, listSources, listTabs, parseGoogleUrl, serviceAccountEmail, DEFAULT_LEGEND } from '@/lib/schema-tool/sources'
+import { addSource, listSources, listTabs, parseGoogleUrl, serviceAccountEmail, writebackOf, DEFAULT_LEGEND } from '@/lib/schema-tool/sources'
 import { fail, guard } from '@/lib/schema-tool/http'
 
 export const dynamic = 'force-dynamic'
@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     const sources = listSources().map(s => {
       const rows = s.rows_json ? Object.keys(JSON.parse(s.rows_json)).length : 0
       const { content, rows_json, ...rest } = s
-      return { ...rest, row_count: rows, changes: s.changes ? JSON.parse(s.changes) : null }
+      return { ...rest, writeback: writebackOf(s), row_count: rows, changes: s.changes ? JSON.parse(s.changes) : null }
     })
     return NextResponse.json({ sources, service_account: saCache.email, default_legend: DEFAULT_LEGEND })
   } catch (e) { return fail(e) }

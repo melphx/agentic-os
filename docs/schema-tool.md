@@ -26,6 +26,9 @@ A sidebar page for reading and changing the site's JSON-LD schema
   formatting kept ({red} text, highlights, ~~strikethrough~~, cell notes, links), tracks rows added/changed
   since the last read, and can sync schema to them. Each source has a "how to read it" note. Share the file
   (Viewer) with the MCD Google service account; reader: `mcd/scripts/schema_source_reader.py`.
+  - **Write-back** (Sources → *Set up status column*, file shared as **Editor**): adds a "Schema status"
+    dropdown (Added / Not Added) to a column. The assistant stages status + "Added MM-YYYY" notes together with
+    the schema change; the sheet is written only after the change is applied, and put back on Undo.
 - **History**: every change with who/when/how many snippets. **Undo** restores the exact
   previous content of each snippet (skips any snippet edited again since).
 - **Page check**: what schema a page outputs (HFCM / Rank Math / inline), whether it all

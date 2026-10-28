@@ -13,6 +13,12 @@ Commands (all print JSON):
   sheet --id SHEET_ID [--tab TAB | --gid GID] [--range A1:Z600]
   doc   --id DOC_ID
   file  --id DRIVE_FILE_ID                   any Drive file: {kind: sheet|doc|binary, ...}; binary = base64 bytes
+
+Write-back (needs the file shared with the service account as Editor):
+  setup  --id SHEET_ID --tab TAB --status-col I [--header "Schema status"] [--values "Added,Not Added"] [--first-row 3]
+         adds a dropdown column (header + data validation + green/red colouring)
+  write  --id SHEET_ID --tab TAB --updates '[{"cell":"I25","value":"Added"}, {"cell":"E25","value":"Added 10-2026","append":true}]'
+         returns the previous values so the change can be undone
 """
 import argparse
 import json
@@ -34,14 +40,17 @@ def _sa_path():
     raise RuntimeError("No service account JSON found. Set SCHEMA_TOOL_SA_JSON (or INITIATIVES_SA_JSON).")
 
 
-def _creds():
+WRITE_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+
+
+def _creds(write=False):
     from google.oauth2 import service_account
-    return service_account.Credentials.from_service_account_file(_sa_path(), scopes=SCOPES)
+    return service_account.Credentials.from_service_account_file(_sa_path(), scopes=WRITE_SCOPES if write else SCOPES)
 
 
-def _svc(name, version):
+def _svc(name, version, write=False):
     from googleapiclient.discovery import build
-    return build(name, version, credentials=_creds(), cache_discovery=False)
+    return build(name, version, credentials=_creds(write), cache_discovery=False)
 
 
 def cmd_whoami(_args):
@@ -139,6 +148,73 @@ def cmd_file(args):
     print(json.dumps({"kind": "binary", "name": f.get("name", ""), "mimeType": mt, "b64": base64.b64encode(data).decode()}))
 
 
+def _col_index(col):
+    n = 0
+    for ch in col.upper():
+        n = n * 26 + (ord(ch) - 64)
+    return n - 1
+
+
+def _sheet_id(svc, spreadsheet_id, tab):
+    meta = svc.spreadsheets().get(spreadsheetId=spreadsheet_id, fields="sheets.properties(title,sheetId,gridProperties)").execute()
+    for sh in meta.get("sheets", []):
+        if sh["properties"]["title"] == tab:
+            return sh["properties"]["sheetId"], sh["properties"].get("gridProperties", {}).get("rowCount", 1000)
+    raise RuntimeError(f"Tab not found: {tab}")
+
+
+def cmd_setup(args):
+    svc = _svc("sheets", "v4", write=True)
+    sid, rows = _sheet_id(svc, args.id, args.tab)
+    col = _col_index(args.status_col)
+    values = [v.strip() for v in args.values.split(",") if v.strip()]
+    first = int(args.first_row) - 1
+    rng = {"sheetId": sid, "startRowIndex": first, "endRowIndex": rows, "startColumnIndex": col, "endColumnIndex": col + 1}
+    colour = {"Added": {"red": 0.85, "green": 0.95, "blue": 0.85}, "Not Added": {"red": 0.98, "green": 0.87, "blue": 0.87}}
+    reqs = [
+        {"setDataValidation": {"range": rng, "rule": {
+            "condition": {"type": "ONE_OF_LIST", "values": [{"userEnteredValue": v} for v in values]},
+            "showCustomUi": True, "strict": False}}},
+    ]
+    for v in values:
+        if v in colour:
+            reqs.append({"addConditionalFormatRule": {"index": 0, "rule": {"ranges": [rng], "booleanRule": {
+                "condition": {"type": "TEXT_EQ", "values": [{"userEnteredValue": v}]},
+                "format": {"backgroundColor": colour[v]}}}}})
+    svc.spreadsheets().batchUpdate(spreadsheetId=args.id, body={"requests": reqs}).execute()
+    svc.spreadsheets().values().update(
+        spreadsheetId=args.id, range=f"'{args.tab}'!{args.status_col.upper()}1", valueInputOption="RAW",
+        body={"values": [[args.header]]}).execute()
+    print(json.dumps({"ok": True, "column": args.status_col.upper(), "values": values}))
+
+
+def cmd_write(args):
+    svc = _svc("sheets", "v4", write=True)
+    updates = json.loads(args.updates)
+    if not isinstance(updates, list) or not updates:
+        raise RuntimeError("No updates")
+    if len(updates) > 2000:
+        raise RuntimeError("Too many cells in one write (max 2000)")
+    ranges = [f"'{args.tab}'!{u['cell']}" for u in updates]
+    prev = svc.spreadsheets().values().batchGet(spreadsheetId=args.id, ranges=ranges, valueRenderOption="FORMATTED_VALUE").execute()
+    before = []
+    for u, vr in zip(updates, prev.get("valueRanges", [])):
+        vals = vr.get("values") or [[""]]
+        before.append({"cell": u["cell"], "value": (vals[0] or [""])[0] if vals else ""})
+    data = []
+    for r, u, b in zip(ranges, updates, before):
+        val = str(u.get("value", ""))
+        if u.get("append"):
+            prev_val = str(b["value"] or "")
+            if val in prev_val:
+                continue                      # note already there
+            val = f"{prev_val}; {val}" if prev_val.strip() else val
+        data.append({"range": r, "values": [[val]]})
+    if data:
+        svc.spreadsheets().values().batchUpdate(spreadsheetId=args.id, body={"valueInputOption": "RAW", "data": data}).execute()
+    print(json.dumps({"ok": True, "written": len(data), "previous": before}))
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -147,13 +223,19 @@ def main():
     s = sub.add_parser("sheet"); s.add_argument("--id", required=True); s.add_argument("--tab", default=""); s.add_argument("--gid", default=""); s.add_argument("--range", default="A1:Z600")
     d = sub.add_parser("doc"); d.add_argument("--id", required=True)
     f = sub.add_parser("file"); f.add_argument("--id", required=True)
+    st = sub.add_parser("setup"); st.add_argument("--id", required=True); st.add_argument("--tab", required=True)
+    st.add_argument("--status-col", dest="status_col", required=True); st.add_argument("--header", default="Schema status")
+    st.add_argument("--values", default="Added,Not Added"); st.add_argument("--first-row", dest="first_row", default="3")
+    w = sub.add_parser("write"); w.add_argument("--id", required=True); w.add_argument("--tab", required=True); w.add_argument("--updates", required=True)
     args = ap.parse_args()
     try:
-        {"whoami": cmd_whoami, "tabs": cmd_tabs, "sheet": cmd_sheet, "doc": cmd_doc, "file": cmd_file}[args.cmd](args)
+        {"whoami": cmd_whoami, "tabs": cmd_tabs, "sheet": cmd_sheet, "doc": cmd_doc, "file": cmd_file, "setup": cmd_setup, "write": cmd_write}[args.cmd](args)
     except Exception as e:  # noqa: BLE001
         msg = str(e)
         if "403" in msg or "PERMISSION_DENIED" in msg or "does not have permission" in msg:
-            msg = "The service account can't open this file. Share it (Viewer) with the service-account email shown in the Sources tab."
+            msg = ("The service account can't change this file. Share it as Editor with the service-account email shown in the Sources tab."
+                   if args.cmd in ("setup", "write") else
+                   "The service account can't open this file. Share it (Viewer) with the service-account email shown in the Sources tab.")
         print(json.dumps({"error": msg[:600]}))
         sys.exit(1)
 
