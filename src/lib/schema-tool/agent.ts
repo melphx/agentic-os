@@ -106,7 +106,7 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'propose_sheet_updates',
-    description: 'Stage status / note updates for rows of a connected sheet that has write-back set up (e.g. mark sameAs rows "Added" or "Not Added"). Pass changeset_id to attach them to a schema change you just staged: the sheet is then written only after that change is applied successfully, and put back if it is undone. Without changeset_id it stages a sheet-only change (for rows whose links are already correct in the schema). note: short text appended to the NOTES cell; use "Added {date}" ({date} becomes MM-YYYY when written). For "Not Added" always give the reason in the note.',
+    description: 'Stage status / note updates for rows of a connected sheet that has write-back set up (e.g. mark sameAs rows "Added" or "Not Added"). Pass changeset_id to attach them to a schema change you just staged: the sheet is then written only after that change is applied successfully, and put back if it is undone. Without changeset_id it stages a sheet-only change (for rows whose links are already correct in the schema). note: short text that REPLACES the NOTES cell (written in black); use just "Added {date}" ({date} becomes MM-YYYY when written). For "Not Added" always give the reason in the note.',
     parameters: {
       type: 'object',
       properties: {

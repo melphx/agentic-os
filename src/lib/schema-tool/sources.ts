@@ -23,6 +23,7 @@ export const DEFAULT_LEGEND = `How to read this sheet (SEO sameAs / mentions tra
 - Write MENTIONS rows as subjectOf entries ({"@type": "Article", "url": "…", "name": "…"}) on the Organization (homepage) or the page's Service (city pages). schema.org only allows "mentions" on articles/web pages, so "mentions" on an Organization or Service is flagged by validators.
 - Column C sometimes holds the OLD link ("old url", "OLD LINK", "old one", "Is the old one"): replace the old link with the column B link wherever the old one appears.
 - Column E (NOTES) is the team's history ("Added 09-2026", "Replaced 09-2026", "Needs to be changed on schema"). Columns F–H are formula helpers — ignore them.
+- When you mark a row, your note REPLACES the NOTES cell (e.g. "Needs to be added to schema Oct 2026" becomes just "Added {date}"), so keep it short: "Added {date}", "Replaced {date}", "Removed {date}", or for Not Added a short reason.
 - Column I (Schema status) is the dropdown you keep up to date: "Added" when the URL is in every place column A asks for, "Not Added" when it isn't (NO rows, or rows you couldn't add — say why in the note).
 - {red} text marks something that still needs doing. Blue text is just link styling. Rows under a heading (Socials, Listing Sites, Wikis, Press, Listicles, Podcasts…) are grouping only.`
 
@@ -324,7 +325,7 @@ export function describeRows(s: SourceRow, rows: SheetRowUpdate[]) {
   }))
 }
 
-/** Turn row-level updates into cell writes. Notes are appended to what is already in the notes cell. */
+/** Turn row-level updates into cell writes. The note replaces the notes cell and is written in black. */
 export function planSheetWrites(s: SourceRow, rows: SheetRowUpdate[]): SheetCell[] {
   const wb = writebackOf(s)
   if (!wb) throw new Error(`Source #${s.id} has no write-back set up (Sources tab → Set up status column).`)
@@ -336,12 +337,13 @@ export function planSheetWrites(s: SourceRow, rows: SheetRowUpdate[]): SheetCell
       if (wb.values.indexOf(u.status) < 0) throw new Error(`Status must be one of: ${wb.values.join(', ')}`)
       out.push({ cell: `${wb.status_col}${row}`, value: u.status })
     }
-    if (u.note && String(u.note).trim()) out.push({ cell: `${wb.note_col}${row}`, value: String(u.note).trim().slice(0, 300), append: true })
+    // the note replaces what was there (e.g. a red "Needs to be added to schema" becomes a black "Added 10-2026")
+    if (u.note && String(u.note).trim()) out.push({ cell: `${wb.note_col}${row}`, value: String(u.note).trim().slice(0, 300), black: true })
   }
   return out
 }
 
-export interface SheetCell { cell: string; value: string; append?: boolean }
+export interface SheetCell { cell: string; value: string; append?: boolean; black?: boolean }
 
 /** Write cells and return what was there before (for undo). */
 export async function writeCells(id: number, cells: SheetCell[]): Promise<{ cell: string; value: string }[]> {

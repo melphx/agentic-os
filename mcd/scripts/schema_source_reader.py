@@ -17,7 +17,8 @@ Commands (all print JSON):
 Write-back (needs the file shared with the service account as Editor):
   setup  --id SHEET_ID --tab TAB --status-col I [--header "Schema status"] [--values "Added,Not Added"] [--first-row 3]
          adds a dropdown column (header + data validation + green/red colouring)
-  write  --id SHEET_ID --tab TAB --updates '[{"cell":"I25","value":"Added"}, {"cell":"E25","value":"Added 10-2026","append":true}]'
+  write  --id SHEET_ID --tab TAB --updates '[{"cell":"I25","value":"Added"}, {"cell":"E25","value":"Added 10-2026","black":true}]'
+         ("append": true adds to the existing text instead of replacing it; "black": true sets black text)
          returns the previous values so the change can be undone
 """
 import argparse
@@ -212,6 +213,23 @@ def cmd_write(args):
         data.append({"range": r, "values": [[val]]})
     if data:
         svc.spreadsheets().values().batchUpdate(spreadsheetId=args.id, body={"valueInputOption": "RAW", "data": data}).execute()
+    # cells marked "black": plain black text (e.g. a red "Needs to be added" note replaced by "Added 10-2026")
+    black = [u["cell"] for u in updates if u.get("black")]
+    if black:
+        import re as _re
+        sid, _rows = _sheet_id(svc, args.id, args.tab)
+        reqs = []
+        for c in black:
+            m = _re.match(r"^([A-Z]+)(\d+)$", c.upper())
+            if not m:
+                continue
+            col, row = _col_index(m.group(1)), int(m.group(2)) - 1
+            reqs.append({"repeatCell": {
+                "range": {"sheetId": sid, "startRowIndex": row, "endRowIndex": row + 1, "startColumnIndex": col, "endColumnIndex": col + 1},
+                "cell": {"userEnteredFormat": {"textFormat": {"foregroundColorStyle": {"rgbColor": {"red": 0, "green": 0, "blue": 0}}}}},
+                "fields": "userEnteredFormat.textFormat.foregroundColorStyle"}})
+        if reqs:
+            svc.spreadsheets().batchUpdate(spreadsheetId=args.id, body={"requests": reqs}).execute()
     print(json.dumps({"ok": True, "written": len(data), "previous": before}))
 
 

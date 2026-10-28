@@ -123,8 +123,7 @@ export function ChangesetCard({ initial, onOpen, compact, onChange }: { initial:
                     Status: <span style={{ color: T.faint }}>{r.prev_status || 'blank'}</span> → <b style={{ color: r.status === 'Added' ? T.green : T.amber }}>{r.status}</b>{same ? <span style={{ color: T.faint }}> (no change)</span> : null}
                   </span>}
                   {r.note && <span title={r.prev_note ? `Current note: ${r.prev_note}` : ''}>
-                    Note: {r.prev_note ? <span style={{ color: T.faint }}>“{r.prev_note.length > 40 ? r.prev_note.slice(0, 40) + '…' : r.prev_note}” + </span> : null}<span style={{ color: '#c7d2fe' }}>“{r.note.replace('{date}', new Date().toISOString().slice(5, 7) + '-' + new Date().getFullYear())}”</span>
-                    {r.prev_note && r.prev_note.includes(r.note.replace('{date}', new Date().toISOString().slice(5, 7) + '-' + new Date().getFullYear())) ? <span style={{ color: T.faint }}> (already there)</span> : null}
+                    Note: {r.prev_note ? <><span style={{ color: T.faint, textDecoration: 'line-through' }}>“{r.prev_note.length > 40 ? r.prev_note.slice(0, 40) + '…' : r.prev_note}”</span> → </> : null}<span style={{ color: '#c7d2fe' }}>“{r.note.replace('{date}', new Date().toISOString().slice(5, 7) + '-' + new Date().getFullYear())}”</span>
                   </span>}
                 </div>
               </div>
