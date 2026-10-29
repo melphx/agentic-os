@@ -26,6 +26,12 @@ import json
 import os
 import sys
 
+# httplib2 >= 0.32 refuses compressed responses that expand more than 100x once they pass 10 MB
+# ("Amplification ratio … exceeds limit"). A whole Sheets tab with formatting is very repetitive JSON
+# and compresses ~100x, so allow a higher ratio for Google's API, with a 300 MB hard cap on the output.
+os.environ.setdefault("httplib2_decode_limit_ratio", "5000")
+os.environ.setdefault("httplib2_decode_limit_hard", str(300 << 20))
+
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
