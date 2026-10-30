@@ -1,6 +1,7 @@
 'use client'
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import SchemaToolView from '@/components/schema-tool/SchemaToolView'
 import {
   LayoutDashboard, Bot, ListTodo, Terminal as TerminalIcon,
   Settings, Send, ChevronLeft, Play, RefreshCw, LogOut,
@@ -218,6 +219,7 @@ const NAV = [
   { id: 'email-health', icon: <span style={{fontSize:14}}>📧</span>, label: 'Email Health' },
   { id: 'mcd-reports', icon: <span style={{fontSize:14}}>📊</span>, label: 'MCD Reports' },
   { id: 'ghl-monitor', icon: <span style={{fontSize:14}}>🔍</span>, label: 'GHL Monitor' },
+  { id: 'schema',      icon: <span style={{fontSize:14}}>🧩</span>, label: 'Schema' },
   { id: 'settings',   icon: <Settings size={18} />,        label: 'Settings'   },
 ]
 
@@ -6285,6 +6287,7 @@ export default function Page() {
       case 'email-health': return <EmailHealthReportView />
       case 'mcd-reports':  return <McdReportsView />
       case 'ghl-monitor':  return <GhlMonitorView />
+      case 'schema':       return <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}><SchemaToolView /></div>
       case 'hermes':     return <HermesView messages={messages} onSend={handleSend} loading={chatLoading} />
       case 'projects':   return <ProjectsView agents={agents} onSelectAgent={a => { setSelectedAgent(a); setView('agents') }} />
       case 'triggers':   return <TriggersPanel agents={agents} />
